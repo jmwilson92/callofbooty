@@ -46,13 +46,14 @@ Click the page to lock the pointer.
   Terrain is a hard floor; the player cannot pass through it.
 - **Fixed 60 Hz simulation** decoupled from rendering via an accumulator, with
   the camera interpolating between ticks.
-- **Seeded 1600 m San Diego playspace** — Pacific on the west, Mission Bay +
-  Lindbergh Field bay cuts, eastern Mission Trails hills. Vertex coloured by
-  height and slope (SoCal coastal palette). Freeway-style roads link POIs.
-- **Nine San Diego POIs** — La Jolla, University City, Miramar Ridge, Mission
-  Trails, Mission Bay, Old Town, Balboa Park, Downtown (highest loot), Lindbergh
-  Field. Layout tracks `docs/map-reference-san-diego.png`. Buildings are
-  assembled from a kit (slabs, walls, stairs, parapets).
+- **Seeded 1800 m San Diego playspace** — shaped from satellite + terrain
+  reference maps: Pacific west, Point Loma peninsula, Coronado island,
+  Mission Bay multi-lobe lagoon, San Diego Bay, Mission Valley (I-8) trench,
+  mesa/canyon city, eastern chaparral hills. Freeways I-5 / I-8 / I-15 /
+  I-805 / SR-52 / SR-163 as real corridors.
+- **Twelve POIs** — La Jolla, University City, Miramar, Clairemont, Mission
+  Trails, Mission Bay, Old Town, Balboa Park, Downtown (highest loot),
+  Lindbergh Field, Point Loma, Coronado. See `docs/04-san-diego-map.md`.
 - **400 cover props** scattered by Poisson-disc with 6 m minimum spacing.
 
 All tunable values live in `src/config.js`. Nothing gameplay-related is

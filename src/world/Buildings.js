@@ -259,6 +259,72 @@ function buildOldTown(sink, terrain, rng) {
   }
 }
 
+// --- Clairemont: mesa suburb grid ---
+function buildClairemont(sink, terrain, rng) {
+  const p = poi('clairemont');
+  const base = p.flatten;
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const x = p.x - 40 + c * 30;
+      const z = p.z - 35 + r * 28;
+      makeBuilding(sink, {
+        x, z, w: 16 + rng() * 4, d: 12 + rng() * 3,
+        floors: 1 + Math.floor(rng() * 2),
+        baseY: base, color: pick(rng, PAL), rng,
+      });
+    }
+  }
+}
+
+// --- Point Loma: ridge housing + lighthouse-style tower ---
+function buildPointLoma(sink, terrain, rng) {
+  const p = poi('pointloma');
+  const base = p.flatten;
+
+  makeBuilding(sink, {
+    x: p.x - 6, z: p.z - 6, w: 12, d: 12, floors: 4,
+    baseY: base, color: PAL[4], rng,
+  });
+  const mastY = base + BUILDINGS.GROUND_FLOOR_HEIGHT + 3 * BUILDINGS.FLOOR_HEIGHT;
+  sink.addSpan(p.x - 0.6, mastY, p.z - 0.6, p.x + 0.6, mastY + 18, p.z + 0.6, 0x9a968c);
+
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 1.6 + 0.4;
+    const r = 22 + (i % 2) * 14;
+    const w = 14, d = 10;
+    const x = p.x + Math.cos(a) * r - w / 2;
+    const z = p.z + Math.sin(a) * r - d / 2;
+    makeBuilding(sink, {
+      x, z, w, d, floors: 1 + Math.floor(rng() * 2),
+      baseY: seatY(terrain, p, x, z, w, d),
+      color: pick(rng, PAL), rng,
+    });
+  }
+}
+
+// --- Coronado: resort strip across the bay ---
+function buildCoronado(sink, terrain, rng) {
+  const p = poi('coronado');
+  const base = p.flatten;
+
+  // Hotel-scale block
+  makeBuilding(sink, {
+    x: p.x - 28, z: p.z - 14, w: 36, d: 22, floors: 4,
+    baseY: base, color: 0x9a968c, rng,
+  });
+  makeBuilding(sink, {
+    x: p.x + 16, z: p.z - 10, w: 22, d: 16, floors: 3,
+    baseY: base, color: PAL[5], rng,
+  });
+
+  for (let i = 0; i < 6; i++) {
+    makeShed(sink, {
+      x: p.x - 40 + i * 14, z: p.z + 22, w: 10, d: 6, h: 3.2,
+      baseY: base, color: pick(rng, PAL),
+    });
+  }
+}
+
 export function buildAllStructures(sink, terrain, rng) {
   buildDowntown(sink, terrain, rng);
   buildAirport(sink, terrain, rng);
@@ -269,4 +335,7 @@ export function buildAllStructures(sink, terrain, rng) {
   buildLaJolla(sink, terrain, rng);
   buildMissionBay(sink, terrain, rng);
   buildOldTown(sink, terrain, rng);
+  buildClairemont(sink, terrain, rng);
+  buildPointLoma(sink, terrain, rng);
+  buildCoronado(sink, terrain, rng);
 }

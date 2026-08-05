@@ -36,8 +36,8 @@ export const PLAYER = {
   // Crouch transition speed (m/s of capsule height change)
   CROUCH_LERP: 8.0,
 
-  // Old Town / Mission Valley approach, facing Downtown (south).
-  SPAWN: { x: -20, z: 160 },
+  // Mission Valley (I-8 corridor), looking south toward Downtown.
+  SPAWN: { x: -30, z: 90 },
 };
 
 export const SLIDE = {
@@ -92,145 +92,231 @@ export const CAMERA = {
 
 export const WORLD = {
   SEED: 1337,
-  // San Diego metro playspace. +X = east, -Z = north, -X = west (Pacific).
-  SIZE: 1600, // metres, square, centred near Mission Valley
-  CELL: 4, // heightfield + render mesh resolution in metres
-  MAX_ELEVATION: 95,
+  // Compressed San Diego metro from satellite + terrain reference maps.
+  // +X = east, -Z = north, -X = west (Pacific). Origin ≈ Mission Valley / I-8 × I-805.
+  SIZE: 1800,
+  CELL: 4,
+  MAX_ELEVATION: 120,
   WATER_LEVEL: 0.0,
 
-  // 4 octaves of simplex for coastal rolling + inland foothills
-  NOISE_OCTAVES: 4,
-  NOISE_BASE_FREQ: 0.0014,
-  NOISE_LACUNARITY: 2.0,
-  NOISE_PERSISTENCE: 0.5,
+  NOISE_OCTAVES: 5,
+  NOISE_BASE_FREQ: 0.0012,
+  NOISE_LACUNARITY: 2.05,
+  NOISE_PERSISTENCE: 0.48,
 
-  // Soft rim so players cannot walk off the playable square; ocean is authored west.
-  FALLOFF_START: 0.88,
-  FALLOFF_END: 0.99,
-  BASE_LIFT: 6,
-  EDGE_DEPTH: 18,
+  FALLOFF_START: 0.90,
+  FALLOFF_END: 0.995,
+  BASE_LIFT: 5,
+  EDGE_DEPTH: 22,
 
-  // Pacific shoreline (west). Land is generally x > COAST_X with bays cut in.
-  COAST_X: -520,
-  COAST_BLEND: 90,
+  // Pacific coast baseline (west). Actual shoreline is noise-warped + Point Loma.
+  COAST_X: -560,
+  COAST_BLEND: 70,
 
-  // Mission Bay lagoon (inland water cut) — keep clear of the east-shore POI pad
-  MISSION_BAY: { x: -320, z: 20, rx: 140, rz: 100, depth: 4.5 },
-  // San Diego Bay water (southwest of downtown; does not cover the city pad)
-  SD_BAY: { x: -320, z: 480, rx: 170, rz: 130, depth: 6.0 },
+  // Mission Bay — multi-lobe lagoon (satellite: round system west of I-5).
+  MISSION_BAY_LOBES: [
+    { x: -360, z: -20, rx: 150, rz: 120, depth: 5.0 }, // main basin
+    { x: -420, z: 60, rx: 90, rz: 70, depth: 4.5 },   // west arm toward Mission Beach
+    { x: -280, z: 70, rx: 70, rz: 55, depth: 4.0 },   // east finger toward Old Town
+  ],
 
-  // Mission Trails / eastern hills boost
-  EAST_HILLS: { x: 480, z: -60, radius: 280, peak: 88 },
+  // San Diego Bay — long N–S basin (satellite: between Point Loma/Coronado and mainland).
+  SD_BAY: { x: -180, z: 380, rx: 200, rz: 260, depth: 8.0 },
 
-  FOG_NEAR: 450,
-  FOG_FAR: 1100,
-  SKY_COLOR: 0x8eb8d4,
+  // Point Loma peninsula restored after bay cut (hook west of the bay).
+  POINT_LOMA: { x: -420, z: 420, rx: 95, rz: 200, ridge: 38 },
+  // Coronado island / spit across the bay.
+  CORONADO: { x: -200, z: 520, rx: 110, rz: 55, height: 8 },
 
-  // Afternoon sun over the Pacific (west-southwest)
-  SUN_ELEVATION_DEG: 38,
-  SUN_AZIMUTH_DEG: 240,
-  SUN_INTENSITY: 2.35,
-  SUN_COLOR: 0xffe4b8,
-  AMBIENT_SKY: 0x9ab8d0,
-  AMBIENT_GROUND: 0x6a5f4a,
-  AMBIENT_INTENSITY: 0.78,
+  // Mission Trails + eastern foothills (terrain map: real relief east of the city).
+  EAST_HILLS: { x: 520, z: 40, radius: 340, peak: 105 },
+  // Secondary ridge: Clairemont / Linda Vista mesas north of Mission Valley.
+  NORTH_MESA: { x: -80, z: -220, radius: 260, peak: 52 },
+  // Mission Valley trench (I-8 corridor) — low E–W slot through the middle.
+  MISSION_VALLEY: { z: 90, halfWidth: 95, depth: 14 },
+
+  FOG_NEAR: 480,
+  FOG_FAR: 1200,
+  SKY_COLOR: 0x87b4cc,
+
+  // Late-afternoon sun off the Pacific
+  SUN_ELEVATION_DEG: 36,
+  SUN_AZIMUTH_DEG: 245,
+  SUN_INTENSITY: 2.4,
+  SUN_COLOR: 0xffe0b0,
+  AMBIENT_SKY: 0x96b6ce,
+  AMBIENT_GROUND: 0x6e6048,
+  AMBIENT_INTENSITY: 0.72,
 
   SHADOW_MAP_SIZE: 2048,
   SHADOW_BOX: 120,
 };
 
-// Terrain vertex colouring by height and slope — SoCal coastal palette.
+// SoCal coastal + chaparral palette (satellite: green coast, brown inland hills).
 export const TERRAIN_COLORS = {
-  SAND: 0xd4c4a0,
-  GRASS: 0x6b8a45,
-  DRY_GRASS: 0xa09058,
+  SAND: 0xd6c6a2,
+  GRASS: 0x5f7a42,
+  DRY_GRASS: 0xa8945c,
+  CHAPARRAL: 0x8a7348, // brown inland hills from satellite
   DIRT: 0x7a6348,
   ROCK: 0x8c8a85,
   ROCK_DARK: 0x5d5b58,
-  SNOW: 0xe8ecf0, // unused at SD elevations; kept for blend safety
+  SNOW: 0xe8ecf0,
   ASPHALT: 0x3a3b3e,
+  URBAN: 0x7a7c7e, // dense city plateaus
 
-  SAND_MAX: 3.5,
-  GRASS_MAX: 48,
-  ROCK_MIN_SLOPE_DEG: 32,
-  ROCK_DARK_SLOPE_DEG: 46,
-  SNOW_MIN: 120,
-  NOISE_VARIATION: 0.035,
+  SAND_MAX: 3.2,
+  GRASS_MAX: 36,
+  CHAPARRAL_MIN: 40,
+  ROCK_MIN_SLOPE_DEG: 30,
+  ROCK_DARK_SLOPE_DEG: 44,
+  SNOW_MIN: 140,
+  NOISE_VARIATION: 0.04,
 };
 
-// San Diego battle-royale POIs, laid out from map.png (Google Maps screenshot).
+// POIs placed to match satellite_view.png relative layout (compressed BR scale).
 // Coord frame: +X east, -Z north, -X west (Pacific). Origin ≈ Mission Valley.
-// `flatten` carves a level pad so buildings never float or sink.
 export const POIS = [
   {
     id: 'lajolla', name: 'La Jolla',
-    x: -480, z: -400, radius: 95, flatten: 22.0, loot: 'high',
-    note: 'NW coastal cliffs — Village of La Jolla / Shores',
+    x: -520, z: -420, radius: 95, flatten: 24.0, loot: 'high',
+    note: 'Village of La Jolla / coastal cliffs (NW)',
   },
   {
     id: 'university', name: 'University City',
-    x: 50, z: -360, radius: 100, flatten: 38.0, loot: 'medium',
-    note: 'North campus / UTC corridor',
+    x: -120, z: -420, radius: 100, flatten: 40.0, loot: 'medium',
+    note: 'UTC / SR-52 / I-805 node',
   },
   {
-    id: 'miramar', name: 'Miramar Ridge',
-    x: 300, z: -400, radius: 85, flatten: null, loot: 'medium',
-    note: 'High ground north — air station ridge silhouette',
+    id: 'miramar', name: 'Miramar',
+    x: 160, z: -460, radius: 90, flatten: null, loot: 'medium',
+    note: 'North high ground — air station ridge',
+  },
+  {
+    id: 'clairemont', name: 'Clairemont',
+    x: -160, z: -200, radius: 95, flatten: 36.0, loot: 'medium',
+    note: 'Mesa neighborhoods north of Mission Valley',
   },
   {
     id: 'missiontrails', name: 'Mission Trails',
-    x: 500, z: -40, radius: 115, flatten: null, loot: 'medium',
-    note: 'East hills / regional park rocky terrain',
+    x: 480, z: -20, radius: 120, flatten: null, loot: 'medium',
+    note: 'East park / rocky hills (terrain map relief)',
   },
   {
     id: 'missionbay', name: 'Mission Bay',
-    // Shore pad on the east bank of the lagoon (not in the water).
-    x: -140, z: 60, radius: 85, flatten: 6.0, loot: 'medium',
-    note: 'Bay parks, beach strip, recreational cover',
+    x: -220, z: 40, radius: 90, flatten: 5.5, loot: 'medium',
+    note: 'East shore of Mission Bay lagoon',
   },
   {
     id: 'oldtown', name: 'Old Town',
-    x: -50, z: 170, radius: 90, flatten: 12.0, loot: 'high',
-    note: 'I-5 / I-8 interchange approach',
+    x: -80, z: 140, radius: 85, flatten: 11.0, loot: 'high',
+    note: 'I-5 / I-8 interchange hub',
   },
   {
     id: 'balboa', name: 'Balboa Park',
-    x: 130, z: 280, radius: 100, flatten: 18.0, loot: 'high',
-    note: 'Park + museum blocks mid-south',
+    x: 100, z: 220, radius: 100, flatten: 20.0, loot: 'high',
+    note: 'Green park block NE of downtown',
   },
   {
     id: 'downtown', name: 'Downtown',
-    x: 80, z: 400, radius: 140, flatten: 10.0, loot: 'highest',
-    note: 'Dense city — highest loot, vertical play',
+    x: 20, z: 340, radius: 130, flatten: 9.0, loot: 'highest',
+    note: 'Dense core on the bay — highest loot',
   },
   {
     id: 'airport', name: 'Lindbergh Field',
-    x: -160, z: 340, radius: 100, flatten: 7.0, loot: 'medium',
-    note: 'SAN airport / bay flats — hangars + open sightlines',
+    x: -120, z: 250, radius: 105, flatten: 6.5, loot: 'medium',
+    note: 'SAN on the bay flats between Old Town and Downtown',
+  },
+  {
+    id: 'pointloma', name: 'Point Loma',
+    x: -440, z: 400, radius: 90, flatten: 28.0, loot: 'high',
+    note: 'Peninsula ridge / Sunset Cliffs approach',
+  },
+  {
+    id: 'coronado', name: 'Coronado',
+    x: -200, z: 520, radius: 80, flatten: 7.5, loot: 'high',
+    note: 'Island across San Diego Bay',
   },
 ];
 
-// Freeway-inspired corridors between POIs (I-5, I-8, I-15, I-805, SR-52/163).
+// POI connectors (secondary arterials).
 export const ROAD_LINKS = [
-  ['lajolla', 'missionbay'],       // coastal I-5
-  ['missionbay', 'oldtown'],       // I-5 south
-  ['oldtown', 'downtown'],         // into the city
-  ['oldtown', 'airport'],          // Harbor Dr / bay
-  ['airport', 'downtown'],         // waterfront
-  ['downtown', 'balboa'],          // SR-163 / park
-  ['balboa', 'university'],        // 163 north corridor
-  ['oldtown', 'university'],       // mid-city north
-  ['university', 'miramar'],       // SR-52 / 15
-  ['miramar', 'missiontrails'],    // I-15 east hills
-  ['missiontrails', 'balboa'],     // I-8 / east approach
-  ['missiontrails', 'downtown'],   // long east-west artery
-  ['lajolla', 'university'],       // SR-52 west
+  ['lajolla', 'university'],
+  ['lajolla', 'clairemont'],
+  ['university', 'miramar'],
+  ['university', 'clairemont'],
+  ['clairemont', 'oldtown'],
+  ['clairemont', 'missionbay'],
+  ['missionbay', 'oldtown'],
+  ['oldtown', 'airport'],
+  ['airport', 'downtown'],
+  ['oldtown', 'downtown'],
+  ['downtown', 'balboa'],
+  ['balboa', 'missiontrails'],
+  ['miramar', 'missiontrails'],
+  ['pointloma', 'airport'],
+  ['pointloma', 'coronado'],
+  ['coronado', 'downtown'],
+  ['missionbay', 'pointloma'],
+];
+
+// Multi-point freeways from the satellite map (world metres). Drawn as road corridors.
+export const FREEWAYS = [
+  // I-5 coastal spine (Torrey → La Jolla → Mission Bay → Downtown → south)
+  {
+    id: 'i5', width: 16,
+    pts: [
+      [-480, -700], [-500, -480], [-420, -280], [-340, -40],
+      [-200, 120], [-80, 220], [10, 340], [40, 520], [30, 780],
+    ],
+  },
+  // I-8 Mission Valley east–west
+  {
+    id: 'i8', width: 16,
+    pts: [
+      [-700, 70], [-420, 80], [-200, 95], [0, 100],
+      [220, 90], [420, 70], [620, 50], [800, 40],
+    ],
+  },
+  // I-15 inland north–south
+  {
+    id: 'i15', width: 14,
+    pts: [
+      [180, -700], [170, -460], [140, -200], [100, 40],
+      [80, 220], [90, 400], [120, 600], [140, 800],
+    ],
+  },
+  // I-805 parallel corridor
+  {
+    id: 'i805', width: 14,
+    pts: [
+      [-80, -700], [-90, -420], [-70, -180], [-20, 40],
+      [40, 200], [70, 380], [100, 560], [120, 780],
+    ],
+  },
+  // SR-52 east–west north city
+  {
+    id: 'sr52', width: 12,
+    pts: [
+      [-520, -380], [-300, -400], [-100, -420], [120, -440],
+      [320, -420], [520, -380],
+    ],
+  },
+  // SR-163 Balboa / downtown connector
+  {
+    id: 'sr163', width: 12,
+    pts: [
+      [-40, -500], [-20, -280], [20, -80], [60, 100],
+      [90, 220], [40, 320],
+    ],
+  },
 ];
 
 export const ROADS = {
-  WIDTH: 10, // arterial / freeway feel
+  WIDTH: 10,
   BLEND: 14,
   RAISE: 0.12,
+  FREEWAY_BLEND: 18,
 };
 
 export const BUILDINGS = {

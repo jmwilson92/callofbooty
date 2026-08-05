@@ -1,4 +1,4 @@
-import { WORLD, POIS, ROAD_LINKS, MAP, TERRAIN_COLORS } from '../config.js';
+import { WORLD, POIS, ROAD_LINKS, FREEWAYS, MAP, TERRAIN_COLORS } from '../config.js';
 
 // Always-on square minimap (top-left) + full-map overlay toggled with M.
 // Both share a baked height-color raster so drawing stays cheap every frame.
@@ -103,6 +103,7 @@ export class MapView {
     const sand = hexToRgb(TERRAIN_COLORS.SAND);
     const grass = hexToRgb(TERRAIN_COLORS.GRASS);
     const dry = hexToRgb(TERRAIN_COLORS.DRY_GRASS);
+    const chap = hexToRgb(TERRAIN_COLORS.CHAPARRAL ?? 0x8a7348);
     const rock = hexToRgb(TERRAIN_COLORS.ROCK);
     const water = [26, 74, 92];
 
@@ -126,20 +127,23 @@ export class MapView {
             r = 58; g = 59; b = 62;
           } else {
             const tSand = Math.min(1, Math.max(0, (h - waterY) / 4));
-            const tGrass = Math.min(1, Math.max(0, (h - 4) / 30));
-            const tDry = Math.min(1, Math.max(0, (h - 35) / 40));
-            const tRock = Math.min(1, Math.max(0, (h - 55) / 35));
+            const tGrass = Math.min(1, Math.max(0, (h - 4) / 28));
+            const tDry = Math.min(1, Math.max(0, (h - 32) / 35));
+            const tChap = Math.min(1, Math.max(0, (h - 42) / 40));
+            const tRock = Math.min(1, Math.max(0, (h - 70) / 40));
             r = sand[0]; g = sand[1]; b = sand[2];
             r = lerpByte(r, grass[0], tSand * 0.9);
             g = lerpByte(g, grass[1], tSand * 0.9);
             b = lerpByte(b, grass[2], tSand * 0.9);
-            r = lerpByte(r, dry[0], tGrass * 0.5 + tDry * 0.5);
-            g = lerpByte(g, dry[1], tGrass * 0.5 + tDry * 0.5);
-            b = lerpByte(b, dry[2], tGrass * 0.5 + tDry * 0.5);
+            r = lerpByte(r, dry[0], tGrass * 0.45 + tDry * 0.4);
+            g = lerpByte(g, dry[1], tGrass * 0.45 + tDry * 0.4);
+            b = lerpByte(b, dry[2], tGrass * 0.45 + tDry * 0.4);
+            r = lerpByte(r, chap[0], tChap);
+            g = lerpByte(g, chap[1], tChap);
+            b = lerpByte(b, chap[2], tChap);
             r = lerpByte(r, rock[0], tRock);
             g = lerpByte(g, rock[1], tRock);
             b = lerpByte(b, rock[2], tRock);
-            // Slight macro variation so the map isn't a flat fill
             const n = this.terrain.detail.noise2D(x * 0.004, z * 0.004);
             const m = 1 + n * 0.08;
             r = Math.min(255, Math.max(0, (r * m) | 0));
@@ -270,10 +274,26 @@ export class MapView {
   }
 
   _strokeRoads(ctx, toPx, width) {
-    ctx.strokeStyle = 'rgba(58, 59, 62, 0.95)';
-    ctx.lineWidth = width;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+
+    // Freeways first (wider, slightly brighter — matches satellite yellow arteries)
+    ctx.strokeStyle = 'rgba(70, 72, 76, 0.95)';
+    for (const fw of FREEWAYS) {
+      ctx.lineWidth = width * (fw.width ? fw.width / 10 : 1.4);
+      ctx.beginPath();
+      for (let i = 0; i < fw.pts.length; i++) {
+        const [x, z] = fw.pts[i];
+        const p = toPx(x, z);
+        if (i === 0) ctx.moveTo(p.px, p.py);
+        else ctx.lineTo(p.px, p.py);
+      }
+      ctx.stroke();
+    }
+
+    // POI arterials
+    ctx.strokeStyle = 'rgba(58, 59, 62, 0.9)';
+    ctx.lineWidth = width;
     for (const [a, b] of ROAD_LINKS) {
       const pa = this._poiById[a];
       const pb = this._poiById[b];
