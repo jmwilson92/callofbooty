@@ -342,6 +342,66 @@ function buildCoronado(sink, terrain, rng) {
   }
 }
 
+// --- Radio Tower: summit outpost on the eastern mountain spine ---
+function buildRadioTower(sink, terrain, rng) {
+  const p = poi('radiotower');
+  const base = p.flatten ?? seatY(terrain, p, p.x - 5, p.z - 5, 10, 10);
+
+  // Equipment building under the mast
+  const tw = 12, td = 12;
+  const tx = p.x - tw / 2, tz = p.z - td / 2;
+  makeBuilding(sink, {
+    x: tx, z: tz, w: tw, d: td, floors: 3,
+    baseY: base, color: 0x6e6c68, rng,
+  });
+
+  // Main lattice mast (silhouette landmark)
+  const mastY = base + BUILDINGS.GROUND_FLOOR_HEIGHT + 2 * BUILDINGS.FLOOR_HEIGHT;
+  sink.addSpan(p.x - 0.7, mastY, p.z - 0.7, p.x + 0.7, mastY + 36, p.z + 0.7, 0x8a8880);
+  // Cross-arms
+  sink.addSpan(p.x - 4, mastY + 28, p.z - 0.35, p.x + 4, mastY + 29.2, p.z + 0.35, 0x6e6c68);
+  sink.addSpan(p.x - 0.35, mastY + 22, p.z - 3.5, p.x + 0.35, mastY + 23.2, p.z + 3.5, 0x6e6c68);
+  // Beacon tip
+  sink.addSpan(p.x - 0.9, mastY + 36, p.z - 0.9, p.x + 0.9, mastY + 38.5, p.z + 0.9, 0xc44a3c);
+
+  // Outbuildings ring
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.4;
+    const r = 28;
+    const w = 10, d = 8;
+    const x = p.x + Math.cos(a) * r - w / 2;
+    const z = p.z + Math.sin(a) * r - d / 2;
+    makeShed(sink, {
+      x, z, w, d, h: 4.5,
+      baseY: seatY(terrain, p, x, z, w, d),
+      color: pick(rng, [0x6e6c68, 0x87857f, 0x5d5b58]),
+    });
+  }
+
+  // Generator blocks / hard cover on the pad
+  for (let i = 0; i < 5; i++) {
+    const gx = p.x - 18 + i * 9;
+    sink.addSpan(gx, base, p.z + 16, gx + 2.8, base + 2.2, p.z + 18.5, 0x5c6166);
+  }
+
+  // Perimeter sandbags / low wall
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const r = 38;
+    const x = p.x + Math.cos(a) * r;
+    const z = p.z + Math.sin(a) * r;
+    const x2 = p.x + Math.cos(a + 0.4) * r;
+    const z2 = p.z + Math.sin(a + 0.4) * r;
+    const minX = Math.min(x, x2), maxX = Math.max(x, x2);
+    const minZ = Math.min(z, z2), maxZ = Math.max(z, z2);
+    sink.addSpan(
+      minX, base, minZ,
+      Math.max(minX + 1.0, maxX), base + 1.25, Math.max(minZ + 0.45, maxZ),
+      0x8e7a5a, 'thin'
+    );
+  }
+}
+
 export function buildAllStructures(sink, terrain, rng) {
   buildDowntown(sink, terrain, rng);
   buildAirport(sink, terrain, rng);
@@ -352,4 +412,5 @@ export function buildAllStructures(sink, terrain, rng) {
   buildBalboa(sink, terrain, rng);
   buildZoo(sink, terrain, rng);
   buildCoronado(sink, terrain, rng);
+  buildRadioTower(sink, terrain, rng);
 }

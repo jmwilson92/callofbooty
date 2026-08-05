@@ -248,6 +248,12 @@ export const POIS = [
     x: -200, z: 520, radius: 90, flatten: 7.5, loot: 'high',
     note: 'Island / spit across San Diego Bay',
   },
+  {
+    id: 'radiotower', name: 'Radio Tower',
+    // Central summit of the far-east massif (see EAST_MOUNTAINS.peaks).
+    x: 700, z: -60, radius: 85, flatten: 138.0, loot: 'high',
+    note: 'High-loot outpost on the eastern mountain spine',
+  },
 ];
 
 // Arterials between POIs.
@@ -271,6 +277,11 @@ export const ROAD_LINKS = [
   ['balboa', 'missionvalley'],
   ['coronado', 'downtown'],
   ['coronado', 'airport'],
+  // Switchbacks / approach roads up the east wall
+  ['radiotower', 'kearnymesa'],
+  ['radiotower', 'missionvalley'],
+  ['radiotower', 'balboa'],
+  ['radiotower', 'zoo'],
 ];
 
 // Multi-point freeways from the satellite map (world metres). Drawn as road corridors.

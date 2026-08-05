@@ -27,6 +27,7 @@ Origin ≈ **Mission Valley**. World size: **1800 m**.
 | `balboa` | **Balboa Park** | Museums / park NE of downtown |
 | `zoo` | **San Diego Zoo** | Zoo grounds north of Balboa |
 | `coronado` | **Coronado** | Island across San Diego Bay |
+| `radiotower` | **Radio Tower** | Summit outpost on the eastern mountain spine |
 
 ## Geography (still present under the POIs)
 
