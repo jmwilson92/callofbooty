@@ -91,8 +91,9 @@ export function createHud() {
       <tr><td>Space</td><td>jump / mantle</td></tr>
       <tr><td>C or Ctrl</td><td>crouch</td></tr>
       <tr><td>Sprint + C</td><td>slide (jump to cancel and keep your speed)</td></tr>
+      <tr><td>M</td><td>tactical map (your location)</td></tr>
       <tr><td>F3</td><td>performance overlay</td></tr>
-      <tr><td>Esc</td><td>release pointer</td></tr>
+      <tr><td>Esc</td><td>release pointer / close map</td></tr>
     </table>
     <p class="err"></p>`;
   document.body.appendChild(hint);

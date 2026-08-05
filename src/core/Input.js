@@ -23,8 +23,8 @@ export class Input {
       if (e.repeat) return;
       this.keys.add(e.code);
       this.pressed.add(e.code);
-      // Stop space from scrolling and F3 from opening browser search.
-      if (e.code === 'Space' || e.code === 'F3') e.preventDefault();
+      // Stop space from scrolling, F3 from browser search, M from finding.
+      if (e.code === 'Space' || e.code === 'F3' || e.code === 'KeyM') e.preventDefault();
     });
 
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));

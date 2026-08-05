@@ -22,8 +22,9 @@ Then open http://localhost:5173 and click to lock the pointer.
 | `C` or `Ctrl` | crouch |
 | Sprint + `C` | slide — jump to cancel and keep your horizontal speed |
 | Right mouse | ADS stance (movement/bob only; no weapons yet) |
+| `M` | open / close tactical map (shows your location) |
 | `F3` | performance overlay |
-| `Esc` | release pointer |
+| `Esc` | release pointer (also closes the map) |
 
 ## What Phase 1 covers
 

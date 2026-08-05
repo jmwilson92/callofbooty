@@ -12,6 +12,7 @@ import { scatterProps } from './world/Props.js';
 import { Controller } from './player/Controller.js';
 import { PlayerCamera } from './player/Camera.js';
 import { DebugOverlay, createHud } from './ui/Debug.js';
+import { MapView } from './ui/MapView.js';
 
 // Bootstrap and system wiring. Systems receive their dependencies here and
 // otherwise talk through the event bus.
@@ -97,9 +98,14 @@ function start() {
   const input = new Input(renderer.domElement, bus);
   const hud = createHud();
   const debug = new DebugOverlay(renderer);
+  const mapView = new MapView(terrain);
   const clock = new Clock();
 
-  bus.on('pointerlock', (locked) => hud.setLocked(locked));
+  bus.on('pointerlock', (locked) => {
+    hud.setLocked(locked);
+    // Closing pointer lock with Esc should also dismiss the tactical map.
+    if (!locked && mapView.open) mapView.setOpen(false);
+  });
   bus.on('pointerlock:error', () => {
     // Chrome blocks re-locking for about a second after Esc.
     hud.setError('Pointer lock was blocked by the browser. Click again in a moment.');
@@ -130,7 +136,8 @@ function start() {
     requestAnimationFrame(frame);
 
     // Mouse look is applied once per frame; it is inherently frame-rate driven.
-    if (input.locked) {
+    // Freeze look while the tactical map is open so the cursor isn't fighting M.
+    if (input.locked && !mapView.open) {
       const { dx, dy } = input.consumeMouse();
       playerCam.applyMouse(dx, dy);
     } else {
@@ -138,19 +145,21 @@ function start() {
     }
 
     if (input.actionPressed('debug')) debug.toggle();
+    if (input.actionPressed('map')) mapView.toggle();
 
     clock.advance((dt) => {
-      controller.ads = input.locked && input.buttons.has(2);
-      if (input.locked) {
+      controller.ads = input.locked && input.buttons.has(2) && !mapView.open;
+      // Allow movement while map is open, but not while pointer is unlocked.
+      if (input.locked && !mapView.open) {
         controller.tick(dt, input, playerCam.yaw);
       } else {
-        // Keep gravity and collision alive so the player settles while unlocked.
+        // Keep gravity and collision alive so the player settles while unlocked / on map.
         controller.tick(dt, IDLE_INPUT, playerCam.yaw);
       }
       input.endTick();
     });
 
-    const strafe = input.locked
+    const strafe = input.locked && !mapView.open
       ? (input.action('right') ? 1 : 0) - (input.action('left') ? 1 : 0)
       : 0;
     playerCam.update(clock.frameDelta, controller, clock.alpha, strafe);
@@ -161,13 +170,14 @@ function start() {
     sun.target.updateMatrixWorld();
 
     renderer.render(scene, playerCam.camera);
+    mapView.update(controller.pos, playerCam.yaw);
     debug.update(clock.frameDelta, controller, stats);
   }
 
   requestAnimationFrame(frame);
 
   // Expose for console poking and for the smoke test.
-  window.__game = { scene, renderer, controller, terrain, hash, playerCam, stats, clock, SIM };
+  window.__game = { scene, renderer, controller, terrain, hash, playerCam, stats, clock, SIM, mapView };
 }
 
 // A no-op input so the controller can still simulate while the pointer is free.

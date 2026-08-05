@@ -293,5 +293,27 @@ export const INPUT = {
     sprint: ['ShiftLeft', 'ShiftRight'],
     crouch: ['KeyC', 'ControlLeft'],
     debug: ['F3'],
+    map: ['KeyM'],
   },
+};
+
+// Minimap (always-on square, top-left) + full map (toggle with M).
+export const MAP = {
+  MINIMAP_SIZE: 168, // CSS px, square
+  MINIMAP_RANGE: 280, // metres of world visible on the minimap (edge to edge)
+  FULL_MAP_MAX: 720, // max CSS px for the full-map square on large screens
+  // Baked height-color raster resolution (power of two-ish is fine)
+  RASTER: 512,
+  WATER: '#1a4a5c',
+  SAND: '#c9b896',
+  GRASS: '#5f7a3f',
+  DRY: '#8f8750',
+  ROCK: '#7a7874',
+  ROAD: '#3a3b3e',
+  POI: '#f0c14a',
+  POI_TEXT: '#e8ecf0',
+  PLAYER: '#7fd4ff',
+  PLAYER_RING: 'rgba(127, 212, 255, 0.35)',
+  BORDER: 'rgba(255, 255, 255, 0.18)',
+  BG: 'rgba(8, 12, 16, 0.82)',
 };
