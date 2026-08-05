@@ -157,7 +157,15 @@ export class Terrain {
     }
   }
 
-  // Bilinear height sample in world space.
+  /**
+   * Height of the terrain SURFACE at a world position.
+   *
+   * This evaluates the same two triangles the mesh is built from, not a
+   * bilinear patch. Bilinear disagrees with the rendered triangles by up to
+   * half the cell's corner spread, so the player would stand on a surface that
+   * is not the one drawn -- which reads in-game as the ground shaking
+   * underfoot at roughly one cycle per cell crossed.
+   */
   heightAt(x, z) {
     const fx = (x + this.half) / this.cell;
     const fz = (z + this.half) / this.cell;
@@ -172,7 +180,11 @@ export class Terrain {
     const h10 = this.heights[this.idx(ix + 1, iz)];
     const h01 = this.heights[this.idx(ix, iz + 1)];
     const h11 = this.heights[this.idx(ix + 1, iz + 1)];
-    return lerp(lerp(h00, h10, tx), lerp(h01, h11, tx), tz);
+
+    // buildMesh() triangulates each quad as (h00, h01, h10) and (h10, h01, h11),
+    // i.e. the diagonal runs from (0,1) to (1,0). Keep these in lockstep.
+    if (tx + tz <= 1) return h00 + (h10 - h00) * tx + (h01 - h00) * tz;
+    return h11 + (h01 - h11) * (1 - tx) + (h10 - h11) * (1 - tz);
   }
 
   normalAt(x, z, out = new THREE.Vector3()) {
@@ -196,26 +208,29 @@ export class Terrain {
     return this.roadMask[this.idx(fx, fz)];
   }
 
+  // Surface colour blended across height and slope. Hard if/else bands put a
+  // visible seam wherever a threshold is crossed, which reads as blotching
+  // rather than as terrain; every transition here is a smoothstep instead.
   _vertexColor(x, z, h, slopeDeg, out) {
     const C = TERRAIN_COLORS;
-    let col;
+
+    out.setHex(C.SAND);
+    out.lerp(_tmpC.setHex(C.GRASS), smoothstep(C.SAND_MAX - 1.5, C.SAND_MAX + 4, h));
+    out.lerp(_tmpC.setHex(C.DRY_GRASS), smoothstep(C.GRASS_MAX - 9, C.GRASS_MAX + 9, h));
+    out.lerp(_tmpC.setHex(C.SNOW), smoothstep(C.SNOW_MIN - 6, C.SNOW_MIN + 8, h));
+
+    // Rock takes over as the face steepens, dark rock on the steepest.
+    out.lerp(_tmpC.setHex(C.ROCK),
+      smoothstep(C.ROCK_MIN_SLOPE_DEG - 7, C.ROCK_MIN_SLOPE_DEG + 9, slopeDeg));
+    out.lerp(_tmpC.setHex(C.ROCK_DARK),
+      smoothstep(C.ROCK_DARK_SLOPE_DEG - 7, C.ROCK_DARK_SLOPE_DEG + 9, slopeDeg));
+
     const road = this.roadAt(x, z);
-
-    if (h < C.SAND_MAX) col = C.SAND;
-    else if (slopeDeg > C.ROCK_DARK_SLOPE_DEG) col = C.ROCK_DARK;
-    else if (slopeDeg > C.ROCK_MIN_SLOPE_DEG) col = C.ROCK;
-    else if (h > C.SNOW_MIN) col = C.SNOW;
-    else if (h > C.GRASS_MAX) col = C.DRY_GRASS;
-    else col = C.GRASS;
-
-    out.setHex(col);
-
     if (road > 0) out.lerp(_tmpC.setHex(C.ASPHALT), road);
 
-    // Break up large flat fills so they do not read as a solid colour.
-    const v = this.detail.noise2D(x * 0.05, z * 0.05) * C.NOISE_VARIATION;
-    const macro = this.detail.noise2D(x * 0.004, z * 0.004) * C.NOISE_VARIATION * 1.6;
-    const m = 1 + v + macro;
+    // Large-scale variation only. Per-vertex noise at a wavelength near the
+    // mesh resolution just produces speckle.
+    const m = 1 + this.detail.noise2D(x * 0.005, z * 0.005) * C.NOISE_VARIATION;
     out.setRGB(
       clamp(out.r * m, 0, 1),
       clamp(out.g * m, 0, 1),

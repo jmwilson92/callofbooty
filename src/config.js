@@ -79,7 +79,12 @@ export const CAMERA = {
 
   BOB_AMP_VERT: 0.035,
   BOB_AMP_HORIZ: 0.025,
-  BOB_FREQ_SCALE: 1.15, // cycles per meter travelled
+  // Sway cycles per metre travelled. The vertical bob runs at twice this (one
+  // dip per footfall), so at the 4.4 m/s walk speed this lands near 2.2 Hz --
+  // roughly human footfall cadence. Anything much above ~3 Hz reads as the
+  // screen vibrating rather than as walking.
+  BOB_FREQ_SCALE: 0.25,
+  BOB_MAX_INTENSITY: 1.2,
   BOB_ADS_MULT: 0.3,
   STRAFE_ROLL_DEG: 0.6,
   ROLL_BLEND: 9.0,
@@ -136,8 +141,11 @@ export const TERRAIN_COLORS = {
   ROCK_MIN_SLOPE_DEG: 34,
   ROCK_DARK_SLOPE_DEG: 48,
   SNOW_MIN: 46,
-  // +/- brightness jitter so large flat areas are not a solid fill
-  NOISE_VARIATION: 0.06,
+  // +/- brightness jitter so large flat areas are not a solid fill. Keep this
+  // low: the terrain has no texture yet, so vertex brightness noise is the most
+  // visible thing on screen and reads as blotching well before it reads as
+  // variation.
+  NOISE_VARIATION: 0.03,
 };
 
 // Seven hand-placed points of interest. Coordinates are (x, z) in metres.

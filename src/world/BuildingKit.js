@@ -14,25 +14,54 @@ const SLAB = BUILDINGS.SLAB_THICKNESS;
  * `openings` entries are { a0, a1, y0, y1 } in along-axis world coords.
  */
 export function wall(sink, axis, fixed, a0, a1, yBottom, yTop, color, openings = [], tag = 'solid') {
-  const sorted = [...openings].sort((p, q) => p.a0 - q.a0);
-  let cursor = a0;
-
   const emit = (s, e, y0, y1) => {
     if (e - s <= 1e-4 || y1 - y0 <= 1e-4) return;
     if (axis === 'x') sink.addSpan(s, y0, fixed - T / 2, e, y1, fixed + T / 2, color, tag);
     else sink.addSpan(fixed - T / 2, y0, s, fixed + T / 2, y1, e, color, tag);
   };
 
-  for (const op of sorted) {
+  // Clip to the wall span, discard anything empty.
+  const ops = [];
+  for (const op of openings) {
     const s = Math.max(a0, op.a0);
     const e = Math.min(a1, op.a1);
-    if (e <= s) continue;
-    emit(cursor, s, yBottom, yTop); // solid pier before the opening
-    emit(s, e, yBottom, Math.min(op.y0, yTop)); // under the sill
-    emit(s, e, Math.max(op.y1, yBottom), yTop); // lintel above
-    cursor = Math.max(cursor, e);
+    if (e - s <= 1e-4) continue;
+    ops.push({ a0: s, a1: e, y0: Math.max(yBottom, op.y0), y1: Math.min(yTop, op.y1) });
   }
-  emit(cursor, a1, yBottom, yTop);
+  if (!ops.length) {
+    emit(a0, a1, yBottom, yTop);
+    return;
+  }
+
+  // Cut the wall at every opening edge so that within a slice an opening either
+  // spans it completely or not at all. Openings must then be UNIONED per slice:
+  // emitting each one independently lets a window's under-sill block get built
+  // straight across an overlapping doorway, which walls the building shut.
+  const cuts = new Set([a0, a1]);
+  for (const op of ops) {
+    cuts.add(op.a0);
+    cuts.add(op.a1);
+  }
+  const edges = [...cuts].sort((p, q) => p - q);
+
+  for (let i = 0; i < edges.length - 1; i++) {
+    const s = edges[i];
+    const e = edges[i + 1];
+    if (e - s <= 1e-4) continue;
+    const mid = (s + e) / 2;
+
+    const bands = ops
+      .filter((o) => o.a0 <= mid && o.a1 >= mid)
+      .map((o) => [o.y0, o.y1])
+      .sort((p, q) => p[0] - q[0]);
+
+    let y = yBottom;
+    for (const [b0, b1] of bands) {
+      if (b0 > y) emit(s, e, y, b0);
+      if (b1 > y) y = b1;
+    }
+    emit(s, e, y, yTop);
+  }
 }
 
 /** Floor slab spanning a rect, optionally with a rectangular hole punched in it. */
@@ -132,14 +161,22 @@ export function makeBuilding(sink, opts) {
       return out;
     };
 
-    // Two entrances on different faces, per the spec rule.
-    const southOpenings = winsAlong(x, x + w);
-    const eastOpenings = winsAlong(z, z + d);
+    // Two entrances on different faces, per the spec rule. A window overlapping
+    // a doorway is dropped so the door reads as a door rather than as one
+    // merged hole in the facade.
+    const addDoor = (list, centre) => {
+      const d0 = centre - doorW / 2;
+      const d1 = centre + doorW / 2;
+      const kept = list.filter((op) => op.a1 <= d0 + 1e-4 || op.a0 >= d1 - 1e-4);
+      kept.push({ a0: d0, a1: d1, y0: yBot, y1: yBot + doorH });
+      return kept;
+    };
+
+    let southOpenings = winsAlong(x, x + w);
+    let eastOpenings = winsAlong(z, z + d);
     if (isGround) {
-      const cx = x + w * 0.35;
-      southOpenings.push({ a0: cx - doorW / 2, a1: cx + doorW / 2, y0: yBot, y1: yBot + doorH });
-      const cz = z + d * 0.32;
-      eastOpenings.push({ a0: cz - doorW / 2, a1: cz + doorW / 2, y0: yBot, y1: yBot + doorH });
+      southOpenings = addDoor(southOpenings, x + w * 0.35);
+      eastOpenings = addDoor(eastOpenings, z + d * 0.32);
     }
 
     wall(sink, 'x', z + T / 2, x, x + w, yBot, yTop, color, southOpenings);

@@ -186,6 +186,87 @@ check('no falling through terrain (400 drop points)',
   fall.worst < 0.2,
   `${fall.tested} points, worst sink ${fall.worst.toFixed(3)}m${fall.worstAt ? ` at ${fall.worstAt}` : ''}`);
 
+// --- the surface you stand on is the surface you see -------------------------
+// Sample triangle centroids straight out of the rendered mesh and compare
+// against the height collision uses. Any gap here is felt in-game as the ground
+// shaking underfoot while walking.
+const surface = await page.evaluate(() => {
+  const g = window.__game;
+  const mesh = g.scene.getObjectByName('terrain');
+  const pos = mesh.geometry.attributes.position.array;
+  const idx = mesh.geometry.index.array;
+  const triCount = idx.length / 3;
+
+  let worst = 0;
+  let sampled = 0;
+  for (let t = 0; t < triCount; t += 97) {
+    const i0 = idx[t * 3], i1 = idx[t * 3 + 1], i2 = idx[t * 3 + 2];
+    // A triangle's centroid lies on its plane, so its y is the surface height.
+    const cx = (pos[i0 * 3] + pos[i1 * 3] + pos[i2 * 3]) / 3;
+    const cy = (pos[i0 * 3 + 1] + pos[i1 * 3 + 1] + pos[i2 * 3 + 1]) / 3;
+    const cz = (pos[i0 * 3 + 2] + pos[i1 * 3 + 2] + pos[i2 * 3 + 2]) / 3;
+    worst = Math.max(worst, Math.abs(g.terrain.heightAt(cx, cz) - cy));
+    sampled++;
+  }
+  return { worst, sampled };
+});
+
+check('collision surface matches the rendered mesh',
+  surface.worst < 0.01,
+  `${surface.sampled} triangles, worst mismatch ${surface.worst.toFixed(4)}m`);
+
+// --- doorways are actually passable -----------------------------------------
+// Walk at the front door of every Grid building and require entry. A doorway
+// can exist in the facade yet be blocked by an overlapping window's sill, which
+// looks like a door but walls the building shut.
+const doors = await page.evaluate(() => {
+  const g = window.__game;
+  const c = g.controller;
+  const input = {
+    action: (n) => n === 'forward',
+    actionPressed: () => false,
+    buttons: new Set(),
+  };
+
+  // Grid layout mirrors src/world/Buildings.js: 4x3 blocks of 22x18 on a 12m street.
+  const cols = 4, rows = 3, bw = 22, bd = 18, street = 12;
+  const stepX = bw + street, stepZ = bd + street;
+  const x0 = 40 - (cols * stepX - street) / 2;
+  const z0 = 30 - (rows * stepZ - street) / 2;
+
+  let entered = 0;
+  let total = 0;
+  const failures = [];
+
+  for (let r = 0; r < rows; r++) {
+    for (let col = 0; col < cols; col++) {
+      const bx = x0 + col * stepX;
+      const bz = z0 + r * stepZ;
+      const doorX = bx + bw * 0.35; // matches makeBuilding
+      total++;
+
+      c.pos.set(doorX, 26.05, bz - 2.2); // outside the south wall
+      c.prevPos.copy(c.pos);
+      c.vel.set(0, 0, 0);
+      c.height = 1.8;
+      c.mantling = false;
+      c.sliding = false;
+
+      // Face +Z, straight through the doorway.
+      for (let t = 0; t < 200; t++) c.tick(1 / 60, input, Math.PI);
+
+      const inside = c.pos.z > bz + 1.0 && c.pos.z < bz + bd;
+      if (inside) entered++;
+      else failures.push(`(${bx.toFixed(0)},${bz.toFixed(0)}) stopped at z=${c.pos.z.toFixed(2)} vs wall ${bz.toFixed(0)}`);
+    }
+  }
+  return { entered, total, failures: failures.slice(0, 3) };
+});
+
+check('can walk through the front door of every Grid building',
+  doors.entered === doors.total,
+  `${doors.entered}/${doors.total}${doors.failures.length ? ' — ' + doors.failures.join('; ') : ''}`);
+
 // --- stairs are climbable ----------------------------------------------------
 // Walk forward from the base of a stair core in The Grid and confirm the player
 // gains a full storey. This is the real test of step-up against box geometry.
@@ -327,18 +408,26 @@ check('slide triggers and boosts speed',
   `${slide.sprintSpeed.toFixed(2)} -> ${slide.slideSpeed.toFixed(2)} m/s`);
 
 // --- screenshot --------------------------------------------------------------
-// Put the player somewhere scenic, hide the menu overlay, and let it render.
-await page.evaluate(() => {
-  const g = window.__game;
-  g.controller.pos.set(6, g.terrain.heightAt(6, -60) + 1.7, -60);
-  g.controller.prevPos.copy(g.controller.pos);
-  g.playerCam.yaw = Math.PI;
-  g.playerCam.pitch = -0.06;
-  const hint = document.getElementById('hint');
-  if (hint) hint.style.display = 'none';
-});
-await page.waitForTimeout(600);
-await page.screenshot({ path: 'tools/screenshot.png' });
+// Two reference views for eyeballing after a change.
+async function shot(path, x, z, yaw, pitch, eye = 1.7) {
+  await page.evaluate(([px, pz, yw, pt, ey]) => {
+    const g = window.__game;
+    g.controller.pos.set(px, g.terrain.heightAt(px, pz) + ey, pz);
+    g.controller.prevPos.copy(g.controller.pos);
+    g.controller.vel.set(0, 0, 0);
+    g.playerCam.yaw = yw;
+    g.playerCam.pitch = pt;
+    const hint = document.getElementById('hint');
+    if (hint) hint.style.display = 'none';
+  }, [x, z, yaw, pitch, eye]);
+  await page.waitForTimeout(700);
+  await page.screenshot({ path });
+}
+
+// Straight at a Grid building's front door.
+await shot('tools/screenshot-door.png', 19.7, -16.5, Math.PI, -0.02);
+// Open ground, to judge terrain colour banding.
+await shot('tools/screenshot.png', -200, 120, 2.2, 0.02);
 console.log('\n  screenshot written to tools/screenshot.png');
 
 await browser.close();

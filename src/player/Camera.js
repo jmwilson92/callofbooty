@@ -73,7 +73,7 @@ export class PlayerCamera {
     let bobX = 0, bobY = 0;
     if (controller.grounded && !controller.sliding && controller.speed > 0.4) {
       this.bobPhase = controller.distanceTravelled * CAMERA.BOB_FREQ_SCALE;
-      const intensity = clamp(controller.speed / PLAYER.SPEED_WALK, 0, 1.6) *
+      const intensity = clamp(controller.speed / PLAYER.SPEED_WALK, 0, CAMERA.BOB_MAX_INTENSITY) *
         (controller.ads ? CAMERA.BOB_ADS_MULT : 1);
       const p = this.bobPhase * Math.PI * 2;
       bobY = Math.sin(p * 2) * CAMERA.BOB_AMP_VERT * intensity;
