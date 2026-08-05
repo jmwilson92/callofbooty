@@ -36,8 +36,8 @@ export const PLAYER = {
   // Crouch transition speed (m/s of capsule height change)
   CROUCH_LERP: 8.0,
 
-  // Downtown core (city skyline) — slight offset so you don't clip a tower.
-  SPAWN: { x: 40, z: 430 },
+  // Downtown core on dry land (east of the bay).
+  SPAWN: { x: 140, z: 350 },
 };
 
 export const SLIDE = {
@@ -120,8 +120,8 @@ export const WORLD = {
     { x: -280, z: 70, rx: 70, rz: 55, depth: 4.0 },   // east finger toward Old Town
   ],
 
-  // San Diego Bay — long N–S basin (satellite: between Point Loma/Coronado and mainland).
-  SD_BAY: { x: -180, z: 380, rx: 200, rz: 260, depth: 8.0 },
+  // San Diego Bay — stays west of the downtown plate (do not flood the city).
+  SD_BAY: { x: -280, z: 420, rx: 170, rz: 240, depth: 8.0 },
 
   // Point Loma peninsula restored after bay cut (hook west of the bay).
   POINT_LOMA: { x: -420, z: 420, rx: 95, rz: 200, ridge: 38 },
@@ -234,8 +234,9 @@ export const POIS = [
   },
   {
     id: 'downtown', name: 'Downtown',
-    x: 60, z: 420, loot: 'highest',
-    note: 'Bayfront skyline (downtown.png)',
+    // Solid mesa plate east of the bay — full skyline grid stays dry
+    x: 140, z: 360, loot: 'highest',
+    note: 'Bayfront skyline on land (downtown.png)',
   },
   {
     id: 'pointloma', name: 'Point Loma',

@@ -454,12 +454,16 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng) 
 
   const gy = (x, z, w = 0, d = 0) => groundY(terrain, x, z, w, d);
 
-  // Street segments follow terrain at their midpoint (slightly below sidewalk)
+  const MIN_DRY = 2.8; // never pave or build in water / wet sand
+
+  // Street segments only where grade is dry
   for (let c = 0; c <= cols; c++) {
     for (let r = 0; r < rows; r++) {
       const sx = originX + c * stepX - streetW;
       const sz = originZ + r * stepZ;
-      const y = gy(sx + streetW / 2, sz + blockD / 2) - 0.06;
+      const y0 = gy(sx + streetW / 2, sz + blockD / 2);
+      if (y0 < MIN_DRY) continue;
+      const y = y0 - 0.06;
       sink.addSpan(sx, y, sz - 0.5, sx + streetW, y + 0.1, sz + blockD + 0.5, C.asphalt);
       neonStrip(sink, sx + streetW / 2 - 0.15, y + 0.08, sz, sx + streetW / 2 + 0.15, y + 0.12, sz + blockD, C.yellowHot);
     }
@@ -468,7 +472,9 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng) 
     for (let c = 0; c < cols; c++) {
       const sx = originX + c * stepX;
       const sz = originZ + r * stepZ - streetW;
-      const y = gy(sx + blockW / 2, sz + streetW / 2) - 0.06;
+      const y0 = gy(sx + blockW / 2, sz + streetW / 2);
+      if (y0 < MIN_DRY) continue;
+      const y = y0 - 0.06;
       sink.addSpan(sx - 0.5, y, sz, sx + blockW + 0.5, y + 0.1, sz + streetW, C.asphalt);
     }
   }
@@ -479,8 +485,8 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng) 
       const bx = originX + c * stepX;
       const bz = originZ + r * stepZ;
       const blockBase = gy(bx + blockW / 2, bz + blockD / 2);
+      if (blockBase < MIN_DRY) continue; // skip flooded blocks entirely
 
-      // Sidewalk plate at local grade
       sink.addSpan(bx - 1, blockBase - 0.02, bz - 1, bx + blockW + 1, blockBase + 0.05, bz + blockD + 1, C.concrete);
 
       const distCore = Math.hypot(c - cols * 0.45, r - rows * 0.4);
@@ -494,6 +500,7 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng) 
         const tw = Math.min(blockW * 0.42, 10 + rng() * 12);
         const td = Math.min(blockD * 0.42, 10 + rng() * 11);
         const baseY = gy(bx + ox, bz + oz, tw, td);
+        if (baseY < MIN_DRY) continue;
 
         let floors;
         if (financial && rng() > 0.25) floors = 18 + Math.floor(rng() * 14);
@@ -518,11 +525,12 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng) 
     }
   }
 
-  // Harbor hotels strip on south edge
+  // Harbor hotels strip on south edge — only on dry ground
   for (let i = 0; i < 5; i++) {
     const hx = originX + 10 + i * 32;
     const hz = originZ + rows * stepZ + 8;
     const by = gy(hx, hz, 16, 14);
+    if (by < MIN_DRY) continue;
     placeSkylineTower(sink, hx, hz, by, rng, 12 + Math.floor(rng() * 8));
     towers++;
   }
@@ -532,13 +540,15 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng) 
     const gx = originX + cols * stepX + 5;
     const gz = originZ + stepZ;
     const by = gy(gx + 18, gz + 20);
-    for (let lvl = 0; lvl < 5; lvl++) {
-      const y = by + lvl * 3.2;
-      sink.addSpan(gx, y, gz, gx + 36, y + 0.4, gz + 40, C.concrete);
-      post(sink, gx + 2, by, gz + 2, 5 * 3.2, 0.8, C.concrete);
-      post(sink, gx + 32, by, gz + 2, 5 * 3.2, 0.8, C.concrete);
-      post(sink, gx + 2, by, gz + 36, 5 * 3.2, 0.8, C.concrete);
-      post(sink, gx + 32, by, gz + 36, 5 * 3.2, 0.8, C.concrete);
+    if (by >= MIN_DRY) {
+      for (let lvl = 0; lvl < 5; lvl++) {
+        const y = by + lvl * 3.2;
+        sink.addSpan(gx, y, gz, gx + 36, y + 0.4, gz + 40, C.concrete);
+        post(sink, gx + 2, by, gz + 2, 5 * 3.2, 0.8, C.concrete);
+        post(sink, gx + 32, by, gz + 2, 5 * 3.2, 0.8, C.concrete);
+        post(sink, gx + 2, by, gz + 36, 5 * 3.2, 0.8, C.concrete);
+        post(sink, gx + 32, by, gz + 36, 5 * 3.2, 0.8, C.concrete);
+      }
     }
   }
 
