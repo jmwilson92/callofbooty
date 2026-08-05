@@ -486,48 +486,45 @@ export class Terrain {
   _vertexColor(x, z, h, slopeDeg, out) {
     const C = TERRAIN_COLORS;
 
+    // Sharper height bands (narrow smoothsteps) so biomes read cleanly.
     out.setHex(C.SAND);
-    out.lerp(_tmpC.setHex(C.GRASS), smoothstep(C.SAND_MAX - 1.5, C.SAND_MAX + 4, h));
-    // Transition into dry grass / chaparral (brown inland hills on satellite)
-    out.lerp(_tmpC.setHex(C.DRY_GRASS), smoothstep(C.GRASS_MAX - 10, C.GRASS_MAX + 6, h));
-    out.lerp(_tmpC.setHex(C.CHAPARRAL), smoothstep(C.CHAPARRAL_MIN - 8, C.CHAPARRAL_MIN + 20, h));
+    out.lerp(_tmpC.setHex(C.GRASS), smoothstep(C.SAND_MAX - 0.6, C.SAND_MAX + 2.2, h));
+    out.lerp(_tmpC.setHex(C.DRY_GRASS), smoothstep(C.GRASS_MAX - 4, C.GRASS_MAX + 4, h));
+    out.lerp(_tmpC.setHex(C.CHAPARRAL), smoothstep(C.CHAPARRAL_MIN - 4, C.CHAPARRAL_MIN + 12, h));
 
-    // Inland brown push (east + elevated)
-    const inland = smoothstep(-50, 450, x) * smoothstep(8, 50, h);
-    out.lerp(_tmpC.setHex(C.CHAPARRAL), inland * 0.35);
+    // Inland brown only on true east high ground
+    const inland = smoothstep(80, 420, x) * smoothstep(20, 55, h);
+    out.lerp(_tmpC.setHex(C.CHAPARRAL), inland * 0.28);
 
-    // Alpine scrub on the eastern massif before pure rock/snow
     if (C.ALPINE_MIN != null) {
-      out.lerp(_tmpC.setHex(C.CHAPARRAL),
-        smoothstep(C.ALPINE_MIN - 15, C.ALPINE_MIN + 25, h) * 0.45);
       out.lerp(_tmpC.setHex(C.ROCK),
-        smoothstep(C.ALPINE_MIN + 20, C.ALPINE_MIN + 55, h) * 0.5);
+        smoothstep(C.ALPINE_MIN + 5, C.ALPINE_MIN + 40, h) * 0.55);
     }
 
     out.lerp(_tmpC.setHex(C.ROCK),
-      smoothstep(C.ROCK_MIN_SLOPE_DEG - 7, C.ROCK_MIN_SLOPE_DEG + 9, slopeDeg));
+      smoothstep(C.ROCK_MIN_SLOPE_DEG - 4, C.ROCK_MIN_SLOPE_DEG + 6, slopeDeg));
     out.lerp(_tmpC.setHex(C.ROCK_DARK),
-      smoothstep(C.ROCK_DARK_SLOPE_DEG - 7, C.ROCK_DARK_SLOPE_DEG + 9, slopeDeg));
+      smoothstep(C.ROCK_DARK_SLOPE_DEG - 4, C.ROCK_DARK_SLOPE_DEG + 6, slopeDeg));
 
-    // Summit rock / light snow on the tallest eastern peaks
-    out.lerp(_tmpC.setHex(C.ROCK_DARK), smoothstep(120, 155, h) * 0.55);
+    out.lerp(_tmpC.setHex(C.ROCK_DARK), smoothstep(125, 150, h) * 0.5);
     out.lerp(_tmpC.setHex(C.SNOW),
-      smoothstep(C.SNOW_MIN - 8, C.SNOW_MIN + 12, h)
-      * (1 - smoothstep(C.ROCK_MIN_SLOPE_DEG + 5, C.ROCK_DARK_SLOPE_DEG + 10, slopeDeg)));
+      smoothstep(C.SNOW_MIN - 4, C.SNOW_MIN + 8, h)
+      * (1 - smoothstep(C.ROCK_MIN_SLOPE_DEG + 2, C.ROCK_DARK_SLOPE_DEG + 6, slopeDeg)));
 
-    // Dense urban plateau tint near downtown / mid-city flats
-    const urban = (1 - smoothstep(12, 28, h))
-      * smoothstep(-200, 80, x)
-      * smoothstep(-50, 200, z)
-      * (1 - smoothstep(380, 520, z));
-    if (urban > 0.05 && slopeDeg < 18) {
-      out.lerp(_tmpC.setHex(C.URBAN), urban * 0.4);
+    // Light urban tint only on very flat mid-city pads
+    const urban = (1 - smoothstep(8, 16, h))
+      * smoothstep(-120, 100, x)
+      * smoothstep(100, 280, z)
+      * (1 - smoothstep(420, 520, z));
+    if (urban > 0.08 && slopeDeg < 14) {
+      out.lerp(_tmpC.setHex(C.URBAN), urban * 0.28);
     }
 
     const road = this.roadAt(x, z);
     if (road > 0) out.lerp(_tmpC.setHex(C.ASPHALT), road);
 
-    const m = 1 + this.detail.noise2D(x * 0.0045, z * 0.0045) * C.NOISE_VARIATION;
+    // Tiny macro variation only — large smear was killing definition
+    const m = 1 + this.detail.noise2D(x * 0.003, z * 0.003) * C.NOISE_VARIATION;
     out.setRGB(
       clamp(out.r * m, 0, 1),
       clamp(out.g * m, 0, 1),
@@ -609,11 +606,11 @@ export class Terrain {
     const geo = new THREE.PlaneGeometry(this.size * 1.9, this.size * 1.9);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x27687c,
-      roughness: 0.2,
-      metalness: 0.14,
+      color: 0x1f6a82,
+      roughness: 0.18,
+      metalness: 0.08,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.94,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.y = WORLD.WATER_LEVEL;

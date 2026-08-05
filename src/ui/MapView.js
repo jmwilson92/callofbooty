@@ -126,29 +126,22 @@ export class MapView {
           if (road > 0.35) {
             r = 58; g = 59; b = 62;
           } else {
-            const tSand = Math.min(1, Math.max(0, (h - waterY) / 4));
-            const tGrass = Math.min(1, Math.max(0, (h - 4) / 28));
-            const tDry = Math.min(1, Math.max(0, (h - 32) / 35));
-            const tChap = Math.min(1, Math.max(0, (h - 42) / 40));
-            const tRock = Math.min(1, Math.max(0, (h - 70) / 40));
-            r = sand[0]; g = sand[1]; b = sand[2];
-            r = lerpByte(r, grass[0], tSand * 0.9);
-            g = lerpByte(g, grass[1], tSand * 0.9);
-            b = lerpByte(b, grass[2], tSand * 0.9);
-            r = lerpByte(r, dry[0], tGrass * 0.45 + tDry * 0.4);
-            g = lerpByte(g, dry[1], tGrass * 0.45 + tDry * 0.4);
-            b = lerpByte(b, dry[2], tGrass * 0.45 + tDry * 0.4);
-            r = lerpByte(r, chap[0], tChap);
-            g = lerpByte(g, chap[1], tChap);
-            b = lerpByte(b, chap[2], tChap);
-            r = lerpByte(r, rock[0], tRock);
-            g = lerpByte(g, rock[1], tRock);
-            b = lerpByte(b, rock[2], tRock);
-            const n = this.terrain.detail.noise2D(x * 0.004, z * 0.004);
-            const m = 1 + n * 0.08;
-            r = Math.min(255, Math.max(0, (r * m) | 0));
-            g = Math.min(255, Math.max(0, (g * m) | 0));
-            b = Math.min(255, Math.max(0, (b * m) | 0));
+            // Harder steps for a cleaner tactical map read
+            let band;
+            if (h < 4) band = sand;
+            else if (h < 28) band = grass;
+            else if (h < 48) band = dry;
+            else if (h < 95) band = chap;
+            else band = rock;
+            r = band[0]; g = band[1]; b = band[2];
+            // Slight slope darken for definition
+            const slope = this.terrain.slopeDegAt(x, z);
+            if (slope > 28) {
+              const t = Math.min(1, (slope - 28) / 30);
+              r = lerpByte(r, rock[0], t * 0.7);
+              g = lerpByte(g, rock[1], t * 0.7);
+              b = lerpByte(b, rock[2], t * 0.7);
+            }
           }
         }
         data[o] = r;

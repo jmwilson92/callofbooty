@@ -342,6 +342,36 @@ function buildCoronado(sink, terrain, rng) {
   }
 }
 
+// --- La Jolla: cliffside village on the NW coast ---
+function buildLaJolla(sink, terrain, rng) {
+  const p = poi('lajolla');
+  const base = p.flatten;
+
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 1.5 - 0.3;
+    const r = 18 + (i % 3) * 14;
+    const w = 12 + rng() * 5;
+    const d = 10 + rng() * 4;
+    const x = p.x + Math.cos(a) * r - w / 2;
+    const z = p.z + Math.sin(a) * r - d / 2;
+    makeBuilding(sink, {
+      x, z, w, d, floors: 1 + Math.floor(rng() * 3),
+      baseY: seatY(terrain, p, x, z, w, d),
+      color: pick(rng, PAL), rng,
+    });
+  }
+
+  makeShed(sink, {
+    x: p.x - 8, z: p.z + 20, w: 18, d: 12, h: 5,
+    baseY: base, color: 0x8fa0a8, doorW: 3,
+  });
+
+  for (let i = 0; i < 10; i++) {
+    const wx = p.x - 45 + i * 9;
+    sink.addSpan(wx, base, p.z + 42, wx + 7, base + 1.15, p.z + 42.3, 0x9a968c, 'thin');
+  }
+}
+
 // --- Radio Tower: summit outpost on the eastern mountain spine ---
 function buildRadioTower(sink, terrain, rng) {
   const p = poi('radiotower');
@@ -413,4 +443,5 @@ export function buildAllStructures(sink, terrain, rng) {
   buildZoo(sink, terrain, rng);
   buildCoronado(sink, terrain, rng);
   buildRadioTower(sink, terrain, rng);
+  buildLaJolla(sink, terrain, rng);
 }

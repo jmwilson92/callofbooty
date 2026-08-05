@@ -18,6 +18,7 @@ Origin ≈ **Mission Valley**. World size: **1800 m**.
 
 | ID | Name | Approx role |
 |----|------|-------------|
+| `lajolla` | **La Jolla** | NW coastal cliffs / village |
 | `kearnymesa` | **Kearny Mesa** | North industrial/commercial mesa |
 | `missionvalley` | **Mission Valley** | I-8 corridor — spawn hub |
 | `airport` | **San Diego International Airport** | Hangars + open bay flats |

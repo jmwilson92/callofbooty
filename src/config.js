@@ -37,7 +37,7 @@ export const PLAYER = {
   CROUCH_LERP: 8.0,
 
   // Mission Valley pad, looking south toward Downtown / MCRD.
-  SPAWN: { x: 0, z: 70 },
+  SPAWN: { x: -20, z: 20 },
 };
 
 export const SLIDE = {
@@ -75,7 +75,7 @@ export const CAMERA = {
   // Eye node chases the capsule eye position; smooths step-ups.
   FOLLOW_RATE: 25,
   NEAR: 0.1,
-  FAR: 2000,
+  FAR: 2800,
 
   BOB_AMP_VERT: 0.035,
   BOB_AMP_HORIZ: 0.025,
@@ -160,104 +160,115 @@ export const WORLD = {
     ],
   },
 
-  FOG_NEAR: 500,
-  FOG_FAR: 1300,
-  SKY_COLOR: 0x87b4cc,
+  // Clearer air: push fog out so the playspace stays readable.
+  FOG_NEAR: 900,
+  FOG_FAR: 2200,
+  SKY_COLOR: 0x9ec6de,
 
-  // Late-afternoon sun off the Pacific
-  SUN_ELEVATION_DEG: 36,
+  // Brighter, cleaner late-afternoon light
+  SUN_ELEVATION_DEG: 42,
   SUN_AZIMUTH_DEG: 245,
-  SUN_INTENSITY: 2.4,
-  SUN_COLOR: 0xffe0b0,
-  AMBIENT_SKY: 0x96b6ce,
+  SUN_INTENSITY: 2.65,
+  SUN_COLOR: 0xffe8c4,
+  AMBIENT_SKY: 0xa8c4d8,
   AMBIENT_GROUND: 0x6e6048,
-  AMBIENT_INTENSITY: 0.72,
+  AMBIENT_INTENSITY: 0.85,
 
   SHADOW_MAP_SIZE: 2048,
-  SHADOW_BOX: 120,
+  SHADOW_BOX: 140,
 };
 
-// SoCal coastal + chaparral palette (satellite: green coast, brown inland hills).
+// SoCal coastal + chaparral palette — higher contrast, less smear.
 export const TERRAIN_COLORS = {
-  SAND: 0xd6c6a2,
-  GRASS: 0x5f7a42,
-  DRY_GRASS: 0xa8945c,
-  CHAPARRAL: 0x8a7348, // brown inland hills from satellite
+  SAND: 0xe0d0a8,
+  GRASS: 0x5a8238,
+  DRY_GRASS: 0xb09850,
+  CHAPARRAL: 0x8f7540,
   DIRT: 0x7a6348,
-  ROCK: 0x8c8a85,
-  ROCK_DARK: 0x5d5b58,
-  SNOW: 0xe8ecf0,
-  ASPHALT: 0x3a3b3e,
-  URBAN: 0x7a7c7e, // dense city plateaus
+  ROCK: 0x969490,
+  ROCK_DARK: 0x555350,
+  SNOW: 0xf0f4f8,
+  ASPHALT: 0x343538,
+  URBAN: 0x8a8c8e,
 
-  SAND_MAX: 3.2,
-  GRASS_MAX: 36,
-  CHAPARRAL_MIN: 40,
-  ALPINE_MIN: 95,          // high-elevation scrub on eastern peaks
-  ROCK_MIN_SLOPE_DEG: 28,
-  ROCK_DARK_SLOPE_DEG: 42,
-  SNOW_MIN: 155,           // light cap only on the tallest summits
-  NOISE_VARIATION: 0.04,
+  // Tighter height bands = clearer biome read
+  SAND_MAX: 2.8,
+  GRASS_MAX: 32,
+  CHAPARRAL_MIN: 45,
+  ALPINE_MIN: 100,
+  ROCK_MIN_SLOPE_DEG: 30,
+  ROCK_DARK_SLOPE_DEG: 44,
+  SNOW_MIN: 158,
+  // Keep low — per-vertex noise is what made terrain look smeared.
+  NOISE_VARIATION: 0.015,
 };
 
-// Playable POIs. Compressed layout from satellite refs.
+// Playable POIs — spaced for readability (min ~220 m between centers).
 // Coord frame: +X east, -Z north, -X west (Pacific). Origin ≈ Mission Valley.
 export const POIS = [
   {
+    id: 'lajolla', name: 'La Jolla',
+    x: -560, z: -520, radius: 90, flatten: 26.0, loot: 'high',
+    note: 'NW coastal cliffs / village',
+  },
+  {
     id: 'kearnymesa', name: 'Kearny Mesa',
-    x: 80, z: -280, radius: 110, flatten: 42.0, loot: 'medium',
-    note: 'North mesa / industrial-commercial plateau (I-805 / SR-163)',
+    x: 140, z: -380, radius: 95, flatten: 44.0, loot: 'medium',
+    note: 'North mesa / industrial-commercial plateau',
   },
   {
     id: 'missionvalley', name: 'Mission Valley',
-    x: 0, z: 90, radius: 120, flatten: 10.0, loot: 'high',
-    note: 'I-8 corridor valley floor — malls, hotels, central rotations',
+    x: -20, z: 40, radius: 100, flatten: 10.0, loot: 'high',
+    note: 'I-8 corridor valley floor — spawn hub',
   },
   {
     id: 'airport', name: 'San Diego International Airport',
-    x: -140, z: 240, radius: 115, flatten: 6.5, loot: 'medium',
-    note: 'SAN / Lindbergh Field — hangars, open sightlines on the bay',
+    x: -260, z: 180, radius: 100, flatten: 6.5, loot: 'medium',
+    note: 'SAN hangars on the bay flats',
   },
   {
     id: 'mcrd', name: 'MCRD Depot',
-    x: -40, z: 280, radius: 100, flatten: 8.0, loot: 'high',
-    note: 'Marine Corps Recruit Depot — barracks grid beside the airport',
+    x: 20, z: 240, radius: 90, flatten: 8.0, loot: 'high',
+    note: 'Barracks grid east of the airport',
   },
   {
     id: 'downtown', name: 'Downtown',
-    x: 40, z: 380, radius: 140, flatten: 9.0, loot: 'highest',
-    note: 'Dense bayfront core — highest loot, vertical play',
+    x: 50, z: 460, radius: 110, flatten: 9.0, loot: 'highest',
+    note: 'Dense bayfront core — highest loot',
   },
   {
     id: 'pointloma', name: 'Point Loma',
-    x: -440, z: 400, radius: 100, flatten: 28.0, loot: 'high',
-    note: 'Peninsula ridge / high ground west of San Diego Bay',
+    x: -540, z: 360, radius: 90, flatten: 30.0, loot: 'high',
+    note: 'Peninsula ridge west of the bay',
   },
   {
     id: 'balboa', name: 'Balboa Park',
-    x: 140, z: 260, radius: 105, flatten: 18.0, loot: 'high',
-    note: 'Museum / park plateau NE of downtown (SR-163 corridor)',
+    x: 260, z: 300, radius: 95, flatten: 20.0, loot: 'high',
+    note: 'Museum / park plateau NE of downtown',
   },
   {
     id: 'zoo', name: 'San Diego Zoo',
-    x: 180, z: 200, radius: 90, flatten: 22.0, loot: 'high',
-    note: 'Zoo grounds on the north edge of Balboa Park',
+    x: 320, z: 140, radius: 85, flatten: 24.0, loot: 'high',
+    note: 'Zoo grounds north of Balboa',
   },
   {
     id: 'coronado', name: 'Coronado',
-    x: -200, z: 520, radius: 90, flatten: 7.5, loot: 'high',
-    note: 'Island / spit across San Diego Bay',
+    x: -260, z: 620, radius: 85, flatten: 7.5, loot: 'high',
+    note: 'Island across San Diego Bay',
   },
   {
     id: 'radiotower', name: 'Radio Tower',
-    // Central summit of the far-east massif (see EAST_MOUNTAINS.peaks).
-    x: 700, z: -60, radius: 85, flatten: 138.0, loot: 'high',
-    note: 'High-loot outpost on the eastern mountain spine',
+    x: 720, z: -40, radius: 80, flatten: 142.0, loot: 'high',
+    note: 'Summit outpost on the eastern mountain spine',
   },
 ];
 
 // Arterials between POIs.
 export const ROAD_LINKS = [
+  ['lajolla', 'kearnymesa'],
+  ['lajolla', 'missionvalley'],
+  ['lajolla', 'airport'],
+  ['lajolla', 'pointloma'],
   ['kearnymesa', 'missionvalley'],
   ['missionvalley', 'airport'],
   ['missionvalley', 'downtown'],
@@ -268,7 +279,6 @@ export const ROAD_LINKS = [
   ['mcrd', 'downtown'],
   ['pointloma', 'airport'],
   ['pointloma', 'downtown'],
-  ['pointloma', 'mcrd'],
   ['pointloma', 'coronado'],
   ['kearnymesa', 'downtown'],
   ['kearnymesa', 'zoo'],
@@ -277,7 +287,6 @@ export const ROAD_LINKS = [
   ['balboa', 'missionvalley'],
   ['coronado', 'downtown'],
   ['coronado', 'airport'],
-  // Switchbacks / approach roads up the east wall
   ['radiotower', 'kearnymesa'],
   ['radiotower', 'missionvalley'],
   ['radiotower', 'balboa'],
