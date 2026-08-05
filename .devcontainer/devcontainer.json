@@ -1,0 +1,20 @@
+{
+  "name": "callofbooty",
+  "forwardPorts": [5173],
+  "portsAttributes": {
+    "5173": {
+      "label": "Call of Booty (Vite)",
+      "onAutoForward": "notify",
+      "requireLocalPort": true
+    }
+  },
+  "postCreateCommand": "npm install",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "remote.autoForwardPorts": true,
+        "remote.autoForwardPortsSource": "hybrid"
+      }
+    }
+  }
+}
