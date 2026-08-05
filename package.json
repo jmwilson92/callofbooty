@@ -1,0 +1,20 @@
+{
+  "name": "callofbooty",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Browser-based battle royale FPS. Phase 1: movement, camera, world.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "smoketest": "node tools/smoketest.mjs"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1",
+    "vite": "^5.4.10"
+  }
+}
