@@ -168,14 +168,14 @@ export const WORLD = {
   // Brighter, cleaner late-afternoon light
   SUN_ELEVATION_DEG: 42,
   SUN_AZIMUTH_DEG: 245,
-  SUN_INTENSITY: 2.65,
-  SUN_COLOR: 0xffe8c4,
-  AMBIENT_SKY: 0xa8c4d8,
-  AMBIENT_GROUND: 0x6e6048,
-  AMBIENT_INTENSITY: 0.85,
+  SUN_INTENSITY: 2.85,
+  SUN_COLOR: 0xffebd0,
+  AMBIENT_SKY: 0xb0cce0,
+  AMBIENT_GROUND: 0x7a6a50,
+  AMBIENT_INTENSITY: 0.92,
 
   SHADOW_MAP_SIZE: 2048,
-  SHADOW_BOX: 140,
+  SHADOW_BOX: 160,
 };
 
 // SoCal coastal + chaparral palette — higher contrast, less smear.
@@ -397,18 +397,18 @@ export const PROPS = {
 // World-detail structure scatter (procedural kits in world/structures/).
 // Counts are targets; placement retries if terrain is bad.
 export const STRUCTURES = {
-  SUBURBAN: 70,      // suburban homes
-  TRAILER: 12,       // trailer park clusters
-  GAS: 14,           // gas stations near roads
-  RESTAURANT: 18,    // restaurants / fast food
-  AUTO: 10,          // auto repair shops
-  FIRE: 6,           // fire stations
-  BUSINESS: 16,      // office / business centers
-  SKY: 8,            // skyscrapers around downtown
-  BOAT: 10,          // boat houses on coasts/bays
-  BILLBOARD: 12,
-  VEHICLE: 40,       // parked cars near roads
-  ANIMALS: 22,       // abstract zoo creatures at San Diego Zoo
+  SUBURBAN: 110,
+  TRAILER: 16,
+  GAS: 20,
+  RESTAURANT: 28,
+  AUTO: 14,
+  FIRE: 8,
+  BUSINESS: 24,
+  SKY: 14,
+  BOAT: 16,
+  BILLBOARD: 20,
+  VEHICLE: 70,
+  ANIMALS: 36,
 };
 
 export const COLLISION = {

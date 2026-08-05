@@ -145,16 +145,29 @@ export function scatterStructures(sink, terrain, rng) {
     });
   }
 
-  // --- Skyscrapers near downtown ---
+  // --- Skyscrapers: dense downtown core grid + ring ---
   const dt = poi('downtown');
   if (dt) {
-    for (let n = 0; n < S.SKY; n++) {
+    // Core grid for a real skyline silhouette
+    const grid = [
+      [-35, -30], [0, -40], [40, -25], [-40, 10], [15, 5], [50, 15],
+      [-20, 35], [25, 40], [-55, -10], [55, -5], [0, 55], [-15, -55],
+    ];
+    for (const [ox, oz] of grid) {
+      if (stats.sky >= S.SKY) break;
+      const x = dt.x + ox;
+      const z = dt.z + oz;
+      if (terrain.heightAt(x, z) < 2 || terrain.slopeDegAt(x, z) > 18) continue;
+      placeSkyscraper(sink, terrain, x - 8, z - 8, rng);
+      stats.sky++;
+    }
+    // Outer ring fillers
+    for (let n = stats.sky; n < S.SKY; n++) {
       const a = rng() * Math.PI * 2;
-      const r = dt.radius * (0.55 + rng() * 0.7);
+      const r = dt.radius * (0.4 + rng() * 0.9);
       const x = dt.x + Math.cos(a) * r;
       const z = dt.z + Math.sin(a) * r;
-      if (terrain.heightAt(x, z) < 2) continue;
-      if (terrain.slopeDegAt(x, z) > 16) continue;
+      if (terrain.heightAt(x, z) < 2 || terrain.slopeDegAt(x, z) > 16) continue;
       placeSkyscraper(sink, terrain, x - 10, z - 10, rng);
       stats.sky++;
     }
@@ -240,13 +253,13 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
     stats.boat++;
   }
 
-  // Zoo animals
+  // Zoo animals — mixed habitats around the pad
   const zoo = poi('zoo');
   if (zoo) {
-    const kinds = ['large', 'tall', 'bulk', 'small', 'bird', 'large', 'small', 'bulk'];
+    const kinds = ['large', 'tall', 'bulk', 'small', 'bird', 'long', 'large', 'tall', 'small', 'bird', 'bulk', 'long'];
     for (let i = 0; i < STRUCTURES.ANIMALS; i++) {
-      const a = rng() * Math.PI * 2;
-      const r = 15 + rng() * 45;
+      const a = (i / STRUCTURES.ANIMALS) * Math.PI * 2 + rng() * 0.4;
+      const r = 12 + (i % 5) * 10 + rng() * 8;
       const x = zoo.x + Math.cos(a) * r;
       const z = zoo.z + Math.sin(a) * r;
       const y = terrain.heightAt(x, z);
@@ -254,48 +267,93 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
       placeAnimal(sink, x, z, y, rng, kinds[i % kinds.length]);
       stats.animal++;
     }
+    // Extra habitat sheds around zoo edge
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      placeRestaurant(sink, terrain, zoo.x + Math.cos(a) * 55, zoo.z + Math.sin(a) * 55, rng, true);
+      stats.restaurant++;
+    }
   }
 
-  // Downtown extra skyscraper cluster already partially handled; add fire + business
+  // Downtown civic + strip
   if (dt) {
-    placeFireStation(sink, terrain, dt.x - 70, dt.z - 40, rng);
-    placeBusinessCenter(sink, terrain, dt.x + 60, dt.z - 50, rng);
-    placeGasStation(sink, terrain, dt.x - 90, dt.z + 20, rng);
+    placeFireStation(sink, terrain, dt.x - 80, dt.z - 50, rng);
+    placeBusinessCenter(sink, terrain, dt.x + 70, dt.z - 55, rng);
+    placeBusinessCenter(sink, terrain, dt.x - 60, dt.z + 50, rng);
+    placeGasStation(sink, terrain, dt.x - 100, dt.z + 25, rng);
+    placeRestaurant(sink, terrain, dt.x + 85, dt.z + 30, rng, true);
+    placeRestaurant(sink, terrain, dt.x + 40, dt.z - 70, rng, false);
+    placeBillboard(sink, terrain, dt.x - 50, dt.z + 70, rng);
     stats.fire++;
-    stats.business++;
+    stats.business += 2;
     stats.gas++;
+    stats.restaurant += 2;
+    stats.billboard++;
   }
 
-  // Kearny Mesa commercial strip
+  // Balboa food + signs
+  const bal = poi('balboa');
+  if (bal) {
+    placeRestaurant(sink, terrain, bal.x - 40, bal.z + 50, rng, false);
+    placeBillboard(sink, terrain, bal.x + 50, bal.z - 30, rng);
+    stats.restaurant++;
+    stats.billboard++;
+  }
+
+  // Kearny Mesa commercial strip (dense)
   const km = poi('kearnymesa');
   if (km) {
-    placeBusinessCenter(sink, terrain, km.x + 40, km.z + 30, rng);
-    placeAutoRepair(sink, terrain, km.x - 50, km.z + 20, rng);
-    placeGasStation(sink, terrain, km.x - 30, km.z - 50, rng);
-    placeRestaurant(sink, terrain, km.x + 55, km.z - 40, rng, true);
-    stats.business++;
+    placeBusinessCenter(sink, terrain, km.x + 45, km.z + 35, rng);
+    placeBusinessCenter(sink, terrain, km.x - 55, km.z - 25, rng);
+    placeAutoRepair(sink, terrain, km.x - 55, km.z + 25, rng);
+    placeGasStation(sink, terrain, km.x - 35, km.z - 55, rng);
+    placeRestaurant(sink, terrain, km.x + 60, km.z - 45, rng, true);
+    placeRestaurant(sink, terrain, km.x + 30, km.z + 50, rng, true);
+    placeFireStation(sink, terrain, km.x + 70, km.z + 10, rng);
+    placeBillboard(sink, terrain, km.x - 70, km.z + 40, rng);
+    stats.business += 2;
     stats.auto++;
     stats.gas++;
-    stats.restaurant++;
-  }
-
-  // Mission Valley mall-adjacent food + gas
-  if (mv) {
-    placeRestaurant(sink, terrain, mv.x + 70, mv.z + 20, rng, true);
-    placeRestaurant(sink, terrain, mv.x - 70, mv.z - 15, rng, false);
-    placeGasStation(sink, terrain, mv.x + 50, mv.z - 50, rng);
     stats.restaurant += 2;
-    stats.gas++;
+    stats.fire++;
+    stats.billboard++;
   }
 
-  // MCRD / Airport support: gas + auto
+  // Mission Valley mall strip
+  if (mv) {
+    placeRestaurant(sink, terrain, mv.x + 75, mv.z + 25, rng, true);
+    placeRestaurant(sink, terrain, mv.x - 75, mv.z - 20, rng, false);
+    placeRestaurant(sink, terrain, mv.x + 40, mv.z - 55, rng, true);
+    placeGasStation(sink, terrain, mv.x + 55, mv.z - 55, rng);
+    placeBusinessCenter(sink, terrain, mv.x - 90, mv.z + 30, rng);
+    placeBillboard(sink, terrain, mv.x + 100, mv.z, rng);
+    stats.restaurant += 3;
+    stats.gas++;
+    stats.business++;
+    stats.billboard++;
+  }
+
+  // MCRD / Airport support
   const mcrd = poi('mcrd');
   if (mcrd) {
-    placeFireStation(sink, terrain, mcrd.x + 50, mcrd.z - 30, rng);
+    placeFireStation(sink, terrain, mcrd.x + 55, mcrd.z - 35, rng);
+    placeBillboard(sink, terrain, mcrd.x - 40, mcrd.z + 40, rng);
     stats.fire++;
+    stats.billboard++;
   }
   if (ap) {
-    placeAutoRepair(sink, terrain, ap.x + 70, ap.z - 20, rng);
+    placeAutoRepair(sink, terrain, ap.x + 75, ap.z - 25, rng);
+    placeGasStation(sink, terrain, ap.x + 40, ap.z - 60, rng);
+    placeHarborPier(sink, terrain, ap.x - 120, ap.z + 20, rng);
     stats.auto++;
+    stats.gas++;
+  }
+
+  // Coronado resort extras
+  if (cor) {
+    placeRestaurant(sink, terrain, cor.x + 40, cor.z - 30, rng, false);
+    placeBoatHouse(sink, terrain, cor.x - 40, cor.z + 20, rng);
+    stats.restaurant++;
+    stats.boat++;
   }
 }
