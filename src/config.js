@@ -209,8 +209,8 @@ export const TERRAIN_COLORS = {
 export const POIS = [
   {
     id: 'lajolla', name: 'La Jolla',
-    x: -560, z: -520, loot: 'high',
-    note: 'NW coastal cliffs / village',
+    x: -480, z: -480, loot: 'high',
+    note: 'NW coastal cliffs / village (on land)',
   },
   {
     id: 'kearnymesa', name: 'Kearny Mesa',
@@ -224,23 +224,23 @@ export const POIS = [
   },
   {
     id: 'airport', name: 'San Diego International Airport',
-    x: -260, z: 180, loot: 'medium',
-    note: 'SAN hangars on bay flats',
+    x: -160, z: 200, loot: 'medium',
+    note: 'SAN hangars on bay flats (dry apron)',
   },
   {
     id: 'mcrd', name: 'MCRD Depot',
-    x: 20, z: 240, loot: 'high',
+    x: 40, z: 260, loot: 'high',
     note: 'Barracks grid east of the airport',
   },
   {
     id: 'downtown', name: 'Downtown',
-    x: 40, z: 450, loot: 'highest',
+    x: 60, z: 420, loot: 'highest',
     note: 'Bayfront skyline (downtown.png)',
   },
   {
     id: 'pointloma', name: 'Point Loma',
-    x: -540, z: 360, loot: 'high',
-    note: 'Peninsula ridge west of the bay',
+    x: -420, z: 400, loot: 'high',
+    note: 'Peninsula ridge (on Point Loma land mass)',
   },
   {
     id: 'balboa', name: 'Balboa Park',
@@ -254,12 +254,12 @@ export const POIS = [
   },
   {
     id: 'coronado', name: 'Coronado',
-    x: -260, z: 620, loot: 'high',
-    note: 'Island across San Diego Bay',
+    x: -200, z: 520, loot: 'high',
+    note: 'Island land mass across San Diego Bay',
   },
   {
     id: 'radiotower', name: 'Radio Tower',
-    x: 720, z: -40, loot: 'high',
+    x: 700, z: -60, loot: 'high',
     note: 'Summit outpost on eastern mountain spine',
   },
 ];
