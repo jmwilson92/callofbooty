@@ -1,4 +1,16 @@
 {
   "remote.autoForwardPorts": true,
-  "remote.autoForwardPortsSource": "hybrid"
+  "remote.autoForwardPortsSource": "hybrid",
+  "remote.portsAttributes": {
+    "5173": {
+      "label": "Call of Booty",
+      "onAutoForward": "openBrowserOnce",
+      "elevateIfNeeded": false,
+      "requireLocalPort": true
+    },
+    "3000": {
+      "label": "Call of Booty (alt)",
+      "onAutoForward": "openBrowserOnce"
+    }
+  }
 }
