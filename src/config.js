@@ -174,7 +174,7 @@ export const TERRAIN_COLORS = {
   NOISE_VARIATION: 0.04,
 };
 
-// Six playable POIs (user-specified). Compressed layout from satellite refs.
+// Playable POIs. Compressed layout from satellite refs.
 // Coord frame: +X east, -Z north, -X west (Pacific). Origin ≈ Mission Valley.
 export const POIS = [
   {
@@ -207,21 +207,44 @@ export const POIS = [
     x: -440, z: 400, radius: 100, flatten: 28.0, loot: 'high',
     note: 'Peninsula ridge / high ground west of San Diego Bay',
   },
+  {
+    id: 'balboa', name: 'Balboa Park',
+    x: 140, z: 260, radius: 105, flatten: 18.0, loot: 'high',
+    note: 'Museum / park plateau NE of downtown (SR-163 corridor)',
+  },
+  {
+    id: 'zoo', name: 'San Diego Zoo',
+    x: 180, z: 200, radius: 90, flatten: 22.0, loot: 'high',
+    note: 'Zoo grounds on the north edge of Balboa Park',
+  },
+  {
+    id: 'coronado', name: 'Coronado',
+    x: -200, z: 520, radius: 90, flatten: 7.5, loot: 'high',
+    note: 'Island / spit across San Diego Bay',
+  },
 ];
 
-// Arterials between the six POIs.
+// Arterials between POIs.
 export const ROAD_LINKS = [
-  ['kearnymesa', 'missionvalley'],   // 163 / 805 south into the valley
-  ['missionvalley', 'airport'],      // valley → bay flats
-  ['missionvalley', 'downtown'],     // valley → city
-  ['missionvalley', 'mcrd'],         // valley → depot
-  ['airport', 'mcrd'],               // adjacent bay complexes
-  ['airport', 'downtown'],           // Harbor Dr
-  ['mcrd', 'downtown'],              // Pacific Hwy corridor
-  ['pointloma', 'airport'],          // peninsula → SAN
-  ['pointloma', 'downtown'],         // long bay approach
-  ['pointloma', 'mcrd'],             // peninsula → depot
-  ['kearnymesa', 'downtown'],        // long N–S arterial
+  ['kearnymesa', 'missionvalley'],
+  ['missionvalley', 'airport'],
+  ['missionvalley', 'downtown'],
+  ['missionvalley', 'mcrd'],
+  ['missionvalley', 'balboa'],
+  ['airport', 'mcrd'],
+  ['airport', 'downtown'],
+  ['mcrd', 'downtown'],
+  ['pointloma', 'airport'],
+  ['pointloma', 'downtown'],
+  ['pointloma', 'mcrd'],
+  ['pointloma', 'coronado'],
+  ['kearnymesa', 'downtown'],
+  ['kearnymesa', 'zoo'],
+  ['downtown', 'balboa'],
+  ['balboa', 'zoo'],
+  ['balboa', 'missionvalley'],
+  ['coronado', 'downtown'],
+  ['coronado', 'airport'],
 ];
 
 // Multi-point freeways from the satellite map (world metres). Drawn as road corridors.

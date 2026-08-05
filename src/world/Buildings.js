@@ -230,6 +230,118 @@ function buildKearnyMesa(sink, terrain, rng) {
   }
 }
 
+// --- Balboa Park: museum halls + plaza walls ---
+function buildBalboa(sink, terrain, rng) {
+  const p = poi('balboa');
+  const base = p.flatten;
+
+  // Large exhibition halls
+  makeShed(sink, {
+    x: p.x - 40, z: p.z - 28, w: 48, d: 26, h: 14,
+    baseY: base, color: 0x9a968c, doorW: 6,
+  });
+  makeShed(sink, {
+    x: p.x + 20, z: p.z - 20, w: 36, d: 22, h: 12,
+    baseY: base, color: 0x8a8880, doorW: 5,
+  });
+
+  // Museum wings / galleries
+  for (let i = 0; i < 3; i++) {
+    makeBuilding(sink, {
+      x: p.x - 50 + i * 42, z: p.z + 18, w: 22, d: 16,
+      floors: 2 + (i === 1 ? 1 : 0),
+      baseY: base, color: pick(rng, PAL), rng,
+    });
+  }
+
+  // Plaza edge walls (low cover)
+  for (let i = 0; i < 14; i++) {
+    const fx = p.x - 55 + i * 8;
+    sink.addSpan(fx, base, p.z + 48, fx + 6.5, base + 1.15, p.z + 48.3, 0x87857f, 'thin');
+  }
+}
+
+// --- San Diego Zoo: pavilions + winding low walls / habitat sheds ---
+function buildZoo(sink, terrain, rng) {
+  const p = poi('zoo');
+  const base = p.flatten;
+
+  // Entry / large pavilion
+  makeShed(sink, {
+    x: p.x - 20, z: p.z - 30, w: 40, d: 24, h: 11,
+    baseY: base, color: 0x6b7f43, doorW: 6,
+  });
+
+  // Habitat sheds scattered on a ring
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const r = 28 + (i % 3) * 10;
+    const w = 12 + rng() * 6;
+    const d = 10 + rng() * 4;
+    const x = p.x + Math.cos(a) * r - w / 2;
+    const z = p.z + Math.sin(a) * r - d / 2;
+    makeShed(sink, {
+      x, z, w, d, h: 4 + rng() * 3,
+      baseY: seatY(terrain, p, x, z, w, d),
+      color: pick(rng, [0x6b7f43, 0x8a8b52, 0x7a4a3c, 0x8a8880]),
+      doorW: 2.5,
+    });
+  }
+
+  // Viewing platforms / mid buildings
+  makeBuilding(sink, {
+    x: p.x - 8, z: p.z + 8, w: 16, d: 14, floors: 2,
+    baseY: base, color: PAL[5], rng,
+  });
+
+  // Winding low habitat walls for cover
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2;
+    const r = 42;
+    const x = p.x + Math.cos(a) * r;
+    const z = p.z + Math.sin(a) * r;
+    const x2 = p.x + Math.cos(a + 0.25) * r;
+    const z2 = p.z + Math.sin(a + 0.25) * r;
+    const minX = Math.min(x, x2), maxX = Math.max(x, x2);
+    const minZ = Math.min(z, z2), maxZ = Math.max(z, z2);
+    sink.addSpan(
+      minX, base, minZ,
+      Math.max(minX + 1.2, maxX), base + 1.3, Math.max(minZ + 0.5, maxZ),
+      0x6b5943, 'thin'
+    );
+  }
+}
+
+// --- Coronado: resort strip across the bay ---
+function buildCoronado(sink, terrain, rng) {
+  const p = poi('coronado');
+  const base = p.flatten;
+
+  // Hotel del–scale block
+  makeBuilding(sink, {
+    x: p.x - 30, z: p.z - 16, w: 40, d: 24, floors: 5,
+    baseY: base, color: 0x9a968c, rng,
+  });
+  makeBuilding(sink, {
+    x: p.x + 18, z: p.z - 12, w: 24, d: 18, floors: 3,
+    baseY: base, color: PAL[5], rng,
+  });
+
+  // Beach cottages / small sheds along the strip
+  for (let i = 0; i < 7; i++) {
+    makeShed(sink, {
+      x: p.x - 45 + i * 14, z: p.z + 24, w: 10, d: 7, h: 3.4,
+      baseY: base, color: pick(rng, PAL),
+    });
+  }
+
+  // Seawall cover
+  for (let i = 0; i < 12; i++) {
+    const wx = p.x - 50 + i * 9;
+    sink.addSpan(wx, base, p.z + 42, wx + 7.5, base + 1.1, p.z + 42.35, 0x9a968c, 'thin');
+  }
+}
+
 export function buildAllStructures(sink, terrain, rng) {
   buildDowntown(sink, terrain, rng);
   buildAirport(sink, terrain, rng);
@@ -237,4 +349,7 @@ export function buildAllStructures(sink, terrain, rng) {
   buildPointLoma(sink, terrain, rng);
   buildMissionValley(sink, terrain, rng);
   buildKearnyMesa(sink, terrain, rng);
+  buildBalboa(sink, terrain, rng);
+  buildZoo(sink, terrain, rng);
+  buildCoronado(sink, terrain, rng);
 }

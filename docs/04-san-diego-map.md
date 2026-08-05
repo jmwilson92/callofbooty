@@ -14,7 +14,7 @@ References: `satellite view.png`, `terrain map.png` (repo root).
 
 Origin ≈ **Mission Valley**. World size: **1800 m**.
 
-## Six POIs (playable)
+## POIs (playable)
 
 | ID | Name | Approx role |
 |----|------|-------------|
@@ -24,6 +24,9 @@ Origin ≈ **Mission Valley**. World size: **1800 m**.
 | `mcrd` | **MCRD Depot** | Barracks grid beside the airport |
 | `downtown` | **Downtown** | Dense core, highest loot |
 | `pointloma` | **Point Loma** | Peninsula high ground |
+| `balboa` | **Balboa Park** | Museums / park NE of downtown |
+| `zoo` | **San Diego Zoo** | Zoo grounds north of Balboa |
+| `coronado` | **Coronado** | Island across San Diego Bay |
 
 ## Geography (still present under the POIs)
 
