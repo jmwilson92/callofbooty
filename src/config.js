@@ -96,7 +96,7 @@ export const WORLD = {
   // +X = east, -Z = north, -X = west (Pacific). Origin ≈ Mission Valley / I-8 × I-805.
   SIZE: 1800,
   CELL: 4,
-  MAX_ELEVATION: 120,
+  MAX_ELEVATION: 185,
   WATER_LEVEL: 0.0,
 
   NOISE_OCTAVES: 5,
@@ -128,15 +128,40 @@ export const WORLD = {
   // Coronado island / spit across the bay.
   CORONADO: { x: -200, z: 520, rx: 110, rz: 55, height: 8 },
 
-  // Mission Trails + eastern foothills (terrain map: real relief east of the city).
-  EAST_HILLS: { x: 520, z: 40, radius: 340, peak: 105 },
+  // Foothills just west of the true mountain wall (Mission Trails–scale).
+  EAST_HILLS: { x: 480, z: 20, radius: 280, peak: 95 },
   // Secondary ridge: Clairemont / Linda Vista mesas north of Mission Valley.
   NORTH_MESA: { x: -80, z: -220, radius: 260, peak: 52 },
   // Mission Valley trench (I-8 corridor) — low E–W slot through the middle.
   MISSION_VALLEY: { z: 90, halfWidth: 95, depth: 14 },
 
-  FOG_NEAR: 480,
-  FOG_FAR: 1200,
+  // Far-eastern mountain system (stylized BR wall — not GIS-accurate).
+  // N–S spine along the map's east edge with secondary ridges + high peaks.
+  EAST_MOUNTAINS: {
+    // Main spine runs north–south inside the eastern playable rim
+    // (kept west of falloff so peaks aren't shaved by the map edge).
+    spineX: 680,
+    spineHalfWidth: 260,   // how far west the massif reaches
+    foothillStart: 320,    // world X where foothills begin rising hard
+    peakMax: 180,          // highest summit Y
+    peakMin: 100,          // saddle / lower ridge Y
+    // Named summit centers (x, z, peakY, radius)
+    peaks: [
+      { x: 640, z: -400, peak: 172, r: 170 }, // north massif
+      { x: 700, z: -60, peak: 180, r: 190 },  // central high peak
+      { x: 660, z: 240, peak: 162, r: 160 },  // south-central
+      { x: 620, z: 500, peak: 150, r: 150 },  // southern shoulder
+    ],
+    // Secondary N–S ridges offset west of the spine (layered ranges)
+    ridges: [
+      { x: 520, z: -220, rx: 95, rz: 300, peak: 118 },
+      { x: 560, z: 160, rx: 90, rz: 280, peak: 128 },
+      { x: 500, z: 20, rx: 75, rz: 220, peak: 105 },
+    ],
+  },
+
+  FOG_NEAR: 500,
+  FOG_FAR: 1300,
   SKY_COLOR: 0x87b4cc,
 
   // Late-afternoon sun off the Pacific
@@ -168,9 +193,10 @@ export const TERRAIN_COLORS = {
   SAND_MAX: 3.2,
   GRASS_MAX: 36,
   CHAPARRAL_MIN: 40,
-  ROCK_MIN_SLOPE_DEG: 30,
-  ROCK_DARK_SLOPE_DEG: 44,
-  SNOW_MIN: 140,
+  ALPINE_MIN: 95,          // high-elevation scrub on eastern peaks
+  ROCK_MIN_SLOPE_DEG: 28,
+  ROCK_DARK_SLOPE_DEG: 42,
+  SNOW_MIN: 155,           // light cap only on the tallest summits
   NOISE_VARIATION: 0.04,
 };
 

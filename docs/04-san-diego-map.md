@@ -31,8 +31,19 @@ Origin ≈ **Mission Valley**. World size: **1800 m**.
 ## Geography (still present under the POIs)
 
 Pacific west, Point Loma peninsula, San Diego Bay, Mission Bay lagoon,
-Mission Valley trench, mesa/canyon relief, eastern hills, freeways
+Mission Valley trench, mesa/canyon relief, freeways
 (I-5 / I-8 / I-15 / I-805 / SR-52 / SR-163).
+
+### Far-eastern mountain system
+
+Stylized BR wall on the east rim (`WORLD.EAST_MOUNTAINS`) — **not GIS-accurate**,
+but necessary for map readable high ground and a hard eastern edge:
+
+- N–S spine near `x ≈ 720`
+- Layered foothill ridges west of the spine
+- Four summit masses (peaks ~145–175 m)
+- Canyon cuts between ridges for rotation routes
+- Chaparral → rock → light summit snow vertex colors
 
 ## Spawn
 

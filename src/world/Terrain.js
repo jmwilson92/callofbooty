@@ -42,6 +42,65 @@ export class Terrain {
     return ((x - cx) / rx) ** 2 + ((z - cz) / rz) ** 2;
   }
 
+  /**
+   * Far-east mountain wall: N–S spine, layered ridges, discrete summits.
+   * Stylized for BR high ground — not GIS-accurate.
+   */
+  _applyEastMountains(x, z, base, n) {
+    const M = WORLD.EAST_MOUNTAINS;
+    if (!M) return base;
+
+    // Broad foothill ramp from mid-map toward the east rim
+    const foothill = smoothstep(M.foothillStart, M.spineX, x);
+    if (foothill < 0.015) return base;
+
+    // Spine envelope: strongest near spineX, falls off west into the city
+    const distWest = M.spineX - x;
+    const spineMask = 1 - smoothstep(0, M.spineHalfWidth, Math.max(0, distWest));
+    // Soften past the spine toward the hard map rim
+    const pastSpine = smoothstep(M.spineX, M.spineX + 140, x);
+    let mass = foothill * Math.max(spineMask, foothill * 0.4) * (1 - pastSpine * 0.35);
+
+    // Ridged mountain noise along the range
+    const ridgeN = this._ridged(x * 0.85 + 120, z * 1.1, 5, 0.0018, 2.15, 0.52);
+    const detailN = this._ridged(x + 200, z - 80, 3, 0.0045, 2.3, 0.5);
+
+    // Base range height along the spine
+    let rangeH = lerp(M.peakMin, M.peakMax * 0.78, ridgeN);
+    rangeH += (detailN - 0.5) * 28;
+    rangeH += (n - 0.5) * 12;
+
+    // Discrete summits — pull hard toward authored peak heights
+    for (const pk of M.peaks) {
+      const d = Math.hypot(x - pk.x, z - pk.z);
+      const w = 1 - smoothstep(pk.r * 0.2, pk.r, d);
+      if (w > 0) {
+        const tip = pk.peak * (0.72 + ridgeN * 0.18 + detailN * 0.1);
+        rangeH = Math.max(rangeH, lerp(rangeH, tip, Math.pow(w, 1.35)));
+        mass = Math.max(mass, w * Math.max(foothill, 0.75));
+      }
+    }
+
+    // Secondary ridge ellipses (layered ranges west of the main spine)
+    for (const rg of M.ridges) {
+      const e = this._ellipse(x, z, rg.x, rg.z, rg.rx, rg.rz);
+      const w = 1 - smoothstep(0.4, 1.12, e);
+      if (w > 0) {
+        const h = rg.peak * (0.55 + ridgeN * 0.45);
+        rangeH = Math.max(rangeH, lerp(rangeH, h, w * w));
+        mass = Math.max(mass, w * 0.9 * foothill);
+      }
+    }
+
+    // Canyon cuts between ridges (readable valleys for rotation)
+    const gully = Math.pow(1 - ridgeN, 2) * 32 * mass;
+    rangeH -= gully * 0.55;
+
+    // Blend mountain mass over city/foothill base — prefer mountain height
+    const blend = Math.pow(clamp(mass, 0, 1), 0.95);
+    return lerp(base, Math.max(base + 8 * blend, rangeH), blend);
+  }
+
   // Ridged multifractal — mesa tops + canyon cuts (San Diego signature).
   _ridged(x, z, octaves, freq, lac, gain) {
     let sum = 0;
@@ -110,7 +169,7 @@ export class Terrain {
           base -= valley.depth * vMask * vAlong;
         }
 
-        // Eastern mountain mass (Mission Trails → El Cajon foothills)
+        // Near-east foothills (Mission Trails–scale mass before the true wall)
         const hd = Math.hypot(x - hills.x, z - hills.z);
         const hw = 1 - smoothstep(hills.radius * 0.3, hills.radius, hd);
         if (hw > 0) {
@@ -118,6 +177,9 @@ export class Terrain {
           const peak = hills.peak * (0.4 + ridge * 0.6);
           base = lerp(base, peak, hw * hw);
         }
+
+        // Far-eastern mountain system — stylized BR wall (see EAST_MOUNTAINS).
+        base = this._applyEastMountains(x, z, base, n);
 
         // La Jolla / Torrey headland boost
         const lj = 1 - smoothstep(0, 200, Math.hypot(x - (-520), z - (-420)));
@@ -434,10 +496,24 @@ export class Terrain {
     const inland = smoothstep(-50, 450, x) * smoothstep(8, 50, h);
     out.lerp(_tmpC.setHex(C.CHAPARRAL), inland * 0.35);
 
+    // Alpine scrub on the eastern massif before pure rock/snow
+    if (C.ALPINE_MIN != null) {
+      out.lerp(_tmpC.setHex(C.CHAPARRAL),
+        smoothstep(C.ALPINE_MIN - 15, C.ALPINE_MIN + 25, h) * 0.45);
+      out.lerp(_tmpC.setHex(C.ROCK),
+        smoothstep(C.ALPINE_MIN + 20, C.ALPINE_MIN + 55, h) * 0.5);
+    }
+
     out.lerp(_tmpC.setHex(C.ROCK),
       smoothstep(C.ROCK_MIN_SLOPE_DEG - 7, C.ROCK_MIN_SLOPE_DEG + 9, slopeDeg));
     out.lerp(_tmpC.setHex(C.ROCK_DARK),
       smoothstep(C.ROCK_DARK_SLOPE_DEG - 7, C.ROCK_DARK_SLOPE_DEG + 9, slopeDeg));
+
+    // Summit rock / light snow on the tallest eastern peaks
+    out.lerp(_tmpC.setHex(C.ROCK_DARK), smoothstep(120, 155, h) * 0.55);
+    out.lerp(_tmpC.setHex(C.SNOW),
+      smoothstep(C.SNOW_MIN - 8, C.SNOW_MIN + 12, h)
+      * (1 - smoothstep(C.ROCK_MIN_SLOPE_DEG + 5, C.ROCK_DARK_SLOPE_DEG + 10, slopeDeg)));
 
     // Dense urban plateau tint near downtown / mid-city flats
     const urban = (1 - smoothstep(12, 28, h))
