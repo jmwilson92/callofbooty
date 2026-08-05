@@ -12,7 +12,14 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173 and click to lock the pointer.
+Vite listens on **0.0.0.0:5173** so GitHub Codespaces can forward the port.
+
+**Codespaces:** after `npm run dev`, open the **Ports** tab → find **5173** → **Open in Browser**
+(or click the globe icon). If 5173 is missing, click **Forward a Port** and enter `5173`.
+
+**Local:** open http://localhost:5173
+
+Click the page to lock the pointer.
 
 | Input | Action |
 |---|---|
