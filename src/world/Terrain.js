@@ -1,14 +1,12 @@
 import * as THREE from 'three';
 import {
-  WORLD, TERRAIN_COLORS, POIS, ROADS, ROAD_LINKS, FREEWAYS,
+  WORLD, TERRAIN_COLORS, ROADS,
 } from '../config.js';
 import { Simplex, smoothstep, clamp, lerp } from '../core/Noise.js';
-
+import { buildRoadPolylines, polylinesToSegments } from './Roads.js';
 
 // San Diego heightfield shaped from satellite_view.png + terrain_map.png.
 // Same array backs render mesh and collision.
-// Layout: Pacific west, Point Loma + Coronado, Mission Bay, SD Bay,
-// Mission Valley trench, mesa/canyon city, eastern hills.
 
 export class Terrain {
   constructor(seed = WORLD.SEED) {
@@ -24,10 +22,18 @@ export class Terrain {
     this.roadMask = new Float32Array(this.n * this.n);
 
     this._generateBase();
-    // No artificial POI flatten pads — layout follows natural terrain.
-    this.roads = this._buildRoadNetwork();
+    // Connected freeways + arterials; flatten into heightfield.
+    this.roadLines = buildRoadPolylines();
+    this.roads = polylinesToSegments(this.roadLines).map((s) => ({
+      a: { x: s.a.x, y: s.a.z }, // Vector2-style (x,y)=(x,z)
+      b: { x: s.b.x, y: s.b.z },
+      width: s.width,
+      blend: s.blend,
+    }));
     this._applyRoads();
     this._reapplyWaterCuts();
+    // Re-stamp roads after water so decks stay dry and continuous.
+    this._applyRoads();
   }
 
   idx(ix, iz) {
@@ -315,61 +321,37 @@ export class Terrain {
     }
   }
 
-  _buildRoadNetwork() {
-    const segs = [];
-    const by = {};
-    for (const p of POIS) by[p.id] = p;
-
-    for (const [a, b] of ROAD_LINKS) {
-      if (!by[a] || !by[b]) {
-        console.warn(`[terrain] missing POI for road link ${a} → ${b}`);
-        continue;
-      }
-      segs.push({
-        a: new THREE.Vector2(by[a].x, by[a].z),
-        b: new THREE.Vector2(by[b].x, by[b].z),
-        width: ROADS.WIDTH,
-        blend: ROADS.BLEND,
-      });
-    }
-
-    // Freeway polylines (I-5, I-8, I-15, I-805, SR-52, SR-163)
-    for (const fw of FREEWAYS) {
-      const w = fw.width ?? ROADS.WIDTH;
-      const blend = ROADS.FREEWAY_BLEND ?? ROADS.BLEND;
-      for (let i = 0; i < fw.pts.length - 1; i++) {
-        const [x0, z0] = fw.pts[i];
-        const [x1, z1] = fw.pts[i + 1];
-        segs.push({
-          a: new THREE.Vector2(x0, z0),
-          b: new THREE.Vector2(x1, z1),
-          width: w,
-          blend,
-        });
-      }
-    }
-    return segs;
-  }
-
   _applyRoads() {
+    const minH = ROADS.MIN_HEIGHT ?? 2.5;
     for (const seg of this.roads) {
       const halfW = (seg.width ?? ROADS.WIDTH) / 2;
       const blend = seg.blend ?? ROADS.BLEND;
       const reach = halfW + blend;
 
-      const dir = new THREE.Vector2().subVectors(seg.b, seg.a);
-      const len = dir.length();
+      const ax = seg.a.x; const az = seg.a.y;
+      const bx = seg.b.x; const bz = seg.b.y;
+      const dx = bx - ax;
+      const dz = bz - az;
+      const len = Math.hypot(dx, dz);
       if (len < 1e-3) continue;
-      dir.divideScalar(len);
+      const ux = dx / len;
+      const uz = dz / len;
 
       const samples = Math.max(2, Math.ceil(len / this.cell));
       const raw = new Float32Array(samples + 1);
+      let dryCount = 0;
       for (let s = 0; s <= samples; s++) {
         const t = s / samples;
-        raw[s] = this.heightAt(lerp(seg.a.x, seg.b.x, t), lerp(seg.a.y, seg.b.y, t));
+        const h = this.heightAt(lerp(ax, bx, t), lerp(az, bz, t));
+        raw[s] = Math.max(minH, h);
+        if (h >= minH) dryCount++;
       }
+      // Skip segments that are almost entirely water
+      if (dryCount < samples * 0.25) continue;
+
+      // Smooth grade along centreline
       const prof = new Float32Array(samples + 1);
-      const K = 6;
+      const K = 8;
       for (let s = 0; s <= samples; s++) {
         let acc = 0; let cnt = 0;
         for (let k = -K; k <= K; k++) {
@@ -378,30 +360,34 @@ export class Terrain {
           acc += raw[j];
           cnt++;
         }
-        prof[s] = acc / cnt;
+        prof[s] = Math.max(minH, acc / cnt);
       }
 
-      const minX = Math.max(0, Math.floor((Math.min(seg.a.x, seg.b.x) - reach + this.half) / this.cell));
-      const maxX = Math.min(this.n - 1, Math.ceil((Math.max(seg.a.x, seg.b.x) + reach + this.half) / this.cell));
-      const minZ = Math.max(0, Math.floor((Math.min(seg.a.y, seg.b.y) - reach + this.half) / this.cell));
-      const maxZ = Math.min(this.n - 1, Math.ceil((Math.max(seg.a.y, seg.b.y) + reach + this.half) / this.cell));
+      const minX = Math.max(0, Math.floor((Math.min(ax, bx) - reach + this.half) / this.cell));
+      const maxX = Math.min(this.n - 1, Math.ceil((Math.max(ax, bx) + reach + this.half) / this.cell));
+      const minZ = Math.max(0, Math.floor((Math.min(az, bz) - reach + this.half) / this.cell));
+      const maxZ = Math.min(this.n - 1, Math.ceil((Math.max(az, bz) + reach + this.half) / this.cell));
 
       for (let iz = minZ; iz <= maxZ; iz++) {
         const z = this.gx(iz);
         for (let ix = minX; ix <= maxX; ix++) {
           const x = this.gx(ix);
-          const px = x - seg.a.x; const pz = z - seg.a.y;
-          let t = (px * dir.x + pz * dir.y) / len;
+          const px = x - ax; const pz = z - az;
+          let t = (px * ux + pz * uz) / len;
           t = clamp(t, 0, 1);
-          const cx = lerp(seg.a.x, seg.b.x, t);
-          const cz = lerp(seg.a.y, seg.b.y, t);
+          const cx = lerp(ax, bx, t);
+          const cz = lerp(az, bz, t);
           const d = Math.hypot(x - cx, z - cz);
           if (d > reach) continue;
 
-          const roadH = prof[Math.round(t * samples)];
+          let roadH = prof[Math.round(t * samples)];
+          roadH = Math.max(minH, roadH);
           const w = 1 - smoothstep(halfW, reach, d);
           const i = this.idx(ix, iz);
+          // Never drag land under water with a road
+          if (this.heights[i] < minH * 0.5 && w < 0.9) continue;
           this.heights[i] = lerp(this.heights[i], roadH, w);
+          if (this.heights[i] < minH && d <= halfW) this.heights[i] = minH;
           if (d <= halfW) this.roadMask[i] = 1;
           else this.roadMask[i] = Math.max(this.roadMask[i], 1 - smoothstep(halfW, halfW + 2, d));
         }

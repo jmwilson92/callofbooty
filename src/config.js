@@ -295,63 +295,72 @@ export const ROAD_LINKS = [
   ['radiotower', 'zoo'],
 ];
 
-// Multi-point freeways from the satellite map (world metres). Drawn as road corridors.
+// Freeways routed through current POI anchors (dry land). Continuous corridors.
 export const FREEWAYS = [
-  // I-5 coastal spine (Torrey → La Jolla → Mission Bay → Downtown → south)
+  // I-5-ish: La Jolla → airport → downtown west → south
   {
     id: 'i5', width: 16,
     pts: [
-      [-480, -700], [-500, -480], [-420, -280], [-340, -40],
-      [-200, 120], [-80, 220], [10, 340], [40, 520], [30, 780],
+      [-480, -620], [-480, -480], [-360, -200], [-200, 40],
+      [-120, 100], [20, 200], [80, 320], [100, 420], [90, 560],
     ],
   },
-  // I-8 Mission Valley east–west
+  // I-8-ish: west → Mission Valley → east foothills
   {
     id: 'i8', width: 16,
     pts: [
-      [-700, 70], [-420, 80], [-200, 95], [0, 100],
-      [220, 90], [420, 70], [620, 50], [800, 40],
+      [-500, 30], [-280, 40], [-20, 40], [140, 50],
+      [300, 40], [480, 20], [640, 0],
     ],
   },
-  // I-15 inland north–south
+  // I-15-ish: Kearny Mesa → valley → downtown east → south
   {
     id: 'i15', width: 14,
     pts: [
-      [180, -700], [170, -460], [140, -200], [100, 40],
-      [80, 220], [90, 400], [120, 600], [140, 800],
+      [140, -500], [140, -380], [100, -160], [60, 40],
+      [100, 200], [160, 320], [180, 400], [200, 540],
     ],
   },
-  // I-805 parallel corridor
+  // I-805-ish parallel: north mesa → MCRD → downtown
   {
     id: 'i805', width: 14,
     pts: [
-      [-80, -700], [-90, -420], [-70, -180], [-20, 40],
-      [40, 200], [70, 380], [100, 560], [120, 780],
+      [40, -520], [60, -300], [20, -80], [0, 40],
+      [30, 180], [80, 300], [140, 360], [160, 480],
     ],
   },
-  // SR-52 east–west north city
+  // SR-52: La Jolla → Kearny → east
   {
     id: 'sr52', width: 12,
     pts: [
-      [-520, -380], [-300, -400], [-100, -420], [120, -440],
-      [320, -420], [520, -380],
+      [-480, -480], [-280, -420], [0, -400], [140, -380],
+      [320, -300], [500, -200], [640, -80],
     ],
   },
-  // SR-163 Balboa / downtown connector
+  // SR-163: Kearny → Balboa → Downtown
   {
     id: 'sr163', width: 12,
     pts: [
-      [-40, -500], [-20, -280], [20, -80], [60, 100],
-      [90, 220], [40, 320],
+      [140, -380], [160, -200], [180, 40], [220, 200],
+      [240, 320], [180, 340], [140, 360],
+    ],
+  },
+  // Harbor / bay frontage: Point Loma → airport → downtown → Coronado approach
+  {
+    id: 'harbor', width: 12,
+    pts: [
+      [-420, 400], [-300, 280], [-160, 160], [-80, 200],
+      [40, 280], [100, 340], [140, 360], [40, 480], [-80, 520], [-200, 520],
     ],
   },
 ];
 
 export const ROADS = {
-  WIDTH: 10,
-  BLEND: 14,
-  RAISE: 0.12,
-  FREEWAY_BLEND: 18,
+  WIDTH: 12,
+  BLEND: 16,
+  RAISE: 0.14,
+  FREEWAY_BLEND: 20,
+  MIN_HEIGHT: 2.5, // never flatten road below this (stay out of water)
 };
 
 export const BUILDINGS = {

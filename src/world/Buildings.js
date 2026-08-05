@@ -1,10 +1,18 @@
 import { BUILDINGS, POIS } from '../config.js';
 import { makeBuilding, makeShed, slab } from './BuildingKit.js';
 import { placeDowntownDistrict } from './structures/Catalog.js';
+import { Occupancy } from './Occupancy.js';
 
 // San Diego POIs — anchors only; buildings seat on natural terrain.
 
 const PAL = BUILDINGS.PALETTE;
+// Shared world occupancy — prevents POI structures from stacking.
+export const worldOcc = new Occupancy(12);
+
+export function resetOccupancy() {
+  worldOcc.rects.length = 0;
+  worldOcc.buckets.clear();
+}
 
 function poi(id) {
   return POIS.find((p) => p.id === id);
@@ -32,8 +40,11 @@ function pick(rng, arr) {
 // --- Downtown: satellite-style grid + packed high-rises (downtown.png) ---
 function buildDowntown(sink, terrain, rng) {
   const p = poi('downtown');
-  // Per-tower seating on natural terrain (no district flatten pad)
-  placeDowntownDistrict(sink, terrain, p.x, p.z, null, rng);
+  placeDowntownDistrict(sink, terrain, p.x, p.z, null, rng, worldOcc);
+}
+
+function claimOrSkip(x, z, w, d) {
+  return worldOcc.tryClaim(x, z, w, d, 2);
 }
 
 // --- San Diego International Airport: hangars + container/yard cover ---
@@ -424,6 +435,7 @@ function buildRadioTower(sink, terrain, rng) {
 }
 
 export function buildAllStructures(sink, terrain, rng) {
+  resetOccupancy();
   buildDowntown(sink, terrain, rng);
   buildAirport(sink, terrain, rng);
   buildMcrd(sink, terrain, rng);

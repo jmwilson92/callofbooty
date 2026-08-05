@@ -1,5 +1,6 @@
 import { WORLD, POIS, STRUCTURES } from '../../config.js';
 import { poiContains } from '../Poi.js';
+import { worldOcc } from '../Buildings.js';
 import {
   placeSuburbanHome,
   placeTrailer,
@@ -25,6 +26,10 @@ function tooCloseToPoiCore(x, z, scale = 0.85) {
     if (poiContains(p, x, z, scale)) return true;
   }
   return false;
+}
+
+function claimFoot(x, z, w = 18, d = 16) {
+  return worldOcc.tryClaim(x, z, w, d, 2.5);
 }
 
 function poi(id) {
@@ -69,6 +74,7 @@ export function scatterStructures(sink, terrain, rng) {
       if (x > 450) return false; // not deep mountains
       return true;
     }, (x, z) => {
+      if (!claimFoot(x, z, 16, 14)) return;
       placeSuburbanHome(sink, terrain, x, z, rng);
       stats.suburban++;
     });
@@ -83,10 +89,12 @@ export function scatterStructures(sink, terrain, rng) {
       const h = t.heightAt(x, z);
       return h > 4 && h < 35;
     }, (x, z) => {
-      // Cluster of 3–5 trailers
       const count = 3 + Math.floor(rng() * 3);
       for (let i = 0; i < count; i++) {
-        placeTrailer(sink, terrain, x + (i % 3) * 14, z + Math.floor(i / 3) * 10, rng);
+        const tx = x + (i % 3) * 16;
+        const tz = z + Math.floor(i / 3) * 12;
+        if (!claimFoot(tx, tz, 14, 6)) continue;
+        placeTrailer(sink, terrain, tx, tz, rng);
         stats.trailer++;
       }
     });
@@ -105,6 +113,7 @@ export function scatterStructures(sink, terrain, rng) {
       }
       return nearRoad;
     }, (x, z) => {
+      if (!claimFoot(x, z, 28, 24)) return;
       placeGasStation(sink, terrain, x, z, rng);
       stats.gas++;
     });
@@ -117,6 +126,7 @@ export function scatterStructures(sink, terrain, rng) {
       if (tooCloseToPoiCore(x, z, 0.8)) return false;
       return t.heightAt(x, z) < 50;
     }, (x, z) => {
+      if (!claimFoot(x, z, 22, 18)) return;
       placeRestaurant(sink, terrain, x, z, rng, rng() > 0.35);
       stats.restaurant++;
     });
@@ -125,13 +135,21 @@ export function scatterStructures(sink, terrain, rng) {
   // --- Auto repair ---
   for (let n = 0; n < S.AUTO; n++) {
     tryPlace(terrain, rng, 60, (x, z, t) => dryLand(t, x, z, 16) && !tooCloseToPoiCore(x, z, 0.85) && t.heightAt(x, z) < 55,
-      (x, z) => { placeAutoRepair(sink, terrain, x, z, rng); stats.auto++; });
+      (x, z) => {
+        if (!claimFoot(x, z, 24, 20)) return;
+        placeAutoRepair(sink, terrain, x, z, rng);
+        stats.auto++;
+      });
   }
 
   // --- Fire stations ---
   for (let n = 0; n < S.FIRE; n++) {
     tryPlace(terrain, rng, 80, (x, z, t) => dryLand(t, x, z, 14) && !tooCloseToPoiCore(x, z, 1.0),
-      (x, z) => { placeFireStation(sink, terrain, x, z, rng); stats.fire++; });
+      (x, z) => {
+        if (!claimFoot(x, z, 36, 24)) return;
+        placeFireStation(sink, terrain, x, z, rng);
+        stats.fire++;
+      });
   }
 
   // --- Business centers (mid density) ---
@@ -139,9 +157,9 @@ export function scatterStructures(sink, terrain, rng) {
     tryPlace(terrain, rng, 70, (x, z, t) => {
       if (!dryLand(t, x, z, 14)) return false;
       if (tooCloseToPoiCore(x, z, 0.7)) return false;
-      // Kearny / downtown / valley band
       return (Math.abs(x) < 280 && z > -200 && z < 400) || (x > 50 && x < 250 && z < -100);
     }, (x, z) => {
+      if (!claimFoot(x, z, 28, 24)) return;
       placeBusinessCenter(sink, terrain, x, z, rng);
       stats.business++;
     });
@@ -157,6 +175,7 @@ export function scatterStructures(sink, terrain, rng) {
       const x = dt.x + Math.cos(a) * r;
       const z = dt.z + Math.sin(a) * r;
       if (terrain.heightAt(x, z) < 2 || terrain.slopeDegAt(x, z) > 16) continue;
+      if (!claimFoot(x - 8, z - 8, 22, 20)) continue;
       placeSkylineTower(sink, x - 8, z - 8, terrain.heightAt(x, z), rng, 12 + Math.floor(rng() * 12));
       stats.sky++;
     }
@@ -172,6 +191,7 @@ export function scatterStructures(sink, terrain, rng) {
       const hw = t.heightAt(x - 12, z);
       return hw < 1.5 || t.heightAt(x, z + 12) < 1.5;
     }, (x, z) => {
+      if (!claimFoot(x - 20, z, 30, 14)) return;
       placeBoatHouse(sink, terrain, x, z, rng);
       stats.boat++;
     });
@@ -180,7 +200,11 @@ export function scatterStructures(sink, terrain, rng) {
   // --- Billboards ---
   for (let n = 0; n < S.BILLBOARD; n++) {
     tryPlace(terrain, rng, 40, (x, z, t) => dryLand(t, x, z, 20) && !tooCloseToPoiCore(x, z, 0.5),
-      (x, z) => { placeBillboard(sink, terrain, x, z, rng); stats.billboard++; });
+      (x, z) => {
+        if (!claimFoot(x - 2, z - 2, 8, 6)) return;
+        placeBillboard(sink, terrain, x, z, rng);
+        stats.billboard++;
+      });
   }
 
   // --- Parked vehicles near roads ---
