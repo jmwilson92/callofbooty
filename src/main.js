@@ -100,6 +100,10 @@ function start() {
   const clock = new Clock();
 
   bus.on('pointerlock', (locked) => hud.setLocked(locked));
+  bus.on('pointerlock:error', () => {
+    // Chrome blocks re-locking for about a second after Esc.
+    hud.setError('Pointer lock was blocked by the browser. Click again in a moment.');
+  });
   hud.setLocked(false);
 
   window.addEventListener('resize', () => {

@@ -93,13 +93,19 @@ export function createHud() {
       <tr><td>Sprint + C</td><td>slide (jump to cancel and keep your speed)</td></tr>
       <tr><td>F3</td><td>performance overlay</td></tr>
       <tr><td>Esc</td><td>release pointer</td></tr>
-    </table>`;
+    </table>
+    <p class="err"></p>`;
   document.body.appendChild(hint);
+  const err = hint.querySelector('.err');
 
   return {
     setLocked(locked) {
-      hint.style.display = locked ? 'none' : 'block';
+      hint.style.display = locked ? 'none' : 'flex';
       cross.style.display = locked ? 'block' : 'none';
+      if (locked) err.textContent = '';
+    },
+    setError(msg) {
+      err.textContent = msg;
     },
   };
 }

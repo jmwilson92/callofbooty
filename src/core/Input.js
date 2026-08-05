@@ -35,9 +35,10 @@ export class Input {
       this.buttons.clear();
     });
 
-    this.dom.addEventListener('click', () => {
-      if (!this.locked) this.dom.requestPointerLock();
-    });
+    // Listen on `window`, not on the canvas. The menu overlay covers the whole
+    // viewport, so a canvas-only listener never sees the click that is supposed
+    // to start the game.
+    window.addEventListener('click', () => this.requestLock());
 
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.dom;
@@ -54,6 +55,21 @@ export class Input {
     this.dom.addEventListener('mousedown', (e) => this.buttons.add(e.button));
     window.addEventListener('mouseup', (e) => this.buttons.delete(e.button));
     this.dom.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  // Ask for pointer lock. Browsers reject this if it is not driven by a user
+  // gesture, and Chrome enforces a ~1s cooldown after Esc -- report the failure
+  // rather than leaving the player clicking at a screen that does nothing.
+  requestLock() {
+    if (this.locked) return;
+    try {
+      const p = this.dom.requestPointerLock();
+      if (p && typeof p.catch === 'function') {
+        p.catch((err) => this.bus.emit('pointerlock:error', err));
+      }
+    } catch (err) {
+      this.bus.emit('pointerlock:error', err);
+    }
   }
 
   action(name) {

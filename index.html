@@ -18,8 +18,12 @@
         position: fixed; inset: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 0.25rem;
         background: rgba(8, 12, 16, 0.82); backdrop-filter: blur(3px);
-        text-align: center; z-index: 20; cursor: pointer; padding: 2rem;
+        text-align: center; z-index: 20; padding: 2rem;
+        /* Must not intercept clicks: this overlay covers the whole viewport,
+           and the click on it is what starts the game. */
+        pointer-events: none;
       }
+      #hint .err { color: #ff9a7f; margin-top: 1.2rem; font-size: 0.8rem; min-height: 1em; }
       #hint h1 { margin: 0 0 0.25rem; font-size: clamp(1.5rem, 4vw, 2.6rem); letter-spacing: 0.04em; }
       #hint h1 small { font-weight: 400; opacity: 0.55; font-size: 0.5em; }
       #hint .lead { margin: 0 0 1.5rem; opacity: 0.8; }

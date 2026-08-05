@@ -92,8 +92,16 @@ arc, sprint speed, and slide activation.
 It reuses a Chromium already on the machine (`CHROME_PATH`, or a
 `PLAYWRIGHT_BROWSERS_PATH` install) rather than downloading one.
 
-Note that the smoke test runs under a software GL rasteriser, so its frame rate
-is not meaningful — check real FPS with `F3` in a browser.
+Note that the smoke test runs under a software GL rasteriser at a few FPS, so
+its frame rate is not meaningful — check real FPS with `F3` in a browser. The
+movement checks are measured against simulation ticks rather than wall time for
+that reason.
+
+Related: the fixed-timestep loop caps the simulation at `SIM.MAX_TICKS_PER_FRAME`
+(5) ticks per rendered frame to prevent a death spiral. Below roughly 12 FPS the
+game therefore runs in slow motion rather than skipping ahead. That is a
+deliberate trade — raise the cap in `src/config.js` if you would rather it drop
+time than slow down.
 
 ## Not yet built
 

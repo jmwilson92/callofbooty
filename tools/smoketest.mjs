@@ -67,6 +67,59 @@ await page.waitForTimeout(2500);
 check('boots without console errors', consoleErrors.length === 0,
   consoleErrors.slice(0, 3).join(' | '));
 
+// --- pointer lock ------------------------------------------------------------
+// Click the middle of the page the way a player does. The menu overlay covers
+// the whole viewport, so this catches the overlay swallowing the click that is
+// supposed to start the game.
+const centre = await page.evaluate(() => {
+  const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+  return el ? `${el.tagName}#${el.id || '-'}` : 'none';
+});
+await page.mouse.click(640, 360);
+await page.waitForTimeout(600);
+const lock = await page.evaluate(() => ({
+  locked: !!document.pointerLockElement,
+  onCanvas: document.pointerLockElement?.tagName === 'CANVAS',
+  hintHidden: getComputedStyle(document.getElementById('hint')).display === 'none',
+}));
+
+check('click anywhere locks the pointer', lock.locked && lock.onCanvas,
+  `top element at centre is ${centre}; pointerLockElement=${lock.onCanvas ? 'CANVAS' : 'null'}`);
+check('menu overlay hides once locked', lock.hintHidden);
+
+// End-to-end: real key events must reach the controller and move the player.
+// Every other movement check calls the controller directly and would still
+// pass if the input plumbing were broken.
+// Measured against simulation ticks, not wall time: this suite runs on a
+// software rasteriser at a few FPS, and the fixed-timestep guard caps the sim
+// at 5 ticks per frame, so wall-clock distance would be meaningless here.
+const startPos = await page.evaluate(() => {
+  const g = window.__game;
+  return { x: g.controller.pos.x, z: g.controller.pos.z, ticks: g.clock.tickCount };
+});
+await page.keyboard.down('w');
+await page.waitForFunction(
+  (t0) => window.__game.clock.tickCount - t0 > 40, startPos.ticks, { timeout: 30000 }
+);
+await page.keyboard.up('w');
+const endPos = await page.evaluate(() => {
+  const g = window.__game;
+  return {
+    x: g.controller.pos.x, z: g.controller.pos.z,
+    ticks: g.clock.tickCount, speed: g.controller.speed,
+  };
+});
+const travelled = Math.hypot(endPos.x - startPos.x, endPos.z - startPos.z);
+const simSeconds = (endPos.ticks - startPos.ticks) / 60;
+
+check('holding W reaches walk speed through the real input path',
+  Math.abs(endPos.speed - 4.4) < 0.2 && travelled > 0.5,
+  `${endPos.speed.toFixed(2)} m/s, ${travelled.toFixed(2)}m over ${simSeconds.toFixed(2)}s simulated`);
+
+// Release it again so the rest of the checks run from a known state.
+await page.evaluate(() => document.exitPointerLock());
+await page.waitForTimeout(300);
+
 // --- world stats -------------------------------------------------------------
 const stats = await page.evaluate(() => {
   const g = window.__game;
