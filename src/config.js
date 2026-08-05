@@ -36,8 +36,8 @@ export const PLAYER = {
   // Crouch transition speed (m/s of capsule height change)
   CROUCH_LERP: 8.0,
 
-  // Mission Valley pad, looking south toward Downtown / MCRD.
-  SPAWN: { x: -20, z: 20 },
+  // Downtown core (city skyline) — slight offset so you don't clip a tower.
+  SPAWN: { x: 40, z: 430 },
 };
 
 export const SLIDE = {
