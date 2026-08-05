@@ -38,12 +38,13 @@ Then open http://localhost:5173 and click to lock the pointer.
   Terrain is a hard floor; the player cannot pass through it.
 - **Fixed 60 Hz simulation** decoupled from rendering via an accumulator, with
   the camera interpolating between ticks.
-- **Seeded 1200 m island** — 4 octaves of simplex with radial falloff, vertex
-  coloured by height and slope, roads flattened into the terrain between POIs.
-- **Seven POIs** — Harbor, Radio Hill, The Grid, Quarry, Farmstead, Substation,
-  Trailer Row. Buildings are assembled from a kit (slabs, walls with door and
-  window openings, stairs, parapets); every one has two ground entrances on
-  different faces and a continuous stair route to the roof.
+- **Seeded 1600 m San Diego playspace** — Pacific on the west, Mission Bay +
+  Lindbergh Field bay cuts, eastern Mission Trails hills. Vertex coloured by
+  height and slope (SoCal coastal palette). Freeway-style roads link POIs.
+- **Nine San Diego POIs** — La Jolla, University City, Miramar Ridge, Mission
+  Trails, Mission Bay, Old Town, Balboa Park, Downtown (highest loot), Lindbergh
+  Field. Layout tracks `docs/map-reference-san-diego.png`. Buildings are
+  assembled from a kit (slabs, walls, stairs, parapets).
 - **400 cover props** scattered by Poisson-disc with 6 m minimum spacing.
 
 All tunable values live in `src/config.js`. Nothing gameplay-related is

@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { WORLD, TERRAIN_COLORS, POIS, ROADS } from '../config.js';
+import { WORLD, TERRAIN_COLORS, POIS, ROADS, ROAD_LINKS } from '../config.js';
 import { Simplex, smoothstep, clamp, lerp } from '../core/Noise.js';
 
-// Seeded heightfield island. The same array backs both the render mesh and
+// Seeded San Diego heightfield. The same array backs both the render mesh and
 // collision, so what you see is exactly what you stand on.
+// Layout: Pacific on the west, Mission Bay + SD Bay cuts, eastern hills.
 export class Terrain {
   constructor(seed = WORLD.SEED) {
     this.size = WORLD.SIZE;
@@ -20,6 +21,8 @@ export class Terrain {
     this._applyPoiPads();
     this.roads = this._buildRoadNetwork();
     this._applyRoads();
+    // Bays must win over POI pads/roads so lagoons stay wet.
+    this._reapplyWaterCuts();
   }
 
   idx(ix, iz) {
@@ -33,21 +36,70 @@ export class Terrain {
 
   _generateBase() {
     const { NOISE_OCTAVES, NOISE_BASE_FREQ, NOISE_LACUNARITY, NOISE_PERSISTENCE } = WORLD;
+    const bayM = WORLD.MISSION_BAY;
+    const bayS = WORLD.SD_BAY;
+    const hills = WORLD.EAST_HILLS;
+
     for (let iz = 0; iz < this.n; iz++) {
       const z = this.gx(iz);
       for (let ix = 0; ix < this.n; ix++) {
         const x = this.gx(ix);
 
+        // Rolling coastal plain + foothills noise
         let n = this.simplex.fbm(
           x, z, NOISE_OCTAVES, NOISE_BASE_FREQ, NOISE_LACUNARITY, NOISE_PERSISTENCE
         );
-        n = n * 0.5 + 0.5; // -> [0,1]
-        n = Math.pow(n, 1.25); // bias toward lowland, keeps peaks rare
+        n = n * 0.5 + 0.5;
+        n = Math.pow(n, 1.15);
 
-        const r = Math.sqrt(x * x + z * z) / this.half;
+        // West = sea level coastal plain; east rises into Mission Trails foothills.
+        // Normalized eastward bias in [0,1] across the playable width.
+        const east = smoothstep(-400, 520, x);
+        const northHills = smoothstep(200, -450, z) * 0.35; // slight rise toward Miramar/UC
+        let base = WORLD.BASE_LIFT + n * 22 + east * 28 + northHills * 18;
+
+        // La Jolla headland: higher cliffs along the NW coast
+        const laJolla = 1 - smoothstep(0, 180, Math.hypot(x - (-480), z - (-400)));
+        base += laJolla * 16;
+
+        // Eastern mountain / park mass (Mission Trails)
+        const hd = Math.hypot(x - hills.x, z - hills.z);
+        const hw = 1 - smoothstep(hills.radius * 0.35, hills.radius, hd);
+        if (hw > 0) {
+          const ridge = 1 - Math.abs(this.simplex.noise2D(x * 0.003, z * 0.003));
+          base = lerp(base, hills.peak * (0.45 + ridge * 0.55), hw * hw);
+        }
+
+        // Pacific: land falls into ocean west of the coast line (wavy shoreline)
+        const shoreNoise = this.detail.noise2D(z * 0.004, 3.1) * 55;
+        const coast = WORLD.COAST_X + shoreNoise;
+        const oceanW = smoothstep(coast, coast - WORLD.COAST_BLEND, x);
+        // Soft southern ocean near Point Loma / Sunset Cliffs
+        const southOcean = smoothstep(520, 720, z) * smoothstep(-50, -350, x);
+        const waterMask = Math.max(oceanW, southOcean * 0.85);
+
+        // Mission Bay lagoon (ellipse cut)
+        const mb =
+          ((x - bayM.x) / bayM.rx) ** 2 + ((z - bayM.z) / bayM.rz) ** 2;
+        const missionBay = 1 - smoothstep(0.75, 1.15, mb);
+
+        // San Diego Bay / airport flats indent
+        const sb =
+          ((x - bayS.x) / bayS.rx) ** 2 + ((z - bayS.z) / bayS.rz) ** 2;
+        const sdBay = 1 - smoothstep(0.7, 1.2, sb);
+
+        let h = base;
+        // Sink bays toward / under sea level
+        h = lerp(h, -bayM.depth, missionBay * 0.95);
+        h = lerp(h, -bayS.depth, sdBay * 0.9);
+        // Ocean takes priority on the west
+        h = lerp(h, -WORLD.EDGE_DEPTH, waterMask);
+
+        // Soft square rim so the map edge is still ocean/cliffs, not a hard wall
+        const r = Math.max(Math.abs(x), Math.abs(z)) / this.half;
         const f = 1 - smoothstep(WORLD.FALLOFF_START, WORLD.FALLOFF_END, r);
+        h = h * f - (1 - f) * WORLD.EDGE_DEPTH;
 
-        const h = (n * WORLD.MAX_ELEVATION + WORLD.BASE_LIFT) * f - (1 - f) * WORLD.EDGE_DEPTH;
         this.heights[this.idx(ix, iz)] = h;
       }
     }
@@ -80,19 +132,72 @@ export class Terrain {
     }
   }
 
-  // Straight segments linking POIs into a connected network.
+  // Re-carve ocean + bays after pads/roads so shoreline water is not filled in.
+  // Flattened POI pads are protected so buildings stay dry.
+  _reapplyWaterCuts() {
+    const bayM = WORLD.MISSION_BAY;
+    const bayS = WORLD.SD_BAY;
+    const dryPads = POIS.filter((p) => p.flatten !== null && p.flatten !== undefined);
+
+    for (let iz = 0; iz < this.n; iz++) {
+      const z = this.gx(iz);
+      for (let ix = 0; ix < this.n; ix++) {
+        const x = this.gx(ix);
+        const i = this.idx(ix, iz);
+
+        let padProtect = 0;
+        for (const p of dryPads) {
+          const d = Math.hypot(x - p.x, z - p.z);
+          if (d < p.radius + 20) {
+            padProtect = Math.max(padProtect, 1 - smoothstep(p.radius * 0.85, p.radius + 20, d));
+          }
+        }
+        if (padProtect > 0.85) continue;
+
+        let h = this.heights[i];
+        const shoreNoise = this.detail.noise2D(z * 0.004, 3.1) * 55;
+        const coast = WORLD.COAST_X + shoreNoise;
+        const oceanW = smoothstep(coast, coast - WORLD.COAST_BLEND, x);
+        const southOcean = smoothstep(560, 760, z) * smoothstep(-80, -400, x);
+        const waterMask = Math.max(oceanW, southOcean * 0.85);
+
+        const mb =
+          ((x - bayM.x) / bayM.rx) ** 2 + ((z - bayM.z) / bayM.rz) ** 2;
+        const missionBay = 1 - smoothstep(0.85, 1.2, mb);
+
+        const sb =
+          ((x - bayS.x) / bayS.rx) ** 2 + ((z - bayS.z) / bayS.rz) ** 2;
+        const sdBay = 1 - smoothstep(0.85, 1.25, sb);
+
+        const sinkW = (1 - padProtect);
+        if (missionBay > 0.05) {
+          h = Math.min(h, lerp(h, -bayM.depth, missionBay * 0.98 * sinkW));
+        }
+        if (sdBay > 0.05) {
+          h = Math.min(h, lerp(h, -bayS.depth, sdBay * 0.95 * sinkW));
+        }
+        if (waterMask > 0.05) {
+          h = Math.min(h, lerp(h, -WORLD.EDGE_DEPTH, waterMask * sinkW));
+        }
+        this.heights[i] = h;
+      }
+    }
+  }
+
+  // Freeway-style segments linking San Diego POIs (see ROAD_LINKS in config).
   _buildRoadNetwork() {
     const by = {};
     for (const p of POIS) by[p.id] = p;
-    const links = [
-      ['grid', 'harbor'], ['grid', 'radiohill'], ['grid', 'quarry'],
-      ['grid', 'farm'], ['quarry', 'substation'], ['farm', 'trailers'],
-      ['harbor', 'trailers'], ['radiohill', 'substation'],
-    ];
-    return links.map(([a, b]) => ({
-      a: new THREE.Vector2(by[a].x, by[a].z),
-      b: new THREE.Vector2(by[b].x, by[b].z),
-    }));
+    return ROAD_LINKS.map(([a, b]) => {
+      if (!by[a] || !by[b]) {
+        console.warn(`[terrain] missing POI for road link ${a} → ${b}`);
+        return null;
+      }
+      return {
+        a: new THREE.Vector2(by[a].x, by[a].z),
+        b: new THREE.Vector2(by[b].x, by[b].z),
+      };
+    }).filter(Boolean);
   }
 
   // Flatten a corridor to a smoothed centreline profile, blending back to
@@ -310,14 +415,15 @@ export class Terrain {
   }
 
   buildWater() {
-    const geo = new THREE.PlaneGeometry(this.size * 1.6, this.size * 1.6);
+    // Large Pacific plane — coastal blue-green, slightly more transparent for bays.
+    const geo = new THREE.PlaneGeometry(this.size * 1.8, this.size * 1.8);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x2f5a6b,
-      roughness: 0.25,
-      metalness: 0.1,
+      color: 0x2a6a7e,
+      roughness: 0.22,
+      metalness: 0.12,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.88,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.y = WORLD.WATER_LEVEL;

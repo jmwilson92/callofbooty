@@ -1,10 +1,9 @@
 import { BUILDINGS, POIS } from '../config.js';
 import { makeBuilding, makeShed, slab } from './BuildingKit.js';
 
-// Seven hand-placed points of interest, each with a distinct silhouette.
+// San Diego POIs — each has a distinct silhouette for readable rotations.
 // Structures sit on the POI's flattened pad where one exists, otherwise they
-// are seated on the highest terrain sample under their footprint so nothing
-// floats or sinks.
+// are seated on the highest terrain sample under their footprint.
 
 const PAL = BUILDINGS.PALETTE;
 
@@ -27,9 +26,9 @@ function pick(rng, arr) {
   return arr[Math.floor(rng() * arr.length) % arr.length];
 }
 
-// --- The Grid: dense city block, 12 buildings of 2-4 stories, highest loot ---
-function buildGrid(sink, terrain, rng) {
-  const p = poi('grid');
+// --- Downtown San Diego: dense city block, tallest loot ---
+function buildDowntown(sink, terrain, rng) {
+  const p = poi('downtown');
   const cols = 4, rows = 3;
   const bw = 22, bd = 18, street = 12;
   const stepX = bw + street, stepZ = bd + street;
@@ -40,7 +39,8 @@ function buildGrid(sink, terrain, rng) {
     for (let c = 0; c < cols; c++) {
       const bx = x0 + c * stepX;
       const bz = z0 + r * stepZ;
-      const floors = 2 + Math.floor(rng() * 3); // 2-4 stories
+      // Downtown gets taller mid-block towers.
+      const floors = 3 + Math.floor(rng() * 4); // 3-6 stories
       makeBuilding(sink, {
         x: bx, z: bz, w: bw, d: bd, floors,
         baseY: seatY(terrain, p, bx, bz, bw, bd),
@@ -50,41 +50,37 @@ function buildGrid(sink, terrain, rng) {
   }
 }
 
-// --- Harbor: warehouses plus a container yard, coastal ---
-function buildHarbor(sink, terrain, rng) {
-  const p = poi('harbor');
+// --- Lindbergh Field / bay: hangars + container yard ---
+function buildAirport(sink, terrain, rng) {
+  const p = poi('airport');
   const base = p.flatten;
 
   for (let i = 0; i < 3; i++) {
-    const w = 42, d = 24;
-    const x = p.x - 60 + i * 50;
-    const z = p.z - 55;
-    makeShed(sink, { x, z, w, d, h: 9, baseY: seatY(terrain, p, x, z, w, d), color: pick(rng, PAL) });
+    const w = 48, d = 26;
+    const x = p.x - 70 + i * 55;
+    const z = p.z - 50;
+    makeShed(sink, { x, z, w, d, h: 11, baseY: seatY(terrain, p, x, z, w, d), color: pick(rng, PAL) });
   }
 
-  // A small two-storey office so the POI has an interior route to a roof.
   makeBuilding(sink, {
-    x: p.x - 70, z: p.z + 30, w: 18, d: 16, floors: 2,
+    x: p.x - 80, z: p.z + 25, w: 20, d: 16, floors: 2,
     baseY: base, color: PAL[0], rng,
   });
 
-  // Container yard. Containers are 2.59 m tall -- taller than the 1.6 m mantle
-  // limit -- so crates are placed alongside as an intermediate step, giving a
-  // real crate -> container mantle chain.
+  // Container yard on the bay side
   const CW = 6.06, CH = 2.59, CD = 2.44;
-  const yardX = p.x + 10;
-  const yardZ = p.z + 20;
+  const yardX = p.x + 15;
+  const yardZ = p.z + 15;
   const colors = [0x4a6b7a, 0x7a4a3c, 0x6b7f43, 0x8a8880];
 
   for (let row = 0; row < 4; row++) {
     for (let col = 0; col < 5; col++) {
       const cx = yardX + col * (CW + 2.2);
       const cz = yardZ + row * (CD + 3.4);
-      const stack = rng() > 0.6 ? 2 : 1;
+      const stack = rng() > 0.55 ? 2 : 1;
       for (let s = 0; s < stack; s++) {
         sink.addSpan(cx, base + s * CH, cz, cx + CW, base + (s + 1) * CH, cz + CD, colors[(row + col + s) % colors.length]);
       }
-      // Step crate against the container's long face.
       if (rng() > 0.35) {
         const kx = cx + rng() * (CW - 1.6);
         sink.addSpan(kx, base, cz - 1.7, kx + 1.5, base + 1.45, cz - 0.2, 0x8e7a5a);
@@ -93,9 +89,9 @@ function buildHarbor(sink, terrain, rng) {
   }
 }
 
-// --- Radio Hill: tower plus three outbuildings on natural high ground ---
-function buildRadioHill(sink, terrain, rng) {
-  const p = poi('radiohill');
+// --- Miramar Ridge: tower + outbuildings on natural high ground ---
+function buildMiramar(sink, terrain, rng) {
+  const p = poi('miramar');
   const tw = 10, td = 10;
   const tx = p.x - tw / 2, tz = p.z - td / 2;
   const baseY = seatY(terrain, p, tx, tz, tw, td);
@@ -105,7 +101,6 @@ function buildRadioHill(sink, terrain, rng) {
     baseY, color: PAL[4], rng,
   });
 
-  // Antenna mast above the tower roof -- silhouette, no collision surprise.
   const mastY = baseY + BUILDINGS.GROUND_FLOOR_HEIGHT + 4 * BUILDINGS.FLOOR_HEIGHT;
   sink.addSpan(p.x - 0.5, mastY, p.z - 0.5, p.x + 0.5, mastY + 22, p.z + 0.5, 0x6e6c68);
 
@@ -118,15 +113,15 @@ function buildRadioHill(sink, terrain, rng) {
   }
 }
 
-// --- Quarry: terraced benches around a low pit floor, deliberately cover-poor ---
-function buildQuarry(sink, terrain, rng) {
-  const p = poi('quarry');
-  const base = p.flatten;
+// --- Mission Trails: terraced rocky benches (cover-poor high ground) ---
+function buildMissionTrails(sink, terrain, rng) {
+  const p = poi('missiontrails');
+  // Seat pit floor on terrain under the POI center (no flatten pad).
+  const base = terrain.heightAt(p.x, p.z) - 6;
   const benchH = 3.2;
   const rock = 0x6e6c68;
   const rockDark = 0x5d5b58;
 
-  // Concentric benches stepping up and outward from the pit floor.
   for (let k = 1; k <= 4; k++) {
     const inset = 22 + k * 15;
     const y0 = base + (k - 1) * benchH;
@@ -139,7 +134,6 @@ function buildQuarry(sink, terrain, rng) {
     sink.addSpan(p.x + inset - t, y0, p.z - inset + t, p.x + inset, y1, p.z + inset - t, c);
   }
 
-  // A ramp cut through the benches so the pit floor is reachable on foot.
   const rampW = 9;
   for (let k = 0; k < 4; k++) {
     const y = base + k * benchH;
@@ -147,76 +141,91 @@ function buildQuarry(sink, terrain, rng) {
     slab(sink, p.x - rampW / 2, z0, p.x + rampW / 2, z0 + 15, y + benchH, rockDark);
   }
 
-  // Two equipment sheds on the pit floor.
   makeShed(sink, { x: p.x - 26, z: p.z - 14, w: 14, d: 10, h: 5, baseY: base, color: PAL[2] });
   makeShed(sink, { x: p.x + 8, z: p.z + 2, w: 12, d: 9, h: 4.5, baseY: base, color: PAL[0] });
 }
 
-// --- Farmstead: barn, silos, outbuildings ---
-function buildFarm(sink, terrain, rng) {
-  const p = poi('farm');
+// --- Balboa Park: large sheds + mid buildings (museums / halls stand-ins) ---
+function buildBalboa(sink, terrain, rng) {
+  const p = poi('balboa');
   const base = p.flatten;
 
-  makeShed(sink, { x: p.x - 18, z: p.z - 12, w: 34, d: 20, h: 10, baseY: base, color: 0x7a4a3c, doorW: 5 });
+  makeShed(sink, { x: p.x - 22, z: p.z - 16, w: 40, d: 22, h: 12, baseY: base, color: 0x9a968c, doorW: 5 });
+  makeShed(sink, { x: p.x + 28, z: p.z - 10, w: 28, d: 18, h: 10, baseY: base, color: 0x8a8880, doorW: 4 });
 
-  // Three silos. Boxes stand in for cylinders at placeholder-art fidelity.
-  for (let i = 0; i < 3; i++) {
-    const sx = p.x + 26 + i * 11;
-    const sz = p.z - 6;
-    sink.addSpan(sx, base, sz, sx + 8, base + 17, sz + 8, 0x9a968c);
-    sink.addSpan(sx - 0.4, base + 17, sz - 0.4, sx + 8.4, base + 18.6, sz + 8.4, 0x6e6c68);
+  for (let i = 0; i < 2; i++) {
+    makeBuilding(sink, {
+      x: p.x - 40 + i * 50, z: p.z + 20, w: 18, d: 14, floors: 2 + i,
+      baseY: base, color: pick(rng, PAL), rng,
+    });
   }
 
-  makeBuilding(sink, {
-    x: p.x - 40, z: p.z + 18, w: 14, d: 12, floors: 2,
-    baseY: base, color: PAL[5], rng,
-  });
-  makeShed(sink, { x: p.x - 6, z: p.z + 26, w: 16, d: 10, h: 4.2, baseY: base, color: PAL[3] });
-
-  // Fence line along the field edge -- low cover, vaultable.
-  for (let i = 0; i < 26; i++) {
-    const fx = p.x - 60 + i * 5;
-    sink.addSpan(fx, base, p.z + 46, fx + 4.2, base + 1.2, p.z + 46.25, 0x6b5943, 'thin');
+  // Low walls / plaza edges for cover
+  for (let i = 0; i < 18; i++) {
+    const fx = p.x - 50 + i * 6;
+    sink.addSpan(fx, base, p.z + 48, fx + 5, base + 1.15, p.z + 48.3, 0x87857f, 'thin');
   }
 }
 
-// --- Substation: transformer sheds and pylons ---
-function buildSubstation(sink, terrain, rng) {
-  const p = poi('substation');
+// --- University City: campus blocks + service sheds ---
+function buildUniversity(sink, terrain, rng) {
+  const p = poi('university');
   const base = p.flatten;
 
-  for (let i = 0; i < 3; i++) {
-    const x = p.x - 30 + i * 24;
-    makeShed(sink, { x, z: p.z - 8, w: 16, d: 12, h: 5.5, baseY: base, color: 0x87857f });
+  for (let i = 0; i < 4; i++) {
+    const x = p.x - 45 + (i % 2) * 48;
+    const z = p.z - 30 + Math.floor(i / 2) * 40;
+    makeBuilding(sink, {
+      x, z, w: 24, d: 18, floors: 2 + Math.floor(rng() * 2),
+      baseY: base, color: pick(rng, PAL), rng,
+    });
   }
 
-  // Transformer blocks -- hard cover on an open pad.
+  for (let i = 0; i < 3; i++) {
+    const x = p.x - 20 + i * 22;
+    makeShed(sink, { x, z: p.z + 55, w: 14, d: 10, h: 5, baseY: base, color: 0x87857f });
+  }
+}
+
+// --- La Jolla: cliffside village — smaller structures + deck cover ---
+function buildLaJolla(sink, terrain, rng) {
+  const p = poi('lajolla');
+  const base = p.flatten;
+
   for (let i = 0; i < 8; i++) {
-    const tx = p.x - 34 + (i % 4) * 20;
-    const tz = p.z + 18 + Math.floor(i / 4) * 14;
-    sink.addSpan(tx, base, tz, tx + 3.2, base + 2.6, tz + 2.2, 0x5c6166);
+    const a = (i / 8) * Math.PI * 1.4 - 0.4;
+    const r = 18 + (i % 3) * 16;
+    const w = 12 + rng() * 6;
+    const d = 10 + rng() * 4;
+    const x = p.x + Math.cos(a) * r - w / 2;
+    const z = p.z + Math.sin(a) * r - d / 2;
+    makeBuilding(sink, {
+      x, z, w, d, floors: 1 + Math.floor(rng() * 3),
+      baseY: seatY(terrain, p, x, z, w, d),
+      color: pick(rng, PAL), rng,
+    });
   }
 
-  // Pylons: four legs plus a cross member, no interior.
-  for (let i = 0; i < 3; i++) {
-    const px = p.x - 26 + i * 26;
-    const pz = p.z - 40;
-    for (const [ox, oz] of [[0, 0], [4, 0], [0, 4], [4, 4]]) {
-      sink.addSpan(px + ox, base, pz + oz, px + ox + 0.7, base + 26, pz + oz + 0.7, 0x6e6c68);
-    }
-    sink.addSpan(px - 3, base + 26, pz - 3, px + 7.7, base + 27.4, pz + 7.7, 0x6e6c68);
+  // Seaside low walls
+  for (let i = 0; i < 12; i++) {
+    const wx = p.x - 55 + i * 9;
+    sink.addSpan(wx, base, p.z + 40, wx + 7, base + 1.2, p.z + 40.35, 0x9a968c, 'thin');
   }
 }
 
-// --- Trailer Row: scattered small structures, good rotations ---
-function buildTrailers(sink, terrain, rng) {
-  const p = poi('trailers');
+// --- Mission Bay: recreation sheds + scattered small cover ---
+function buildMissionBay(sink, terrain, rng) {
+  const p = poi('missionbay');
   const base = p.flatten;
-  for (let i = 0; i < 12; i++) {
+
+  makeShed(sink, { x: p.x - 40, z: p.z - 20, w: 30, d: 16, h: 7, baseY: base, color: 0x4a6b7a, doorW: 4 });
+  makeShed(sink, { x: p.x + 10, z: p.z - 15, w: 24, d: 14, h: 6, baseY: base, color: 0x6b7f43, doorW: 3.5 });
+
+  for (let i = 0; i < 10; i++) {
     const a = rng() * Math.PI * 2;
-    const r = 12 + rng() * 62;
-    const w = 9 + rng() * 4;
-    const d = 3.4;
+    const r = 20 + rng() * 55;
+    const w = 8 + rng() * 4;
+    const d = 3.5;
     const x = p.x + Math.cos(a) * r;
     const z = p.z + Math.sin(a) * r;
     makeShed(sink, {
@@ -224,17 +233,40 @@ function buildTrailers(sink, terrain, rng) {
       baseY: seatY(terrain, p, x, z, w, d),
       color: pick(rng, PAL), doorW: 1.4,
     });
-    // Step block at the door so trailers are enterable and mantle-able.
     sink.addSpan(x + w / 2 - 0.8, base, z - 1.2, x + w / 2 + 0.8, base + 0.6, z, 0x6b5943);
   }
 }
 
+// --- Old Town: mixed low buildings near the interchange ---
+function buildOldTown(sink, terrain, rng) {
+  const p = poi('oldtown');
+  const base = p.flatten;
+
+  for (let i = 0; i < 6; i++) {
+    const x = p.x - 40 + (i % 3) * 28;
+    const z = p.z - 25 + Math.floor(i / 3) * 32;
+    makeBuilding(sink, {
+      x, z, w: 16 + rng() * 6, d: 12 + rng() * 4, floors: 1 + Math.floor(rng() * 2),
+      baseY: base, color: pick(rng, PAL), rng,
+    });
+  }
+
+  for (let i = 0; i < 4; i++) {
+    makeShed(sink, {
+      x: p.x - 30 + i * 18, z: p.z + 40, w: 12, d: 8, h: 4,
+      baseY: base, color: pick(rng, PAL),
+    });
+  }
+}
+
 export function buildAllStructures(sink, terrain, rng) {
-  buildGrid(sink, terrain, rng);
-  buildHarbor(sink, terrain, rng);
-  buildRadioHill(sink, terrain, rng);
-  buildQuarry(sink, terrain, rng);
-  buildFarm(sink, terrain, rng);
-  buildSubstation(sink, terrain, rng);
-  buildTrailers(sink, terrain, rng);
+  buildDowntown(sink, terrain, rng);
+  buildAirport(sink, terrain, rng);
+  buildMiramar(sink, terrain, rng);
+  buildMissionTrails(sink, terrain, rng);
+  buildBalboa(sink, terrain, rng);
+  buildUniversity(sink, terrain, rng);
+  buildLaJolla(sink, terrain, rng);
+  buildMissionBay(sink, terrain, rng);
+  buildOldTown(sink, terrain, rng);
 }

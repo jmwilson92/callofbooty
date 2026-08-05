@@ -36,8 +36,8 @@ export const PLAYER = {
   // Crouch transition speed (m/s of capsule height change)
   CROUCH_LERP: 8.0,
 
-  // A street on The Grid's pad, looking into the city.
-  SPAWN: { x: 6, z: -25 },
+  // Old Town / Mission Valley approach, facing Downtown (south).
+  SPAWN: { x: -20, z: 160 },
 };
 
 export const SLIDE = {
@@ -92,78 +92,145 @@ export const CAMERA = {
 
 export const WORLD = {
   SEED: 1337,
-  SIZE: 1200, // metres, square, centred on origin
-  CELL: 3, // heightfield + render mesh resolution in metres
-  MAX_ELEVATION: 60,
+  // San Diego metro playspace. +X = east, -Z = north, -X = west (Pacific).
+  SIZE: 1600, // metres, square, centred near Mission Valley
+  CELL: 4, // heightfield + render mesh resolution in metres
+  MAX_ELEVATION: 95,
   WATER_LEVEL: 0.0,
 
-  // 4 octaves of simplex, per spec
+  // 4 octaves of simplex for coastal rolling + inland foothills
   NOISE_OCTAVES: 4,
-  NOISE_BASE_FREQ: 0.0016,
+  NOISE_BASE_FREQ: 0.0014,
   NOISE_LACUNARITY: 2.0,
   NOISE_PERSISTENCE: 0.5,
 
-  // Radial falloff -- edges drop into water so players cannot walk off the map
-  FALLOFF_START: 0.62, // fraction of half-size where falloff begins
-  FALLOFF_END: 0.97,
-  BASE_LIFT: 7, // keeps the island interior comfortably above the waterline
-  EDGE_DEPTH: 14, // how far below sea level the map rim sinks
+  // Soft rim so players cannot walk off the playable square; ocean is authored west.
+  FALLOFF_START: 0.88,
+  FALLOFF_END: 0.99,
+  BASE_LIFT: 6,
+  EDGE_DEPTH: 18,
 
-  FOG_NEAR: 400,
-  FOG_FAR: 900,
-  SKY_COLOR: 0x9ab6cc,
+  // Pacific shoreline (west). Land is generally x > COAST_X with bays cut in.
+  COAST_X: -520,
+  COAST_BLEND: 90,
 
-  SUN_ELEVATION_DEG: 42,
-  SUN_AZIMUTH_DEG: 215,
-  SUN_INTENSITY: 2.2,
-  SUN_COLOR: 0xffe8c4,
-  AMBIENT_SKY: 0x8fa6be,
-  AMBIENT_GROUND: 0x5a5344,
-  AMBIENT_INTENSITY: 0.75,
+  // Mission Bay lagoon (inland water cut) — keep clear of the east-shore POI pad
+  MISSION_BAY: { x: -320, z: 20, rx: 140, rz: 100, depth: 4.5 },
+  // San Diego Bay water (southwest of downtown; does not cover the city pad)
+  SD_BAY: { x: -320, z: 480, rx: 170, rz: 130, depth: 6.0 },
+
+  // Mission Trails / eastern hills boost
+  EAST_HILLS: { x: 480, z: -60, radius: 280, peak: 88 },
+
+  FOG_NEAR: 450,
+  FOG_FAR: 1100,
+  SKY_COLOR: 0x8eb8d4,
+
+  // Afternoon sun over the Pacific (west-southwest)
+  SUN_ELEVATION_DEG: 38,
+  SUN_AZIMUTH_DEG: 240,
+  SUN_INTENSITY: 2.35,
+  SUN_COLOR: 0xffe4b8,
+  AMBIENT_SKY: 0x9ab8d0,
+  AMBIENT_GROUND: 0x6a5f4a,
+  AMBIENT_INTENSITY: 0.78,
 
   SHADOW_MAP_SIZE: 2048,
-  SHADOW_BOX: 120, // shadow camera fitted to this box around the player
+  SHADOW_BOX: 120,
 };
 
-// Terrain vertex colouring by height and slope.
+// Terrain vertex colouring by height and slope — SoCal coastal palette.
 export const TERRAIN_COLORS = {
-  SAND: 0xc2b49a,
-  GRASS: 0x6b7f43,
-  DRY_GRASS: 0x8a8b52,
-  DIRT: 0x6e5a42,
+  SAND: 0xd4c4a0,
+  GRASS: 0x6b8a45,
+  DRY_GRASS: 0xa09058,
+  DIRT: 0x7a6348,
   ROCK: 0x8c8a85,
   ROCK_DARK: 0x5d5b58,
-  SNOW: 0xe8ecf0,
+  SNOW: 0xe8ecf0, // unused at SD elevations; kept for blend safety
   ASPHALT: 0x3a3b3e,
 
-  SAND_MAX: 2.5,
-  GRASS_MAX: 34,
-  ROCK_MIN_SLOPE_DEG: 34,
-  ROCK_DARK_SLOPE_DEG: 48,
-  SNOW_MIN: 46,
-  // +/- brightness jitter so large flat areas are not a solid fill. Keep this
-  // low: the terrain has no texture yet, so vertex brightness noise is the most
-  // visible thing on screen and reads as blotching well before it reads as
-  // variation.
-  NOISE_VARIATION: 0.03,
+  SAND_MAX: 3.5,
+  GRASS_MAX: 48,
+  ROCK_MIN_SLOPE_DEG: 32,
+  ROCK_DARK_SLOPE_DEG: 46,
+  SNOW_MIN: 120,
+  NOISE_VARIATION: 0.035,
 };
 
-// Seven hand-placed points of interest. Coordinates are (x, z) in metres.
+// San Diego battle-royale POIs, laid out from map.png (Google Maps screenshot).
+// Coord frame: +X east, -Z north, -X west (Pacific). Origin ≈ Mission Valley.
 // `flatten` carves a level pad so buildings never float or sink.
 export const POIS = [
-  { id: 'harbor',   name: 'Harbor',      x: -400, z:  430, radius: 105, flatten: 4.0,  loot: 'high' },
-  { id: 'radiohill',name: 'Radio Hill',  x:  330, z: -400, radius:  80, flatten: null, loot: 'medium' },
-  { id: 'grid',     name: 'The Grid',    x:   40, z:   30, radius: 130, flatten: 26.0, loot: 'highest' },
-  { id: 'quarry',   name: 'Quarry',      x: -380, z: -330, radius: 100, flatten: 18.0, loot: 'medium' },
-  { id: 'farm',     name: 'Farmstead',   x:  420, z:  260, radius:  95, flatten: 20.0, loot: 'medium' },
-  { id: 'substation',name:'Substation',  x: -120, z: -450, radius:  75, flatten: 24.0, loot: 'low-medium' },
-  { id: 'trailers', name: 'Trailer Row', x:  430, z:  520, radius:  85, flatten: 12.0, loot: 'low' },
+  {
+    id: 'lajolla', name: 'La Jolla',
+    x: -480, z: -400, radius: 95, flatten: 22.0, loot: 'high',
+    note: 'NW coastal cliffs — Village of La Jolla / Shores',
+  },
+  {
+    id: 'university', name: 'University City',
+    x: 50, z: -360, radius: 100, flatten: 38.0, loot: 'medium',
+    note: 'North campus / UTC corridor',
+  },
+  {
+    id: 'miramar', name: 'Miramar Ridge',
+    x: 300, z: -400, radius: 85, flatten: null, loot: 'medium',
+    note: 'High ground north — air station ridge silhouette',
+  },
+  {
+    id: 'missiontrails', name: 'Mission Trails',
+    x: 500, z: -40, radius: 115, flatten: null, loot: 'medium',
+    note: 'East hills / regional park rocky terrain',
+  },
+  {
+    id: 'missionbay', name: 'Mission Bay',
+    // Shore pad on the east bank of the lagoon (not in the water).
+    x: -140, z: 60, radius: 85, flatten: 6.0, loot: 'medium',
+    note: 'Bay parks, beach strip, recreational cover',
+  },
+  {
+    id: 'oldtown', name: 'Old Town',
+    x: -50, z: 170, radius: 90, flatten: 12.0, loot: 'high',
+    note: 'I-5 / I-8 interchange approach',
+  },
+  {
+    id: 'balboa', name: 'Balboa Park',
+    x: 130, z: 280, radius: 100, flatten: 18.0, loot: 'high',
+    note: 'Park + museum blocks mid-south',
+  },
+  {
+    id: 'downtown', name: 'Downtown',
+    x: 80, z: 400, radius: 140, flatten: 10.0, loot: 'highest',
+    note: 'Dense city — highest loot, vertical play',
+  },
+  {
+    id: 'airport', name: 'Lindbergh Field',
+    x: -160, z: 340, radius: 100, flatten: 7.0, loot: 'medium',
+    note: 'SAN airport / bay flats — hangars + open sightlines',
+  },
+];
+
+// Freeway-inspired corridors between POIs (I-5, I-8, I-15, I-805, SR-52/163).
+export const ROAD_LINKS = [
+  ['lajolla', 'missionbay'],       // coastal I-5
+  ['missionbay', 'oldtown'],       // I-5 south
+  ['oldtown', 'downtown'],         // into the city
+  ['oldtown', 'airport'],          // Harbor Dr / bay
+  ['airport', 'downtown'],         // waterfront
+  ['downtown', 'balboa'],          // SR-163 / park
+  ['balboa', 'university'],        // 163 north corridor
+  ['oldtown', 'university'],       // mid-city north
+  ['university', 'miramar'],       // SR-52 / 15
+  ['miramar', 'missiontrails'],    // I-15 east hills
+  ['missiontrails', 'balboa'],     // I-8 / east approach
+  ['missiontrails', 'downtown'],   // long east-west artery
+  ['lajolla', 'university'],       // SR-52 west
 ];
 
 export const ROADS = {
-  WIDTH: 8,
-  BLEND: 12, // metres of smoothstep back to natural terrain either side
-  RAISE: 0.12, // road mesh sits above flattened terrain to avoid z-fighting
+  WIDTH: 10, // arterial / freeway feel
+  BLEND: 14,
+  RAISE: 0.12,
 };
 
 export const BUILDINGS = {
