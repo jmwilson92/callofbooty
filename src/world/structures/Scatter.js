@@ -8,6 +8,7 @@ import {
   placeFireStation,
   placeBusinessCenter,
   placeSkyscraper,
+  placeSkylineTower,
   placeBoatHouse,
   placeHarborPier,
   placeBridge,
@@ -145,30 +146,16 @@ export function scatterStructures(sink, terrain, rng) {
     });
   }
 
-  // --- Skyscrapers: dense downtown core grid + ring ---
+  // --- Extra towers on downtown fringe (district itself is built in Buildings.js) ---
   const dt = poi('downtown');
   if (dt) {
-    // Core grid for a real skyline silhouette
-    const grid = [
-      [-35, -30], [0, -40], [40, -25], [-40, 10], [15, 5], [50, 15],
-      [-20, 35], [25, 40], [-55, -10], [55, -5], [0, 55], [-15, -55],
-    ];
-    for (const [ox, oz] of grid) {
-      if (stats.sky >= S.SKY) break;
-      const x = dt.x + ox;
-      const z = dt.z + oz;
-      if (terrain.heightAt(x, z) < 2 || terrain.slopeDegAt(x, z) > 18) continue;
-      placeSkyscraper(sink, terrain, x - 8, z - 8, rng);
-      stats.sky++;
-    }
-    // Outer ring fillers
-    for (let n = stats.sky; n < S.SKY; n++) {
+    for (let n = 0; n < S.SKY; n++) {
       const a = rng() * Math.PI * 2;
-      const r = dt.radius * (0.4 + rng() * 0.9);
+      const r = dt.radius * (0.75 + rng() * 0.45);
       const x = dt.x + Math.cos(a) * r;
       const z = dt.z + Math.sin(a) * r;
       if (terrain.heightAt(x, z) < 2 || terrain.slopeDegAt(x, z) > 16) continue;
-      placeSkyscraper(sink, terrain, x - 10, z - 10, rng);
+      placeSkylineTower(sink, x - 8, z - 8, terrain.heightAt(x, z), rng, 12 + Math.floor(rng() * 12));
       stats.sky++;
     }
   }

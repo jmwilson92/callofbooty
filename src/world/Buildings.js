@@ -1,5 +1,6 @@
 import { BUILDINGS, POIS } from '../config.js';
 import { makeBuilding, makeShed, slab } from './BuildingKit.js';
+import { placeDowntownDistrict } from './structures/Catalog.js';
 
 // Six San Diego POIs — each with a distinct silhouette for readable rotations.
 // Structures sit on the POI's flattened pad where one exists.
@@ -23,27 +24,12 @@ function pick(rng, arr) {
   return arr[Math.floor(rng() * arr.length) % arr.length];
 }
 
-// --- Downtown: dense city blocks, highest loot / vertical play ---
+// --- Downtown: satellite-style grid + packed high-rises (downtown.png) ---
 function buildDowntown(sink, terrain, rng) {
   const p = poi('downtown');
-  const cols = 4, rows = 3;
-  const bw = 22, bd = 18, street = 12;
-  const stepX = bw + street, stepZ = bd + street;
-  const x0 = p.x - (cols * stepX - street) / 2;
-  const z0 = p.z - (rows * stepZ - street) / 2;
-
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const bx = x0 + c * stepX;
-      const bz = z0 + r * stepZ;
-      const floors = 3 + Math.floor(rng() * 4); // 3–6 stories
-      makeBuilding(sink, {
-        x: bx, z: bz, w: bw, d: bd, floors,
-        baseY: seatY(terrain, p, bx, bz, bw, bd),
-        color: pick(rng, PAL), rng,
-      });
-    }
-  }
+  const base = p.flatten ?? seatY(terrain, p, p.x, p.z, 10, 10);
+  // Full district: street grid, mid-rises, tall towers, waterfront hotels
+  placeDowntownDistrict(sink, terrain, p.x, p.z, base, rng);
 }
 
 // --- San Diego International Airport: hangars + container/yard cover ---

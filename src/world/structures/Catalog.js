@@ -336,9 +336,77 @@ export function placeBusinessCenter(sink, terrain, x, z, rng) {
   sink.addSpan(x + w * 0.45, baseY + 0.4, z - 7.1, x + w * 0.55, baseY + 1.3, z - 6.2, C.blueLite);
 }
 
-// ===================== SKYSCRAPER =====================
+// ===================== SKYSCRAPER / SKYLINE =====================
+
+/**
+ * Lightweight exterior-only tower for dense skyline massing.
+ * Floor bands + mullions + crown — no full interior (keeps draw cost sane).
+ * floors: story count; taller = downtown financial core look.
+ */
+export function placeSkylineTower(sink, x, z, baseY, rng, floors = null) {
+  const fCount = floors ?? (8 + Math.floor(rng() * 22)); // 8–29
+  const floorH = 3.55;
+  const h = fCount * floorH;
+  const w = 11 + rng() * 16;
+  const d = 11 + rng() * 14;
+  const variant = Math.floor(rng() * 4);
+  const col = pick(rng, [
+    C.glass, C.glassDark, 0x4a5868, 0x2a3848, C.white, 0x6a8090, 0x3a4850, 0xc8d0d8,
+  ]);
+  const band = pick(rng, [C.glassDark, C.metal, 0x1a2830, C.white]);
+
+  if (variant === 0) {
+    // Glass slab
+    sink.addSpan(x, baseY, z, x + w, baseY + h, z + d, col);
+  } else if (variant === 1) {
+    // Podium + shaft setback
+    sink.addSpan(x - 2, baseY, z - 2, x + w + 2, baseY + floorH * 3, z + d + 2, C.concrete);
+    sink.addSpan(x + 1, baseY + floorH * 3, z + 1, x + w - 1, baseY + h, z + d - 1, col);
+  } else if (variant === 2) {
+    // Twin towers sharing podium
+    sink.addSpan(x - 1, baseY, z - 1, x + w + 1, baseY + floorH * 2.5, z + d + 1, C.concrete);
+    const mid = w * 0.48;
+    sink.addSpan(x, baseY + floorH * 2.5, z, x + mid - 0.6, baseY + h, z + d, col);
+    sink.addSpan(x + mid + 0.6, baseY + floorH * 2.5, z, x + w, baseY + h * 0.88, z + d * 0.92, band);
+  } else {
+    // Stepped crown massing
+    sink.addSpan(x, baseY, z, x + w, baseY + h * 0.7, z + d, col);
+    sink.addSpan(x + w * 0.12, baseY + h * 0.7, z + d * 0.12, x + w * 0.88, baseY + h * 0.9, z + d * 0.88, band);
+    sink.addSpan(x + w * 0.25, baseY + h * 0.9, z + d * 0.25, x + w * 0.75, baseY + h, z + d * 0.75, col);
+  }
+
+  // Horizontal floor lines (every other floor for clarity at distance)
+  for (let f = 2; f < fCount; f += 2) {
+    const y = baseY + f * floorH;
+    sink.addSpan(x - 0.06, y, z - 0.06, x + w + 0.06, y + 0.12, z + d + 0.06, band);
+  }
+  // Vertical mullion accents
+  const mullions = 2 + Math.floor(rng() * 3);
+  for (let i = 1; i <= mullions; i++) {
+    const mx = x + (w * i) / (mullions + 1);
+    sink.addSpan(mx - 0.12, baseY + 2, z - 0.08, mx + 0.12, baseY + h - 1, z + 0.08, C.metalLite);
+    sink.addSpan(mx - 0.12, baseY + 2, z + d - 0.08, mx + 0.12, baseY + h - 1, z + d + 0.08, C.metalLite);
+  }
+
+  // Ground lobby glass
+  sink.addSpan(x + w * 0.15, baseY + 0.2, z - 0.12, x + w * 0.85, baseY + 3.2, z + 0.15, C.glass);
+  // Roof plant + antenna
+  const roof = baseY + h;
+  sink.addSpan(x + w * 0.2, roof, z + d * 0.2, x + w * 0.8, roof + 2.2, z + d * 0.8, C.metal);
+  if (fCount >= 16) {
+    post(sink, x + w / 2 - 0.3, roof + 2, z + d / 2 - 0.3, 12 + rng() * 14, 0.55, C.metalLite);
+    neonStrip(sink, x + w / 2 - 0.5, roof + 14, z + d / 2 - 0.5, x + w / 2 + 0.5, roof + 16, z + d / 2 + 0.5, C.redHot);
+  }
+  return { w, d, h, floors: fCount };
+}
+
 export function placeSkyscraper(sink, terrain, x, z, rng) {
   const baseY = groundY(terrain, x, z, 28, 26);
+  // Mix: some enterable mid/high towers, many silhouette skyline towers
+  if (rng() > 0.55) {
+    placeSkylineTower(sink, x, z, baseY, rng, 12 + Math.floor(rng() * 16));
+    return;
+  }
   const variant = Math.floor(rng() * 3);
   const floors = 10 + Math.floor(rng() * 10); // 10–19
   let w = 14 + rng() * 6;
@@ -346,10 +414,8 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
   const col = pick(rng, [C.glass, C.glassDark, 0x4a5860, C.white, 0x2a3840, 0x6a8090]);
 
   if (variant === 0) {
-    // Classic tower
     makeBuilding(sink, { x, z, w, d, floors, baseY, color: col, rng });
   } else if (variant === 1) {
-    // Setback tower — podium + shaft
     makeBuilding(sink, { x, z, w: w + 6, d: d + 6, floors: 3, baseY, color: C.concrete, rng });
     makeBuilding(sink, {
       x: x + 3, z: z + 3, w, d, floors: floors - 2,
@@ -357,7 +423,6 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
       color: col, rng,
     });
   } else {
-    // Twin-slab
     makeBuilding(sink, { x, z, w: w * 0.55, d, floors, baseY, color: col, rng });
     makeBuilding(sink, {
       x: x + w * 0.6, z, w: w * 0.45, d: d * 0.85,
@@ -366,25 +431,127 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
   }
 
   const roof = baseY + BUILDINGS.GROUND_FLOOR_HEIGHT + (floors - 1) * BUILDINGS.FLOOR_HEIGHT;
-  // Crown + spire
   sink.addSpan(x + w * 0.2, roof, z + d * 0.2, x + w * 0.8, roof + 2.5, z + d * 0.8, col);
   post(sink, x + w / 2 - 0.25, roof + 2.5, z + d / 2 - 0.25, 14 + rng() * 10, 0.5, C.metalLite);
   neonStrip(sink, x + w / 2 - 0.4, roof + 14, z + d / 2 - 0.4, x + w / 2 + 0.4, roof + 16, z + d / 2 + 0.4, C.redHot);
-  // Ground plaza lights
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2;
-    post(sink, x + w / 2 + Math.cos(a) * (w * 0.7), baseY, z + d / 2 + Math.sin(a) * (d * 0.7), 3.5, 0.2, C.metal);
-    neonStrip(
-      sink,
-      x + w / 2 + Math.cos(a) * (w * 0.7) - 0.3,
-      baseY + 3.3,
-      z + d / 2 + Math.sin(a) * (d * 0.7) - 0.3,
-      x + w / 2 + Math.cos(a) * (w * 0.7) + 0.5,
-      baseY + 3.6,
-      z + d / 2 + Math.sin(a) * (d * 0.7) + 0.5,
-      C.neonCyan
-    );
+}
+
+/**
+ * Full downtown district from satellite reference: street grid + packed towers.
+ * Matches SD downtown density vibe — numerous high-rises, not sparse midblocks.
+ */
+export function placeDowntownDistrict(sink, terrain, cx, cz, baseY, rng) {
+  // Street grid roughly like the satellite (N–S avenues × E–W streets).
+  // +X east, +Z south. Origin at district center.
+  const cols = 7; // N–S blocks
+  const rows = 6; // E–W blocks
+  const streetW = 10;
+  const blockW = 28;
+  const blockD = 26;
+  const stepX = blockW + streetW;
+  const stepZ = blockD + streetW;
+  const originX = cx - (cols * stepX - streetW) / 2;
+  const originZ = cz - (rows * stepZ - streetW) / 2;
+
+  // Asphalt street grid
+  const gridX0 = originX - streetW;
+  const gridZ0 = originZ - streetW;
+  const gridX1 = originX + cols * stepX;
+  const gridZ1 = originZ + rows * stepZ;
+  sink.addSpan(gridX0, baseY - 0.08, gridZ0, gridX1, baseY + 0.02, gridZ1, C.asphalt);
+
+  // Sidewalk pads under each block (lighter concrete)
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const bx = originX + c * stepX;
+      const bz = originZ + r * stepZ;
+      sink.addSpan(bx - 1.5, baseY - 0.02, bz - 1.5, bx + blockW + 1.5, baseY + 0.06, bz + blockD + 1.5, C.concrete);
+    }
   }
+
+  // Yellow center lines on main streets
+  for (let c = 0; c <= cols; c++) {
+    const sx = originX + c * stepX - streetW / 2;
+    neonStrip(sink, sx - 0.2, baseY + 0.03, gridZ0, sx + 0.2, baseY + 0.08, gridZ1, C.yellowHot);
+  }
+  for (let r = 0; r <= rows; r++) {
+    const sz = originZ + r * stepZ - streetW / 2;
+    neonStrip(sink, gridX0, baseY + 0.03, sz - 0.2, gridX1, baseY + 0.08, sz + 0.2, C.yellowHot);
+  }
+
+  let towers = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const bx = originX + c * stepX;
+      const bz = originZ + r * stepZ;
+
+      // Waterfront south (high z) + core center = tallest
+      const distCore = Math.hypot(c - cols * 0.45, r - rows * 0.4);
+      const waterfront = r >= rows - 2;
+      const financial = distCore < 2.2;
+
+      // 1–3 towers per block (satellite is packed)
+      const perBlock = financial ? 2 + Math.floor(rng() * 2) : 1 + Math.floor(rng() * 2);
+
+      for (let t = 0; t < perBlock; t++) {
+        const ox = 1.5 + (t % 2) * (blockW * 0.42) + rng() * 2;
+        const oz = 1.5 + Math.floor(t / 2) * (blockD * 0.4) + rng() * 2;
+        const tw = Math.min(blockW * 0.42, 10 + rng() * 12);
+        const td = Math.min(blockD * 0.42, 10 + rng() * 11);
+
+        let floors;
+        if (financial && rng() > 0.25) {
+          floors = 18 + Math.floor(rng() * 14); // 18–31 super tall
+        } else if (waterfront && rng() > 0.35) {
+          floors = 14 + Math.floor(rng() * 10); // hotel towers
+        } else if (rng() > 0.4) {
+          floors = 10 + Math.floor(rng() * 10); // high-rise
+        } else {
+          floors = 5 + Math.floor(rng() * 6); // mid-rise fill
+        }
+
+        // A few enterable mid towers for gameplay; rest are silhouette skyline
+        if (floors <= 8 && rng() > 0.5) {
+          makeBuilding(sink, {
+            x: bx + ox, z: bz + oz, w: tw, d: td, floors,
+            baseY, color: pick(rng, [C.glass, C.white, C.cream, C.brick, C.gray]),
+            rng,
+          });
+        } else {
+          placeSkylineTower(sink, bx + ox, bz + oz, baseY, rng, floors);
+        }
+        towers++;
+      }
+
+      // Street furniture: lights on corners
+      post(sink, bx - 2, baseY, bz - 2, 5.5, 0.2, C.metal);
+      neonStrip(sink, bx - 2.4, baseY + 5.2, bz - 2.4, bx - 1.4, baseY + 5.5, bz - 1.4, C.yellowHot);
+    }
+  }
+
+  // Harbor hotels strip on south edge (like marina / Hyatt row)
+  for (let i = 0; i < 5; i++) {
+    const hx = originX + 10 + i * 32;
+    const hz = originZ + rows * stepZ + 8;
+    placeSkylineTower(sink, hx, hz, baseY, rng, 12 + Math.floor(rng() * 8));
+    towers++;
+  }
+
+  // Parking garage (flat multi-level) east of core — satellite has big plates
+  {
+    const gx = originX + cols * stepX + 5;
+    const gz = originZ + stepZ;
+    for (let lvl = 0; lvl < 5; lvl++) {
+      const y = baseY + lvl * 3.2;
+      sink.addSpan(gx, y, gz, gx + 36, y + 0.4, gz + 40, C.concrete);
+      post(sink, gx + 2, baseY, gz + 2, 5 * 3.2, 0.8, C.concrete);
+      post(sink, gx + 32, baseY, gz + 2, 5 * 3.2, 0.8, C.concrete);
+      post(sink, gx + 2, baseY, gz + 36, 5 * 3.2, 0.8, C.concrete);
+      post(sink, gx + 32, baseY, gz + 36, 5 * 3.2, 0.8, C.concrete);
+    }
+  }
+
+  return { towers, cols, rows };
 }
 
 // ===================== BOAT / HARBOR =====================

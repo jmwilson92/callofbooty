@@ -233,8 +233,9 @@ export const POIS = [
   },
   {
     id: 'downtown', name: 'Downtown',
-    x: 50, z: 460, radius: 110, flatten: 9.0, loot: 'highest',
-    note: 'Dense bayfront core — highest loot',
+    // Larger pad for satellite-style street grid + skyline massing
+    x: 40, z: 450, radius: 200, flatten: 9.0, loot: 'highest',
+    note: 'Dense bayfront skyline — numerous high-rises (see downtown.png)',
   },
   {
     id: 'pointloma', name: 'Point Loma',
@@ -404,7 +405,7 @@ export const STRUCTURES = {
   AUTO: 14,
   FIRE: 8,
   BUSINESS: 24,
-  SKY: 14,
+  SKY: 8, // extra towers beyond the downtown district grid
   BOAT: 16,
   BILLBOARD: 20,
   VEHICLE: 70,
