@@ -135,8 +135,9 @@ export function makeBuilding(sink, opts) {
   const runZ1 = sz1 - landing;
   const hole = { x0: sx0 - 0.1, z0: sz0 - 0.1, x1: sx1 + 0.1, z1: runZ1 + 0.1 };
 
-  // Ground slab -- solid, no hole (nothing below it).
-  slab(sink, x, z, x + w, z + d, baseY, floorColor);
+  // Ground slab -- solid, no hole (nothing below it). Lifted clear of the
+  // terrain so the two surfaces are not coplanar.
+  slab(sink, x, z, x + w, z + d, baseY + BUILDINGS.GROUND_SLAB_LIFT, floorColor);
 
   const doorH = BUILDINGS.DOOR_HEIGHT;
   const doorW = BUILDINGS.DOOR_WIDTH;
@@ -215,7 +216,7 @@ export function makeBuilding(sink, opts) {
 export function makeShed(sink, opts) {
   const { x, z, w, d, h, baseY, color, doorW = 3.2 } = opts;
   const floorColor = BUILDINGS.FLOOR_COLOR;
-  slab(sink, x, z, x + w, z + d, baseY, floorColor);
+  slab(sink, x, z, x + w, z + d, baseY + BUILDINGS.GROUND_SLAB_LIFT, floorColor);
 
   const yBot = baseY;
   const yTop = baseY + h;

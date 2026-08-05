@@ -171,6 +171,13 @@ export const BUILDINGS = {
   GROUND_FLOOR_HEIGHT: 4.2,
   WALL_THICKNESS: 0.25,
   SLAB_THICKNESS: 0.3,
+  // A building seated on a flattened POI pad puts its ground floor at exactly
+  // the terrain height, leaving two coplanar surfaces fighting for the same
+  // depth -- which reads in-game as a blotchy, flickering ground floor. Lift
+  // the ground slab clear of the terrain. Small enough to walk over without
+  // noticing (well under MAX_STEP_HEIGHT), large enough to beat depth
+  // precision at the ranges a building interior is ever visible from.
+  GROUND_SLAB_LIFT: 0.08,
   DOOR_WIDTH: 1.4,
   DOOR_HEIGHT: 2.2,
   WINDOW_SILL: 0.9,

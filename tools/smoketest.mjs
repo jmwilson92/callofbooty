@@ -215,6 +215,44 @@ check('collision surface matches the rendered mesh',
   surface.worst < 0.01,
   `${surface.sampled} triangles, worst mismatch ${surface.worst.toFixed(4)}m`);
 
+// --- building floors must not be coplanar with the terrain -------------------
+// Two surfaces at identical depth z-fight, which looks like a blotchy,
+// flickering ground floor.
+const floors = await page.evaluate(() => {
+  const g = window.__game;
+  const cols = 4, rows = 3, bw = 22, bd = 18, street = 12;
+  const stepX = bw + street, stepZ = bd + street;
+  const x0 = 40 - (cols * stepX - street) / 2;
+  const z0 = 30 - (rows * stepZ - street) / 2;
+
+  let worstGap = Infinity;
+  let checked = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const px = x0 + c * stepX + bw / 2;
+      const pz = z0 + r * stepZ + bd / 2;
+      const terrainY = g.terrain.heightAt(px, pz);
+
+      const cand = [];
+      g.hash.query(px - 0.1, pz - 0.1, px + 0.1, pz + 0.1, cand);
+      // The ground floor slab: the lowest box top at or above terrain level.
+      const tops = cand
+        .filter((b) => px >= b.min.x && px <= b.max.x && pz >= b.min.z && pz <= b.max.z)
+        .map((b) => b.max.y)
+        .filter((t) => t >= terrainY - 0.001 && t < terrainY + 1.0)
+        .sort((a, b) => a - b);
+      if (!tops.length) continue;
+      checked++;
+      worstGap = Math.min(worstGap, tops[0] - terrainY);
+    }
+  }
+  return { worstGap, checked };
+});
+
+check('building floors sit clear of the terrain (no z-fighting)',
+  floors.checked > 0 && floors.worstGap > 0.02,
+  `${floors.checked} buildings, smallest floor/terrain gap ${floors.worstGap.toFixed(3)}m`);
+
 // --- doorways are actually passable -----------------------------------------
 // Walk at the front door of every Grid building and require entry. A doorway
 // can exist in the facade yet be blocked by an overlapping window's sill, which
@@ -426,6 +464,8 @@ async function shot(path, x, z, yaw, pitch, eye = 1.7) {
 
 // Straight at a Grid building's front door.
 await shot('tools/screenshot-door.png', 19.7, -16.5, Math.PI, -0.02);
+// Inside a ground floor, looking down -- where coplanar-surface z-fighting shows.
+await shot('tools/screenshot-interior.png', 20, 0, 1.0, -0.75);
 // Open ground, to judge terrain colour banding.
 await shot('tools/screenshot.png', -200, 120, 2.2, 0.02);
 console.log('\n  screenshot written to tools/screenshot.png');
