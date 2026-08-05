@@ -1,4 +1,5 @@
 import { POIS } from '../config.js';
+import { nearestPoi, poiContains } from '../world/Poi.js';
 
 // F3 overlay: frame rate, draw calls, triangles, and player state.
 export class DebugOverlay {
@@ -24,13 +25,10 @@ export class DebugOverlay {
   }
 
   nearestPoi(x, z) {
-    let best = null;
-    let bestD = Infinity;
-    for (const p of POIS) {
-      const d = Math.hypot(x - p.x, z - p.z);
-      if (d < bestD) { bestD = d; best = p; }
-    }
-    return best && bestD < best.radius * 1.6 ? `${best.name} (${bestD.toFixed(0)}m)` : `${best.name} ${bestD.toFixed(0)}m away`;
+    const { poi: best, dist } = nearestPoi(POIS, x, z);
+    if (!best) return '';
+    if (dist <= 0.5 || poiContains(best, x, z)) return `${best.name} (inside)`;
+    return `${best.name} ${dist.toFixed(0)}m away`;
   }
 
   update(dt, controller, extra = {}) {

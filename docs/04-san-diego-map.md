@@ -16,19 +16,22 @@ Origin ≈ **Mission Valley**. World size: **1800 m**.
 
 ## POIs (playable)
 
-| ID | Name | Approx role |
-|----|------|-------------|
-| `lajolla` | **La Jolla** | NW coastal cliffs / village |
-| `kearnymesa` | **Kearny Mesa** | North industrial/commercial mesa |
-| `missionvalley` | **Mission Valley** | I-8 corridor — spawn hub |
-| `airport` | **San Diego International Airport** | Hangars + open bay flats |
-| `mcrd` | **MCRD Depot** | Barracks grid beside the airport |
-| `downtown` | **Downtown** | Dense core, highest loot |
-| `pointloma` | **Point Loma** | Peninsula high ground |
-| `balboa` | **Balboa Park** | Museums / park NE of downtown |
-| `zoo` | **San Diego Zoo** | Zoo grounds north of Balboa |
-| `coronado` | **Coronado** | Island across San Diego Bay |
-| `radiotower` | **Radio Tower** | Summit outpost on the eastern mountain spine |
+Footprints are **rectangles** (`w` × `d` metres), not circles — shaped like
+districts on the satellite map (valley corridor, airfield plate, downtown grid, etc.).
+
+| ID | Name | Footprint shape | Role |
+|----|------|-----------------|------|
+| `lajolla` | **La Jolla** | Tall N–S strip | NW coastal cliffs / village |
+| `kearnymesa` | **Kearny Mesa** | Wide mesa plate | Industrial/commercial |
+| `missionvalley` | **Mission Valley** | Wide E–W corridor | I-8 spawn hub |
+| `airport` | **San Diego International Airport** | Long E–W field | Hangars + bay flats |
+| `mcrd` | **MCRD Depot** | Base rectangle | Barracks grid |
+| `downtown` | **Downtown** | Large grid district | Skyline, highest loot |
+| `pointloma` | **Point Loma** | Tall N–S peninsula | Ridge high ground |
+| `balboa` | **Balboa Park** | Park rectangle | Museums |
+| `zoo` | **San Diego Zoo** | Compact rectangle | Zoo grounds |
+| `coronado` | **Coronado** | Wide E–W island strip | Resort island |
+| `radiotower` | **Radio Tower** | Small square pad | East mountain outpost |
 
 ## Geography (still present under the POIs)
 

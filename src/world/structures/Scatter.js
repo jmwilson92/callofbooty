@@ -1,4 +1,5 @@
 import { WORLD, POIS, STRUCTURES } from '../../config.js';
+import { poiContains } from '../Poi.js';
 import {
   placeSuburbanHome,
   placeTrailer,
@@ -19,9 +20,9 @@ import {
 
 // Region-aware placement of landmark structures across San Diego.
 
-function tooCloseToPoiCore(x, z, scale = 0.75) {
+function tooCloseToPoiCore(x, z, scale = 0.85) {
   for (const p of POIS) {
-    if (Math.hypot(x - p.x, z - p.z) < p.radius * scale) return true;
+    if (poiContains(p, x, z, scale)) return true;
   }
   return false;
 }
@@ -149,11 +150,16 @@ export function scatterStructures(sink, terrain, rng) {
   // --- Extra towers on downtown fringe (district itself is built in Buildings.js) ---
   const dt = poi('downtown');
   if (dt) {
+    const hw = (dt.w ?? 300) * 0.55;
+    const hd = (dt.d ?? 280) * 0.55;
     for (let n = 0; n < S.SKY; n++) {
-      const a = rng() * Math.PI * 2;
-      const r = dt.radius * (0.75 + rng() * 0.45);
-      const x = dt.x + Math.cos(a) * r;
-      const z = dt.z + Math.sin(a) * r;
+      // Fringe of the rectangular district (not a circle)
+      const edge = Math.floor(rng() * 4);
+      let x; let z;
+      if (edge === 0) { x = dt.x + (rng() * 2 - 1) * hw; z = dt.z - hd - 20 - rng() * 40; }
+      else if (edge === 1) { x = dt.x + (rng() * 2 - 1) * hw; z = dt.z + hd + 20 + rng() * 40; }
+      else if (edge === 2) { x = dt.x - hw - 20 - rng() * 40; z = dt.z + (rng() * 2 - 1) * hd; }
+      else { x = dt.x + hw + 20 + rng() * 40; z = dt.z + (rng() * 2 - 1) * hd; }
       if (terrain.heightAt(x, z) < 2 || terrain.slopeDegAt(x, z) > 16) continue;
       placeSkylineTower(sink, x - 8, z - 8, terrain.heightAt(x, z), rng, 12 + Math.floor(rng() * 12));
       stats.sky++;

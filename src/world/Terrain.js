@@ -3,6 +3,7 @@ import {
   WORLD, TERRAIN_COLORS, POIS, ROADS, ROAD_LINKS, FREEWAYS,
 } from '../config.js';
 import { Simplex, smoothstep, clamp, lerp } from '../core/Noise.js';
+import { poiPadWeight, poiHalfSize } from './Poi.js';
 
 // San Diego heightfield shaped from satellite_view.png + terrain_map.png.
 // Same array backs render mesh and collision.
@@ -252,25 +253,27 @@ export class Terrain {
     }
   }
 
+  // Rectangular district pads (not circular blobs) with soft edge blend.
   _applyPoiPads() {
     for (const poi of POIS) {
       if (poi.flatten === null || poi.flatten === undefined) continue;
       const pad = poi.flatten;
-      const inner = poi.radius;
-      const outer = poi.radius + 55;
+      const { hw, hd } = poiHalfSize(poi);
+      const blend = poi.padBlend ?? 36;
+      const reachX = hw + blend;
+      const reachZ = hd + blend;
 
-      const minX = Math.max(0, Math.floor((poi.x - outer + this.half) / this.cell));
-      const maxX = Math.min(this.n - 1, Math.ceil((poi.x + outer + this.half) / this.cell));
-      const minZ = Math.max(0, Math.floor((poi.z - outer + this.half) / this.cell));
-      const maxZ = Math.min(this.n - 1, Math.ceil((poi.z + outer + this.half) / this.cell));
+      const minX = Math.max(0, Math.floor((poi.x - reachX + this.half) / this.cell));
+      const maxX = Math.min(this.n - 1, Math.ceil((poi.x + reachX + this.half) / this.cell));
+      const minZ = Math.max(0, Math.floor((poi.z - reachZ + this.half) / this.cell));
+      const maxZ = Math.min(this.n - 1, Math.ceil((poi.z + reachZ + this.half) / this.cell));
 
       for (let iz = minZ; iz <= maxZ; iz++) {
         const z = this.gx(iz);
         for (let ix = minX; ix <= maxX; ix++) {
           const x = this.gx(ix);
-          const d = Math.hypot(x - poi.x, z - poi.z);
-          if (d > outer) continue;
-          const w = 1 - smoothstep(inner, outer, d);
+          const w = poiPadWeight(poi, x, z, blend);
+          if (w <= 0) continue;
           const i = this.idx(ix, iz);
           this.heights[i] = lerp(this.heights[i], pad, w);
         }
@@ -292,10 +295,9 @@ export class Terrain {
 
         let padProtect = 0;
         for (const p of dryPads) {
-          const d = Math.hypot(x - p.x, z - p.z);
-          if (d < p.radius + 24) {
-            padProtect = Math.max(padProtect, 1 - smoothstep(p.radius * 0.85, p.radius + 24, d));
-          }
+          // Protect rectangular pad + a bit of blend so bays don't flood districts
+          const w = poiPadWeight(p, x, z, (p.padBlend ?? 36) + 16);
+          if (w > padProtect) padProtect = w;
         }
 
         // Always protect peninsula / island cores from being re-sunk

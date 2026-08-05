@@ -1,4 +1,5 @@
 import { WORLD, POIS, ROAD_LINKS, FREEWAYS, MAP, TERRAIN_COLORS } from '../config.js';
+import { nearestPoi, poiHalfSize, poiContains } from '../world/Poi.js';
 
 // Always-on square minimap (top-left) + full-map overlay toggled with M.
 // Both share a baked height-color raster so drawing stays cheap every frame.
@@ -173,18 +174,10 @@ export class MapView {
   }
 
   nearestPoi(x, z) {
-    let best = null;
-    let bestD = Infinity;
-    for (const p of POIS) {
-      const d = Math.hypot(x - p.x, z - p.z);
-      if (d < bestD) {
-        bestD = d;
-        best = p;
-      }
-    }
+    const { poi: best, dist } = nearestPoi(POIS, x, z);
     if (!best) return '';
-    if (bestD < best.radius) return `IN ${best.name.toUpperCase()}`;
-    return `${best.name} · ${bestD.toFixed(0)} m`;
+    if (dist <= 0.5 || poiContains(best, x, z)) return `IN ${best.name.toUpperCase()}`;
+    return `${best.name} · ${dist.toFixed(0)} m`;
   }
 
   /**
@@ -300,27 +293,38 @@ export class MapView {
     }
   }
 
-  _drawPois(ctx, toPx, radius, withLabels) {
+  _drawPois(ctx, toPx, markerR, withLabels) {
     for (const p of POIS) {
       const { px, py } = toPx(p.x, p.z);
-      // Soft radius ring for full map
+      const { hw, hd } = poiHalfSize(p);
+      // Rectangular district footprint (not a circle)
+      const c0 = toPx(p.x - hw, p.z - hd);
+      const c1 = toPx(p.x + hw, p.z + hd);
+      const rw = Math.max(2, c1.px - c0.px);
+      const rh = Math.max(2, c1.py - c0.py);
+
       if (withLabels) {
-        const r = (p.radius / WORLD.SIZE) * this.fullCanvas.width;
-        ctx.beginPath();
-        ctx.arc(px, py, r, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(240, 193, 74, 0.08)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(240, 193, 74, 0.35)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        ctx.fillStyle = 'rgba(240, 193, 74, 0.1)';
+        ctx.strokeStyle = 'rgba(240, 193, 74, 0.45)';
+        ctx.lineWidth = Math.max(1, this.fullDpr);
+        ctx.fillRect(c0.px, c0.py, rw, rh);
+        ctx.strokeRect(c0.px, c0.py, rw, rh);
+      } else {
+        // Minimap: small rect footprint
+        ctx.fillStyle = 'rgba(240, 193, 74, 0.22)';
+        ctx.strokeStyle = 'rgba(240, 193, 74, 0.65)';
+        ctx.lineWidth = Math.max(1, this.miniDpr * 0.8);
+        ctx.fillRect(c0.px, c0.py, rw, rh);
+        ctx.strokeRect(c0.px, c0.py, rw, rh);
       }
 
+      // Center marker
       ctx.beginPath();
-      ctx.arc(px, py, radius, 0, Math.PI * 2);
+      ctx.arc(px, py, markerR * 0.85, 0, Math.PI * 2);
       ctx.fillStyle = MAP.POI;
       ctx.fill();
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-      ctx.lineWidth = Math.max(1, radius * 0.25);
+      ctx.lineWidth = Math.max(1, markerR * 0.2);
       ctx.stroke();
 
       if (withLabels) {
@@ -331,8 +335,8 @@ export class MapView {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         const label = p.name.toUpperCase();
-        ctx.strokeText(label, px, py - radius - 4 * this.fullDpr);
-        ctx.fillText(label, px, py - radius - 4 * this.fullDpr);
+        ctx.strokeText(label, px, c0.py - 4 * this.fullDpr);
+        ctx.fillText(label, px, c0.py - 4 * this.fullDpr);
       }
     }
   }

@@ -1,5 +1,6 @@
 import { PROPS, POIS, WORLD } from '../config.js';
 import { lerp } from '../core/Noise.js';
+import { poiContains } from './Poi.js';
 
 // Cover props scattered by dart-throwing with a spatial grid enforcing the
 // minimum spacing (Poisson-disc). Props are axis-aligned boxes so their
@@ -68,10 +69,10 @@ export function scatterProps(sink, terrain, rng) {
     if (terrain.slopeDegAt(x, z) > 28) continue; // nothing perched on a cliff
     if (terrain.roadAt(x, z) > 0.25) continue;   // keep the roads clear
 
-    // Bias away from POI interiors -- those spaces get their own hand-placed cover.
+    // Bias away from POI interiors (rectangular districts).
     let inPoi = false;
     for (const p of POIS) {
-      if (Math.hypot(x - p.x, z - p.z) < p.radius * 0.6) { inPoi = true; break; }
+      if (poiContains(p, x, z, 0.7)) { inPoi = true; break; }
     }
     if (inPoi && rng() > PROPS.POI_BIAS) continue;
 
