@@ -243,12 +243,12 @@ export const POIS = [
   },
   {
     id: 'balboa', name: 'Balboa Park',
-    x: 260, z: 300, radius: 95, flatten: 20.0, loot: 'high',
+    x: 240, z: 320, radius: 90, flatten: 20.0, loot: 'high',
     note: 'Museum / park plateau NE of downtown',
   },
   {
     id: 'zoo', name: 'San Diego Zoo',
-    x: 320, z: 140, radius: 85, flatten: 24.0, loot: 'high',
+    x: 360, z: 100, radius: 85, flatten: 24.0, loot: 'high',
     note: 'Zoo grounds north of Balboa',
   },
   {
