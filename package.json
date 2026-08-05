@@ -5,10 +5,11 @@
   "type": "module",
   "description": "Browser-based battle royale FPS. Phase 1: movement, camera, world.",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5173",
+    "dev": "node scripts/print-dev-url.mjs 5173 && vite --host 0.0.0.0 --port 5173",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
-    "smoketest": "node tools/smoketest.mjs"
+    "smoketest": "node tools/smoketest.mjs",
+    "url": "node scripts/print-dev-url.mjs 5173"
   },
   "dependencies": {
     "three": "^0.169.0"
