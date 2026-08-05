@@ -363,6 +363,25 @@ export const ROADS = {
   MIN_HEIGHT: 2.5, // never flatten road below this (stay out of water)
 };
 
+// Downtown city plate — keep the skyline district roughly level.
+// Soft blend at the rim so freeways/terrain still connect naturally.
+// Structures skip residual dips (see Catalog.footprintOk).
+export const DOWNTOWN_PLATE = {
+  // Matches POI downtown anchor; half-extents cover grid + ring + fringe lots
+  cx: 140,
+  cz: 360,
+  halfW: 185,
+  halfD: 165,
+  blend: 55,       // metres of soft falloff outside the hard plate
+  // Target height: null = sample median of dry land in the core
+  targetY: null,
+  minDry: 4.0,
+  // After leveling, tiny noise only (metres peak) — streets stay walkable
+  microAmp: 0.35,
+  // Max height range under a building footprint before we refuse placement
+  maxFootprintDelta: 1.25,
+};
+
 export const BUILDINGS = {
   FLOOR_HEIGHT: 3.4,
   GROUND_FLOOR_HEIGHT: 4.2,

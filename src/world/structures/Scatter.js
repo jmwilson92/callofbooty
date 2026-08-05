@@ -54,6 +54,10 @@ function dryLand(terrain, x, z, maxSlope = 22) {
   if (h > 90) return false; // leave high mountains mostly wild
   if (terrain.slopeDegAt(x, z) > maxSlope) return false;
   if (terrain.roadAt(x, z) > 0.2) return false;
+  // Don't drop scatter props into residual dips on the downtown plate
+  if (terrain.downtownPlateY != null && terrain.onDowntownPlate?.(x, z)) {
+    if (h < terrain.downtownPlateY - 1.2) return false;
+  }
   return true;
 }
 
@@ -178,12 +182,20 @@ export function scatterStructures(sink, terrain, rng) {
       if (terrain.heightAt(x, z) < 3 || terrain.slopeDegAt(x, z) > 16) continue;
       if (terrain.roadAt(x, z) > 0.25) continue;
       if (!claimFoot(x - 8, z - 8, 20, 18)) continue;
-      const by = Math.max(
+      const samples = [
         terrain.heightAt(x, z),
         terrain.heightAt(x + 14, z),
         terrain.heightAt(x, z + 14),
-        terrain.heightAt(x + 14, z + 14)
-      );
+        terrain.heightAt(x + 14, z + 14),
+        terrain.heightAt(x + 7, z + 7),
+      ];
+      const lo = Math.min(...samples);
+      const hi = Math.max(...samples);
+      if (hi - lo > 1.25) continue; // skip dips / uneven fringe lots
+      let by = hi;
+      if (terrain.downtownPlateY != null) {
+        by = Math.max(by, terrain.downtownPlateY - 0.15);
+      }
       placeSkylineTower(sink, x - 8, z - 8, by, rng, 12 + Math.floor(rng() * 12));
       stats.sky++;
     }

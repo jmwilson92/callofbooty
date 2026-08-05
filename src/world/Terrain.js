@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  WORLD, TERRAIN_COLORS, ROADS,
+  WORLD, TERRAIN_COLORS, ROADS, DOWNTOWN_PLATE,
 } from '../config.js';
 import { Simplex, smoothstep, clamp, lerp } from '../core/Noise.js';
 import {
@@ -22,8 +22,11 @@ export class Terrain {
 
     this.heights = new Float32Array(this.n * this.n);
     this.roadMask = new Float32Array(this.n * this.n);
+    this.downtownPlateY = null;
 
     this._generateBase();
+    // Level downtown first so towers sit on a city plate, not canyon noise.
+    this._applyDowntownPlate();
     // Connected freeways + arterials; flatten into heightfield.
     this.roadLines = buildRoadPolylines();
     this.roads = polylinesToSegments(this.roadLines).map((s) => ({
@@ -36,6 +39,10 @@ export class Terrain {
     this._reapplyWaterCuts();
     // Re-stamp roads after water so corridors stay dry and continuous.
     this._applyRoads();
+    // Final plate pass: roads may re-grade through the core — flatten again.
+    // _applyRoads then only paints asphalt mask on the hard plate (no height carve).
+    this._applyDowntownPlate({ reassert: true });
+    this._applyRoads({ maskOnlyOnPlate: true });
     // Parking lots (smooth asphalt plates in the heightfield / road mask)
     this.parkingLots = defaultParkingLots();
     stampParkingLots(this, this.parkingLots);
@@ -264,6 +271,83 @@ export class Terrain {
     }
   }
 
+  /**
+   * Flatten downtown into a roughly level city plate.
+   * Soft rim blend; optional micro-variation; never sinks below minDry.
+   * reassert: keep existing plate Y, only re-level (after roads/water).
+   */
+  _applyDowntownPlate(opts = {}) {
+    const P = DOWNTOWN_PLATE;
+    if (!P) return;
+
+    const minIX = Math.max(0, Math.floor((P.cx - P.halfW - P.blend + this.half) / this.cell));
+    const maxIX = Math.min(this.n - 1, Math.ceil((P.cx + P.halfW + P.blend + this.half) / this.cell));
+    const minIZ = Math.max(0, Math.floor((P.cz - P.halfD - P.blend + this.half) / this.cell));
+    const maxIZ = Math.min(this.n - 1, Math.ceil((P.cz + P.halfD + P.blend + this.half) / this.cell));
+
+    // Sample dry heights in the hard core to pick a stable plate elevation
+    let target = this.downtownPlateY ?? P.targetY;
+    if (target == null || !opts.reassert) {
+      const samples = [];
+      const coreW = P.halfW * 0.7;
+      const coreD = P.halfD * 0.7;
+      for (let iz = minIZ; iz <= maxIZ; iz += 2) {
+        const z = this.gx(iz);
+        for (let ix = minIX; ix <= maxIX; ix += 2) {
+          const x = this.gx(ix);
+          if (Math.abs(x - P.cx) > coreW || Math.abs(z - P.cz) > coreD) continue;
+          const h = this.heights[this.idx(ix, iz)];
+          if (h >= P.minDry) samples.push(h);
+        }
+      }
+      if (samples.length < 8) return;
+      samples.sort((a, b) => a - b);
+      // Prefer upper-middle so we fill dips rather than shave high spots hard
+      target = samples[Math.floor(samples.length * 0.62)];
+      target = Math.max(P.minDry + 2, target);
+    }
+    this.downtownPlateY = target;
+
+    for (let iz = minIZ; iz <= maxIZ; iz++) {
+      const z = this.gx(iz);
+      for (let ix = minIX; ix <= maxIX; ix++) {
+        const x = this.gx(ix);
+        // Normalized distance outside the hard rect (0 inside, 1 at blend edge)
+        const ox = Math.max(0, Math.abs(x - P.cx) - P.halfW) / Math.max(1e-3, P.blend);
+        const oz = Math.max(0, Math.abs(z - P.cz) - P.halfD) / Math.max(1e-3, P.blend);
+        const edge = Math.max(ox, oz);
+        if (edge >= 1) continue;
+
+        const i = this.idx(ix, iz);
+        const h = this.heights[i];
+        // Don't lift water / bay into a mesa
+        if (h < P.minDry * 0.45) continue;
+
+        // Weight: 1 on hard plate, fade through blend ring
+        const w = 1 - smoothstep(0, 1, edge);
+        // Micro variation only on the hard plate (tiny dips/rolls, not canyons)
+        let plate = target;
+        if (P.microAmp > 0 && edge < 0.15) {
+          const n = this.detail.noise2D(x * 0.02, z * 0.02);
+          plate += n * P.microAmp;
+        }
+        // Fill dips more aggressively than shaving peaks (asymmetric blend)
+        const pull = h < plate ? w : w * 0.85;
+        this.heights[i] = lerp(h, plate, pull);
+        if (this.heights[i] < P.minDry && w > 0.5) {
+          this.heights[i] = P.minDry;
+        }
+      }
+    }
+  }
+
+  /** True if (x,z) is on the hard downtown plate (not just the blend rim). */
+  onDowntownPlate(x, z) {
+    const P = DOWNTOWN_PLATE;
+    if (!P) return false;
+    return Math.abs(x - P.cx) <= P.halfW && Math.abs(z - P.cz) <= P.halfD;
+  }
+
   // Water cuts; protect only authored land masses (Point Loma / Coronado).
   _reapplyWaterCuts() {
     const pl = WORLD.POINT_LOMA;
@@ -275,10 +359,11 @@ export class Terrain {
         const x = this.gx(ix);
         const i = this.idx(ix, iz);
 
-        // Always protect peninsula / island cores from being re-sunk
+        // Always protect peninsula / island cores / downtown plate from being re-sunk
         const plW = 1 - smoothstep(0.55, 1.1, this._ellipse(x, z, pl.x, pl.z, pl.rx, pl.rz));
         const cW = 1 - smoothstep(0.65, 1.1, this._ellipse(x, z, cor.x, cor.z, cor.rx, cor.rz));
-        const landProtect = Math.max(plW, cW);
+        const dtProtect = this.onDowntownPlate(x, z) ? 1 : 0;
+        const landProtect = Math.max(plW, cW, dtProtect);
         if (landProtect > 0.7) continue;
 
         let h = this.heights[i];
@@ -326,8 +411,11 @@ export class Terrain {
     }
   }
 
-  _applyRoads() {
+  _applyRoads(opts = {}) {
     const minH = ROADS.MIN_HEIGHT ?? 2.5;
+    const maskOnlyOnPlate = !!opts.maskOnlyOnPlate;
+    const plateY = this.downtownPlateY;
+
     for (const seg of this.roads) {
       const halfW = (seg.width ?? ROADS.WIDTH) / 2;
       const blend = seg.blend ?? ROADS.BLEND;
@@ -391,6 +479,15 @@ export class Terrain {
           const i = this.idx(ix, iz);
           // Never drag land under water with a road
           if (this.heights[i] < minH * 0.5 && w < 0.9) continue;
+
+          const onPlate = plateY != null && this.onDowntownPlate(x, z);
+          if (onPlate && maskOnlyOnPlate) {
+            // Keep the city plate level — asphalt mask only
+            if (d <= halfW) this.roadMask[i] = 1;
+            else this.roadMask[i] = Math.max(this.roadMask[i], 1 - smoothstep(halfW, halfW + 2, d));
+            continue;
+          }
+
           this.heights[i] = lerp(this.heights[i], roadH, w);
           if (this.heights[i] < minH && d <= halfW) this.heights[i] = minH;
           if (d <= halfW) this.roadMask[i] = 1;
