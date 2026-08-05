@@ -51,9 +51,8 @@ Click the page to lock the pointer.
   Mission Bay multi-lobe lagoon, San Diego Bay, Mission Valley (I-8) trench,
   mesa/canyon city, eastern chaparral hills. Freeways I-5 / I-8 / I-15 /
   I-805 / SR-52 / SR-163 as real corridors.
-- **Twelve POIs** — La Jolla, University City, Miramar, Clairemont, Mission
-  Trails, Mission Bay, Old Town, Balboa Park, Downtown (highest loot),
-  Lindbergh Field, Point Loma, Coronado. See `docs/04-san-diego-map.md`.
+- **Six POIs** — Kearny Mesa, Mission Valley, San Diego International Airport,
+  MCRD Depot, Downtown (highest loot), Point Loma. See `docs/04-san-diego-map.md`.
 - **400 cover props** scattered by Poisson-disc with 6 m minimum spacing.
 
 All tunable values live in `src/config.js`. Nothing gameplay-related is

@@ -36,8 +36,8 @@ export const PLAYER = {
   // Crouch transition speed (m/s of capsule height change)
   CROUCH_LERP: 8.0,
 
-  // Mission Valley (I-8 corridor), looking south toward Downtown.
-  SPAWN: { x: -30, z: 90 },
+  // Mission Valley pad, looking south toward Downtown / MCRD.
+  SPAWN: { x: 0, z: 70 },
 };
 
 export const SLIDE = {
@@ -174,90 +174,54 @@ export const TERRAIN_COLORS = {
   NOISE_VARIATION: 0.04,
 };
 
-// POIs placed to match satellite_view.png relative layout (compressed BR scale).
+// Six playable POIs (user-specified). Compressed layout from satellite refs.
 // Coord frame: +X east, -Z north, -X west (Pacific). Origin ≈ Mission Valley.
 export const POIS = [
   {
-    id: 'lajolla', name: 'La Jolla',
-    x: -520, z: -420, radius: 95, flatten: 24.0, loot: 'high',
-    note: 'Village of La Jolla / coastal cliffs (NW)',
+    id: 'kearnymesa', name: 'Kearny Mesa',
+    x: 80, z: -280, radius: 110, flatten: 42.0, loot: 'medium',
+    note: 'North mesa / industrial-commercial plateau (I-805 / SR-163)',
   },
   {
-    id: 'university', name: 'University City',
-    x: -120, z: -420, radius: 100, flatten: 40.0, loot: 'medium',
-    note: 'UTC / SR-52 / I-805 node',
+    id: 'missionvalley', name: 'Mission Valley',
+    x: 0, z: 90, radius: 120, flatten: 10.0, loot: 'high',
+    note: 'I-8 corridor valley floor — malls, hotels, central rotations',
   },
   {
-    id: 'miramar', name: 'Miramar',
-    x: 160, z: -460, radius: 90, flatten: null, loot: 'medium',
-    note: 'North high ground — air station ridge',
+    id: 'airport', name: 'San Diego International Airport',
+    x: -140, z: 240, radius: 115, flatten: 6.5, loot: 'medium',
+    note: 'SAN / Lindbergh Field — hangars, open sightlines on the bay',
   },
   {
-    id: 'clairemont', name: 'Clairemont',
-    x: -160, z: -200, radius: 95, flatten: 36.0, loot: 'medium',
-    note: 'Mesa neighborhoods north of Mission Valley',
-  },
-  {
-    id: 'missiontrails', name: 'Mission Trails',
-    x: 480, z: -20, radius: 120, flatten: null, loot: 'medium',
-    note: 'East park / rocky hills (terrain map relief)',
-  },
-  {
-    id: 'missionbay', name: 'Mission Bay',
-    x: -220, z: 40, radius: 90, flatten: 5.5, loot: 'medium',
-    note: 'East shore of Mission Bay lagoon',
-  },
-  {
-    id: 'oldtown', name: 'Old Town',
-    x: -80, z: 140, radius: 85, flatten: 11.0, loot: 'high',
-    note: 'I-5 / I-8 interchange hub',
-  },
-  {
-    id: 'balboa', name: 'Balboa Park',
-    x: 100, z: 220, radius: 100, flatten: 20.0, loot: 'high',
-    note: 'Green park block NE of downtown',
+    id: 'mcrd', name: 'MCRD Depot',
+    x: -40, z: 280, radius: 100, flatten: 8.0, loot: 'high',
+    note: 'Marine Corps Recruit Depot — barracks grid beside the airport',
   },
   {
     id: 'downtown', name: 'Downtown',
-    x: 20, z: 340, radius: 130, flatten: 9.0, loot: 'highest',
-    note: 'Dense core on the bay — highest loot',
-  },
-  {
-    id: 'airport', name: 'Lindbergh Field',
-    x: -120, z: 250, radius: 105, flatten: 6.5, loot: 'medium',
-    note: 'SAN on the bay flats between Old Town and Downtown',
+    x: 40, z: 380, radius: 140, flatten: 9.0, loot: 'highest',
+    note: 'Dense bayfront core — highest loot, vertical play',
   },
   {
     id: 'pointloma', name: 'Point Loma',
-    x: -440, z: 400, radius: 90, flatten: 28.0, loot: 'high',
-    note: 'Peninsula ridge / Sunset Cliffs approach',
-  },
-  {
-    id: 'coronado', name: 'Coronado',
-    x: -200, z: 520, radius: 80, flatten: 7.5, loot: 'high',
-    note: 'Island across San Diego Bay',
+    x: -440, z: 400, radius: 100, flatten: 28.0, loot: 'high',
+    note: 'Peninsula ridge / high ground west of San Diego Bay',
   },
 ];
 
-// POI connectors (secondary arterials).
+// Arterials between the six POIs.
 export const ROAD_LINKS = [
-  ['lajolla', 'university'],
-  ['lajolla', 'clairemont'],
-  ['university', 'miramar'],
-  ['university', 'clairemont'],
-  ['clairemont', 'oldtown'],
-  ['clairemont', 'missionbay'],
-  ['missionbay', 'oldtown'],
-  ['oldtown', 'airport'],
-  ['airport', 'downtown'],
-  ['oldtown', 'downtown'],
-  ['downtown', 'balboa'],
-  ['balboa', 'missiontrails'],
-  ['miramar', 'missiontrails'],
-  ['pointloma', 'airport'],
-  ['pointloma', 'coronado'],
-  ['coronado', 'downtown'],
-  ['missionbay', 'pointloma'],
+  ['kearnymesa', 'missionvalley'],   // 163 / 805 south into the valley
+  ['missionvalley', 'airport'],      // valley → bay flats
+  ['missionvalley', 'downtown'],     // valley → city
+  ['missionvalley', 'mcrd'],         // valley → depot
+  ['airport', 'mcrd'],               // adjacent bay complexes
+  ['airport', 'downtown'],           // Harbor Dr
+  ['mcrd', 'downtown'],              // Pacific Hwy corridor
+  ['pointloma', 'airport'],          // peninsula → SAN
+  ['pointloma', 'downtown'],         // long bay approach
+  ['pointloma', 'mcrd'],             // peninsula → depot
+  ['kearnymesa', 'downtown'],        // long N–S arterial
 ];
 
 // Multi-point freeways from the satellite map (world metres). Drawn as road corridors.
