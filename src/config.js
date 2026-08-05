@@ -382,9 +382,9 @@ export const BUILDINGS = {
 };
 
 export const PROPS = {
-  COUNT: 400,
-  MIN_SPACING: 6, // Poisson-disc minimum distance
-  POI_BIAS: 0.35, // scatter weight inside POI footprints
+  COUNT: 350,
+  MIN_SPACING: 7,
+  POI_BIAS: 0.3,
   TYPES: {
     ROCK:      { color: 0x6e6c68, min: [1.0, 0.7, 1.0], max: [2.8, 2.2, 2.8] },
     CRATE:     { color: 0x8e7a5a, min: [1.0, 1.0, 1.0], max: [1.6, 1.6, 1.6] },
@@ -392,6 +392,23 @@ export const PROPS = {
     CONTAINER: { color: 0x4a6b7a, min: [6.06, 2.59, 2.44], max: [6.06, 2.59, 2.44] },
     VEHICLE:   { color: 0x5c6166, min: [4.6, 1.45, 1.8], max: [5.7, 1.9, 2.0] },
   },
+};
+
+// World-detail structure scatter (procedural kits in world/structures/).
+// Counts are targets; placement retries if terrain is bad.
+export const STRUCTURES = {
+  SUBURBAN: 70,      // suburban homes
+  TRAILER: 12,       // trailer park clusters
+  GAS: 14,           // gas stations near roads
+  RESTAURANT: 18,    // restaurants / fast food
+  AUTO: 10,          // auto repair shops
+  FIRE: 6,           // fire stations
+  BUSINESS: 16,      // office / business centers
+  SKY: 8,            // skyscrapers around downtown
+  BOAT: 10,          // boat houses on coasts/bays
+  BILLBOARD: 12,
+  VEHICLE: 40,       // parked cars near roads
+  ANIMALS: 22,       // abstract zoo creatures at San Diego Zoo
 };
 
 export const COLLISION = {

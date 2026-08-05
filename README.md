@@ -55,7 +55,11 @@ Click the page to lock the pointer.
   Airport, MCRD Depot, Downtown (highest loot), Point Loma, Balboa Park,
   San Diego Zoo, Coronado, Radio Tower. Spaced for readability; clearer fog and
   terrain definition. See `docs/04-san-diego-map.md`.
-- **400 cover props** scattered by Poisson-disc with 6 m minimum spacing.
+- **Detail structures** — suburban homes, trailers, gas stations, restaurants,
+  fast food, auto shops, fire stations, business centers, skyscrapers, boat
+  houses, harbors, bridges, billboards, parked vehicles, and abstract zoo
+  animals (`src/world/structures/`). Counts in `STRUCTURES` config.
+- **Cover props** scattered by Poisson-disc.
 
 All tunable values live in `src/config.js`. Nothing gameplay-related is
 hardcoded in a system file.

@@ -9,6 +9,7 @@ import { SpatialHash } from './world/Collision.js';
 import { BoxSink } from './world/BoxSink.js';
 import { buildAllStructures } from './world/Buildings.js';
 import { scatterProps } from './world/Props.js';
+import { scatterStructures } from './world/structures/Scatter.js';
 import { Controller } from './player/Controller.js';
 import { PlayerCamera } from './player/Camera.js';
 import { DebugOverlay, createHud } from './ui/Debug.js';
@@ -24,10 +25,11 @@ function buildWorld() {
   const sink = new BoxSink();
 
   buildAllStructures(sink, terrain, rng);
+  const structureStats = scatterStructures(sink, terrain, rng);
   const propStats = scatterProps(sink, terrain, rng);
   sink.registerCollision(hash);
 
-  return { terrain, hash, sink, propStats };
+  return { terrain, hash, sink, propStats, structureStats };
 }
 
 function setupLighting(scene) {
@@ -82,7 +84,7 @@ function start() {
   const sun = setupLighting(scene);
 
   const t0 = performance.now();
-  const { terrain, hash, sink, propStats } = buildWorld();
+  const { terrain, hash, sink, propStats, structureStats } = buildWorld();
   const genMs = performance.now() - t0;
 
   scene.add(terrain.buildMesh());
@@ -126,7 +128,8 @@ function start() {
 
   console.info(
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
-    `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} props placed`
+    `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} props · ` +
+    `structures ${JSON.stringify(structureStats)}`
   );
 
   const loading = document.getElementById('loading');
