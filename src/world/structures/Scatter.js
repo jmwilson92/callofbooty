@@ -168,15 +168,23 @@ export function scatterStructures(sink, terrain, rng) {
   // --- Extra towers on downtown fringe (district itself is built in Buildings.js) ---
   const dt = poi('downtown');
   if (dt) {
-    // Fringe towers around downtown anchor (no pad footprint)
-    for (let n = 0; n < S.SKY; n++) {
+    let attempts = 0;
+    while (stats.sky < S.SKY && attempts < S.SKY * 40) {
+      attempts++;
       const a = rng() * Math.PI * 2;
-      const r = 90 + rng() * 120;
+      const r = 100 + rng() * 160;
       const x = dt.x + Math.cos(a) * r;
       const z = dt.z + Math.sin(a) * r;
-      if (terrain.heightAt(x, z) < 2 || terrain.slopeDegAt(x, z) > 16) continue;
-      if (!claimFoot(x - 8, z - 8, 22, 20)) continue;
-      placeSkylineTower(sink, x - 8, z - 8, terrain.heightAt(x, z), rng, 12 + Math.floor(rng() * 12));
+      if (terrain.heightAt(x, z) < 3 || terrain.slopeDegAt(x, z) > 16) continue;
+      if (terrain.roadAt(x, z) > 0.25) continue;
+      if (!claimFoot(x - 8, z - 8, 20, 18)) continue;
+      const by = Math.max(
+        terrain.heightAt(x, z),
+        terrain.heightAt(x + 14, z),
+        terrain.heightAt(x, z + 14),
+        terrain.heightAt(x + 14, z + 14)
+      );
+      placeSkylineTower(sink, x - 8, z - 8, by, rng, 12 + Math.floor(rng() * 12));
       stats.sky++;
     }
   }

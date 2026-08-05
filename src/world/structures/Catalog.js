@@ -40,15 +40,17 @@ function pick(rng, arr) {
 }
 
 export function groundY(terrain, x, z, w = 0, d = 0) {
+  // Dense sample under footprint so towers don't hover on sloped lots
   let m = terrain.heightAt(x, z);
   if (w || d) {
-    m = Math.max(
-      m,
-      terrain.heightAt(x + w, z),
-      terrain.heightAt(x, z + d),
-      terrain.heightAt(x + w, z + d),
-      terrain.heightAt(x + w * 0.5, z + d * 0.5)
-    );
+    const samples = [
+      [0, 0], [1, 0], [0, 1], [1, 1],
+      [0.5, 0], [0.5, 1], [0, 0.5], [1, 0.5], [0.5, 0.5],
+      [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75],
+    ];
+    for (const [u, v] of samples) {
+      m = Math.max(m, terrain.heightAt(x + w * u, z + d * v));
+    }
   }
   return m;
 }
@@ -308,7 +310,7 @@ export function placeFireStation(sink, terrain, x, z, rng) {
 
 // ===================== BUSINESS =====================
 export function placeBusinessCenter(sink, terrain, x, z, rng) {
-  const baseY = groundY(terrain, x, z, 32, 26);
+  const baseY = groundY(terrain, x, z, 32, 26) - 0.06;
   const floors = 4 + Math.floor(rng() * 4);
   const w = 20 + rng() * 10;
   const d = 16 + rng() * 8;
@@ -317,6 +319,7 @@ export function placeBusinessCenter(sink, terrain, x, z, rng) {
     baseY, color: pick(rng, [C.glass, C.glassDark, C.white, 0x8a98a8, 0x5a6870]),
     rng,
   });
+  addBuildingAccess(sink, x, z, w, d, baseY, floors, BUILDINGS.FLOOR_HEIGHT, rng);
   // Glass ribbon accents per floor
   for (let f = 1; f < floors; f++) {
     const y = baseY + BUILDINGS.GROUND_FLOOR_HEIGHT + (f - 1) * BUILDINGS.FLOOR_HEIGHT + 1.2;
@@ -330,8 +333,6 @@ export function placeBusinessCenter(sink, terrain, x, z, rng) {
     sink.addSpan(px + 0.4, baseY + 0.65, z - 5.1, px + 1.8, baseY + 2.4, z - 3.6, C.green);
     sink.addSpan(px + 0.7, baseY + 2.2, z - 4.7, px + 1.5, baseY + 3.3, z - 4.0, C.lime);
   }
-  // Entry canopy
-  sink.addSpan(x + w * 0.3, baseY + 3.2, z - 3.5, x + w * 0.7, baseY + 3.6, z + 0.2, C.metalLite);
   // Fountain
   sink.addSpan(x + w * 0.4, baseY, z - 7.5, x + w * 0.6, baseY + 0.4, z - 5.8, C.concrete);
   sink.addSpan(x + w * 0.45, baseY + 0.4, z - 7.1, x + w * 0.55, baseY + 1.3, z - 6.2, C.blueLite);
@@ -339,137 +340,214 @@ export function placeBusinessCenter(sink, terrain, x, z, rng) {
 
 // ===================== SKYSCRAPER / SKYLINE =====================
 
-/**
- * Exterior fire-escape / stair tower — walkable landings + steps between floors.
- */
-function addExteriorStairs(sink, x, z, w, d, baseY, floors, floorH) {
-  const sx = x + w + 0.15;
-  const landD = 2.8;
-  const landW = 2.4;
+/** Switchback fire-escape staircase on +X face. */
+function addFireEscapeStairs(sink, x, z, w, d, baseY, floors, floorH) {
+  const sx = x + w + 0.2;
+  const landW = 2.5;
+  const landD = 3.0;
   for (let f = 0; f < floors; f++) {
     const y = baseY + f * floorH;
-    // Landing platform (solid walk surface)
-    sink.addSpan(sx, y, z + 0.4, sx + landW, y + 0.2, z + 0.4 + landD, C.metalLite);
-    // Rail
-    sink.addSpan(sx + landW - 0.12, y + 0.2, z + 0.4, sx + landW, y + 1.1, z + 0.4 + landD, C.metal, 'thin');
+    const zLand = f % 2 === 0 ? z + 0.5 : z + d - landD - 0.5;
+    sink.addSpan(sx, y, zLand, sx + landW, y + 0.18, zLand + landD, C.metalLite);
+    sink.addSpan(sx + landW - 0.1, y + 0.18, zLand, sx + landW, y + 1.05, zLand + landD, C.metal, 'thin');
     if (f < floors - 1) {
-      const steps = 10;
+      const steps = 9;
       const rise = floorH / steps;
-      const run = (landD - 0.4) / steps;
+      const z0 = zLand + (f % 2 === 0 ? landD - 0.3 : 0.3);
+      const dir = f % 2 === 0 ? -1 : 1;
+      const run = (landD - 0.5) / steps;
       for (let k = 0; k < steps; k++) {
-        const zy = z + 0.5 + k * run;
+        const zy = z0 + dir * k * run - (dir < 0 ? run : 0);
         const top = y + (k + 1) * rise;
-        const bot = Math.max(y, top - 0.35);
-        sink.addSpan(sx + 0.15, bot, zy, sx + landW - 0.2, top, zy + run * 0.95, C.metal);
+        sink.addSpan(sx + 0.2, top - 0.32, zy, sx + landW - 0.25, top, zy + Math.abs(run) * 0.9, C.metal);
       }
     }
   }
-  // Ground approach slab
-  sink.addSpan(sx - 0.5, baseY - 0.05, z + 0.2, sx + landW + 0.3, baseY + 0.12, z + 0.4 + landD, C.concrete);
+  sink.addSpan(sx - 0.4, baseY - 0.05, z + 0.3, sx + landW + 0.2, baseY + 0.1, z + 3.2, C.concrete);
+}
+
+/** Vertical ladder with cage rings — mid-rise buildings. */
+function addLadder(sink, x, z, w, d, baseY, floors, floorH) {
+  const lx = x + w + 0.35;
+  const lz = z + d * 0.45;
+  const h = floors * floorH;
+  // Rails
+  post(sink, lx, baseY, lz, h, 0.12, C.metal);
+  post(sink, lx + 0.55, baseY, lz, h, 0.12, C.metal);
+  // Rungs every 0.35m
+  for (let y = baseY + 0.4; y < baseY + h; y += 0.35) {
+    sink.addSpan(lx, y, lz, lx + 0.55, y + 0.08, lz + 0.12, C.metalLite);
+  }
+  // Cage hoops every floor
+  for (let f = 1; f < floors; f++) {
+    const y = baseY + f * floorH;
+    sink.addSpan(lx - 0.15, y, lz - 0.15, lx + 0.7, y + 0.1, lz + 0.35, C.metal, 'thin');
+  }
+  // Roof hatch platform
+  sink.addSpan(lx - 0.3, baseY + h - 0.1, lz - 0.4, lx + 0.9, baseY + h + 0.15, lz + 0.6, C.metalLite);
+}
+
+/** Wide open staircase (stadium/public style) on -Z face. */
+function addOpenStaircase(sink, x, z, w, d, baseY, floors, floorH) {
+  const maxF = Math.min(floors, 8); // open stairs only climb partway for massing variety
+  const stairW = Math.min(w * 0.55, 8);
+  const sx = x + (w - stairW) / 2;
+  for (let f = 0; f < maxF; f++) {
+    const y = baseY + f * floorH;
+    const steps = 8;
+    const rise = floorH / steps;
+    const run = 0.38;
+    for (let k = 0; k < steps; k++) {
+      const top = y + (k + 1) * rise;
+      const zz = z - 0.2 - (f * steps + k) * run;
+      sink.addSpan(sx, top - rise * 0.85, zz, sx + stairW, top, zz + run, C.concrete);
+    }
+    // Landing every floor
+    const landZ = z - 0.2 - (f + 1) * steps * run;
+    sink.addSpan(sx - 0.3, y + floorH, landZ - 1.8, sx + stairW + 0.3, y + floorH + 0.18, landZ, C.concrete);
+  }
 }
 
 /**
- * Internal elevator shaft with floor platforms + button landings.
- * Player walks onto each floor plate through a doorway notch.
+ * Visible elevator bank: glass shaft, doors each floor, car, call panel.
+ * Cut into the south face so the lobby is obviously an entrance.
  */
-function addElevatorShaft(sink, x, z, w, d, baseY, floors, floorH, col) {
-  // Shaft on interior near -X wall
-  const sx0 = x + 0.4;
-  const sx1 = x + 2.6;
-  const sz0 = z + d * 0.35;
-  const sz1 = z + d * 0.35 + 2.4;
-  // Shaft walls (leave south open as door on each floor)
-  sink.addSpan(sx0, baseY, sz0, sx0 + 0.2, baseY + floors * floorH, sz1, C.dark);
-  sink.addSpan(sx1 - 0.2, baseY, sz0, sx1, baseY + floors * floorH, sz1, C.dark);
-  sink.addSpan(sx0, baseY, sz1 - 0.2, sx1, baseY + floors * floorH, sz1, C.dark);
+function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH) {
+  const ew = 2.8;
+  const ed = 2.6;
+  const ex = x + w * 0.5 - ew / 2;
+  const ez = z + 0.15; // south face
+  const totalH = floors * floorH;
+
+  // Glass shaft exterior
+  sink.addSpan(ex, baseY, ez - 0.05, ex + 0.18, baseY + totalH, ez + ed, C.glass);
+  sink.addSpan(ex + ew - 0.18, baseY, ez - 0.05, ex + ew, baseY + totalH, ez + ed, C.glass);
+  sink.addSpan(ex, baseY, ez + ed - 0.18, ex + ew, baseY + totalH, ez + ed, C.metalLite);
+  // Back of shaft into building
+  sink.addSpan(ex + 0.15, baseY, ez + ed - 0.35, ex + ew - 0.15, baseY + totalH, ez + ed - 0.15, C.dark);
+
   for (let f = 0; f < floors; f++) {
     const y = baseY + f * floorH;
-    // Floor plate inside shaft (walkable)
-    sink.addSpan(sx0 + 0.2, y, sz0 + 0.15, sx1 - 0.2, y + 0.18, sz1 - 0.2, C.metalLite);
-    // Car silhouette
-    if (f % 3 === 0) {
-      sink.addSpan(sx0 + 0.35, y + 0.2, sz0 + 0.3, sx1 - 0.35, y + floorH - 0.3, sz1 - 0.35, 0x4a6a8a);
-    }
+    // Landing plate
+    sink.addSpan(ex + 0.2, y, ez + 0.2, ex + ew - 0.2, y + 0.16, ez + ed - 0.4, C.metalLite);
+    // Door frame (open doorway)
+    neonStrip(sink, ex + 0.25, y + 0.15, ez - 0.08, ex + ew - 0.25, y + 2.3, ez + 0.12, C.dark);
+    // Indicator light (small, not a ground-level yellow smear)
+    neonStrip(sink, ex + 0.3, y + 2.15, ez - 0.1, ex + ew - 0.3, y + 2.35, ez + 0.15, C.neonLime);
+    // Call panel
+    sink.addSpan(ex + ew + 0.05, y + 1.0, ez + 0.3, ex + ew + 0.2, y + 1.5, ez + 0.55, C.metal);
+    neonStrip(sink, ex + ew + 0.08, y + 1.15, ez + 0.35, ex + ew + 0.18, y + 1.25, ez + 0.5, C.neonLime);
   }
-  // Lobby door opening already open on south of shaft — mark with frame
-  neonStrip(sink, sx0, baseY + 0.1, sz0 - 0.05, sx1, baseY + 2.2, sz0 + 0.08, C.yellowHot);
+  // Elevator car at mid height (visible)
+  const carF = Math.min(2, floors - 1);
+  const cy = baseY + carF * floorH + 0.2;
+  sink.addSpan(ex + 0.35, cy, ez + 0.35, ex + ew - 0.35, cy + floorH - 0.5, ez + ed - 0.55, 0x3a6a9a);
+  sink.addSpan(ex + 0.5, cy + 0.3, ez + 0.25, ex + ew - 0.5, cy + floorH - 0.8, ez + 0.4, C.glass);
+  // Lobby canopy over entrance
+  sink.addSpan(ex - 0.5, baseY + 2.9, ez - 1.8, ex + ew + 0.5, baseY + 3.25, ez + 0.3, C.metalLite);
+  // Approach mat
+  sink.addSpan(ex - 0.3, baseY - 0.02, ez - 2.2, ex + ew + 0.3, baseY + 0.1, ez + 0.1, C.dark);
+}
+
+/** South-face double door entrance portal (always). */
+function addMainEntrance(sink, x, z, w, d, baseY) {
+  const doorW = Math.min(3.2, w * 0.35);
+  const dx = x + w * 0.5 - doorW / 2;
+  // Recess
+  sink.addSpan(dx - 0.15, baseY, z - 0.25, dx + doorW + 0.15, baseY + 3.0, z + 0.45, C.dark);
+  // Door leaves
+  sink.addSpan(dx, baseY + 0.1, z - 0.1, dx + doorW * 0.48, baseY + 2.7, z + 0.15, 0x2a3540);
+  sink.addSpan(dx + doorW * 0.52, baseY + 0.1, z - 0.1, dx + doorW, baseY + 2.7, z + 0.15, 0x2a3540);
+  // Glass panels on doors
+  sink.addSpan(dx + 0.15, baseY + 0.9, z - 0.15, dx + doorW * 0.42, baseY + 2.4, z, C.glass);
+  sink.addSpan(dx + doorW * 0.58, baseY + 0.9, z - 0.15, dx + doorW - 0.15, baseY + 2.4, z, C.glass);
+  // Canopy
+  sink.addSpan(dx - 0.8, baseY + 2.95, z - 2.0, dx + doorW + 0.8, baseY + 3.25, z + 0.4, C.metalLite);
+  // Steps
+  sink.addSpan(dx - 0.5, baseY - 0.05, z - 2.4, dx + doorW + 0.5, baseY + 0.12, z - 0.2, C.concrete);
+  sink.addSpan(dx - 0.3, baseY + 0.12, z - 1.6, dx + doorW + 0.3, baseY + 0.28, z - 0.15, C.concrete);
 }
 
 /**
- * Lightweight exterior tower + climbable fire escape + elevator shaft.
+ * Attach entrances + varied exterior access to any multi-story massing.
+ * accessMode: 0 fire escape, 1 ladder, 2 open stairs, -1 auto from rng.
+ */
+export function addBuildingAccess(sink, x, z, w, d, baseY, floors, floorH, rng, accessMode = -1) {
+  addMainEntrance(sink, x, z, w, d, baseY);
+  if (floors >= 3) {
+    addElevatorBank(sink, x, z, w, d, baseY, floors, floorH);
+  }
+  const mode = accessMode >= 0 ? accessMode : Math.floor(rng() * 3);
+  if (mode === 0) addFireEscapeStairs(sink, x, z, w, d, baseY, floors, floorH);
+  else if (mode === 1) addLadder(sink, x, z, w, d, baseY, floors, floorH);
+  else addOpenStaircase(sink, x, z, w, d, baseY, Math.min(floors, 10), floorH);
+}
+
+/**
+ * Lightweight exterior tower + climbable access + elevator shaft.
  * floors: story count; taller = downtown financial core look.
+ * Seated slightly into terrain so nothing floats.
  */
 export function placeSkylineTower(sink, x, z, baseY, rng, floors = null) {
   const fCount = Math.min(24, floors ?? (8 + Math.floor(rng() * 16))); // 8–24
   const floorH = 3.5;
   const h = fCount * floorH;
-  const w = 12 + rng() * 12;
-  const d = 12 + rng() * 12;
+  const w = 12 + rng() * 10;
+  const d = 12 + rng() * 10;
   const variant = Math.floor(rng() * 4);
   const col = pick(rng, [
     C.glass, C.glassDark, 0x4a5868, 0x2a3848, C.white, 0x6a8090, 0x3a4850, 0xc8d0d8,
   ]);
   const band = pick(rng, [C.glassDark, C.metal, 0x1a2830, C.white]);
 
-  // Leave a slice on +X for fire escape attachment
-  const bodyW = w - 0.05;
+  // Sink into terrain so no hover gap
+  const seat = baseY - 0.08;
+  const bodyW = w;
 
   if (variant === 0) {
-    sink.addSpan(x, baseY, z, x + bodyW, baseY + h, z + d, col);
+    sink.addSpan(x, seat, z, x + bodyW, seat + h, z + d, col);
   } else if (variant === 1) {
-    sink.addSpan(x - 1.5, baseY, z - 1.5, x + bodyW + 1.5, baseY + floorH * 3, z + d + 1.5, C.concrete);
-    sink.addSpan(x + 0.8, baseY + floorH * 3, z + 0.8, x + bodyW - 0.8, baseY + h, z + d - 0.8, col);
+    sink.addSpan(x - 1.2, seat, z - 1.2, x + bodyW + 1.2, seat + floorH * 3, z + d + 1.2, C.concrete);
+    sink.addSpan(x + 0.6, seat + floorH * 3, z + 0.6, x + bodyW - 0.6, seat + h, z + d - 0.6, col);
   } else if (variant === 2) {
-    sink.addSpan(x - 1, baseY, z - 1, x + bodyW + 1, baseY + floorH * 2.5, z + d + 1, C.concrete);
+    sink.addSpan(x - 0.8, seat, z - 0.8, x + bodyW + 0.8, seat + floorH * 2.5, z + d + 0.8, C.concrete);
     const mid = bodyW * 0.48;
-    sink.addSpan(x, baseY + floorH * 2.5, z, x + mid - 0.5, baseY + h, z + d, col);
-    sink.addSpan(x + mid + 0.5, baseY + floorH * 2.5, z, x + bodyW, baseY + h * 0.9, z + d * 0.92, band);
+    sink.addSpan(x, seat + floorH * 2.5, z, x + mid - 0.5, seat + h, z + d, col);
+    sink.addSpan(x + mid + 0.5, seat + floorH * 2.5, z, x + bodyW, seat + h * 0.9, z + d * 0.92, band);
   } else {
-    sink.addSpan(x, baseY, z, x + bodyW, baseY + h * 0.72, z + d, col);
-    sink.addSpan(x + bodyW * 0.12, baseY + h * 0.72, z + d * 0.12, x + bodyW * 0.88, baseY + h * 0.92, z + d * 0.88, band);
-    sink.addSpan(x + bodyW * 0.22, baseY + h * 0.92, z + d * 0.22, x + bodyW * 0.78, baseY + h, z + d * 0.78, col);
+    sink.addSpan(x, seat, z, x + bodyW, seat + h * 0.72, z + d, col);
+    sink.addSpan(x + bodyW * 0.12, seat + h * 0.72, z + d * 0.12, x + bodyW * 0.88, seat + h * 0.92, z + d * 0.88, band);
+    sink.addSpan(x + bodyW * 0.22, seat + h * 0.92, z + d * 0.22, x + bodyW * 0.78, seat + h, z + d * 0.78, col);
   }
 
-  // Interior floor slabs every story (walkable if player gets in via stairs)
+  // Ground slab + interior floors (single pass)
+  sink.addSpan(x + 0.15, seat + 0.02, z + 0.15, x + bodyW - 0.15, seat + 0.18, z + d - 0.15, C.concrete);
   for (let f = 1; f < fCount; f++) {
-    const y = baseY + f * floorH;
-    sink.addSpan(x + 0.25, y, z + 0.25, x + bodyW - 0.25, y + 0.16, z + d - 0.25, C.concrete);
+    const y = seat + f * floorH;
+    sink.addSpan(x + 0.3, y, z + 0.3, x + bodyW - 0.3, y + 0.16, z + d - 0.3, C.concrete);
   }
-  // Ground slab
-  sink.addSpan(x + 0.1, baseY + 0.05, z + 0.1, x + bodyW - 0.1, baseY + 0.2, z + d - 0.1, C.concrete);
-
-  // Floor lines + mullions
+  // Spandrel bands
   for (let f = 2; f < fCount; f += 2) {
-    const y = baseY + f * floorH;
-    sink.addSpan(x - 0.05, y, z - 0.05, x + bodyW + 0.05, y + 0.1, z + d + 0.05, band);
-  }
-  const mullions = 2 + Math.floor(rng() * 2);
-  for (let i = 1; i <= mullions; i++) {
-    const mx = x + (bodyW * i) / (mullions + 1);
-    sink.addSpan(mx - 0.1, baseY + 2, z - 0.06, mx + 0.1, baseY + h - 1, z + 0.06, C.metalLite);
+    const y = seat + f * floorH;
+    sink.addSpan(x - 0.04, y, z - 0.04, x + bodyW + 0.04, y + 0.1, z + d + 0.04, band);
   }
 
-  // Lobby entrance (south face gap as dark recess + door frame)
-  sink.addSpan(x + bodyW * 0.3, baseY + 0.15, z - 0.15, x + bodyW * 0.7, baseY + 2.8, z + 0.35, C.dark);
-  neonStrip(sink, x + bodyW * 0.3, baseY + 0.15, z - 0.18, x + bodyW * 0.7, baseY + 2.9, z - 0.05, C.glass);
+  addBuildingAccess(sink, x, z, bodyW, d, seat, fCount, floorH, rng);
 
-  addExteriorStairs(sink, x, z, bodyW, d, baseY, fCount, floorH);
-  addElevatorShaft(sink, x, z, bodyW, d, baseY, fCount, floorH, col);
-
-  const roof = baseY + h;
+  const roof = seat + h;
   sink.addSpan(x + bodyW * 0.15, roof, z + d * 0.15, x + bodyW * 0.85, roof + 0.25, z + d * 0.85, C.concrete);
   sink.addSpan(x + bodyW * 0.25, roof + 0.25, z + d * 0.25, x + bodyW * 0.75, roof + 2.0, z + d * 0.75, C.metal);
   if (fCount >= 14) {
     post(sink, x + bodyW / 2 - 0.25, roof + 2, z + d / 2 - 0.25, 10 + rng() * 12, 0.5, C.metalLite);
     neonStrip(sink, x + bodyW / 2 - 0.4, roof + 12, z + d / 2 - 0.4, x + bodyW / 2 + 0.4, roof + 14, z + d / 2 + 0.4, C.redHot);
   }
-  return { w: bodyW + 2.6, d, h, floors: fCount, x, z };
+  return { w: bodyW + 2.8, d: d + 1, h, floors: fCount, x, z };
 }
 
 export function placeSkyscraper(sink, terrain, x, z, rng) {
   const baseY = groundY(terrain, x, z, 28, 26);
   // Mix: some enterable mid/high towers, many silhouette skyline towers
-  if (rng() > 0.55) {
+  if (rng() > 0.45) {
     placeSkylineTower(sink, x, z, baseY, rng, 12 + Math.floor(rng() * 16));
     return;
   }
@@ -478,36 +556,41 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
   let w = 14 + rng() * 6;
   let d = 14 + rng() * 6;
   const col = pick(rng, [C.glass, C.glassDark, 0x4a5860, C.white, 0x2a3840, 0x6a8090]);
+  const seat = baseY - 0.06;
 
   if (variant === 0) {
-    makeBuilding(sink, { x, z, w, d, floors, baseY, color: col, rng });
+    makeBuilding(sink, { x, z, w, d, floors, baseY: seat, color: col, rng });
+    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng);
   } else if (variant === 1) {
-    makeBuilding(sink, { x, z, w: w + 6, d: d + 6, floors: 3, baseY, color: C.concrete, rng });
+    makeBuilding(sink, { x, z, w: w + 6, d: d + 6, floors: 3, baseY: seat, color: C.concrete, rng });
     makeBuilding(sink, {
       x: x + 3, z: z + 3, w, d, floors: floors - 2,
-      baseY: baseY + BUILDINGS.GROUND_FLOOR_HEIGHT + 2 * BUILDINGS.FLOOR_HEIGHT,
+      baseY: seat + BUILDINGS.GROUND_FLOOR_HEIGHT + 2 * BUILDINGS.FLOOR_HEIGHT,
       color: col, rng,
     });
+    addBuildingAccess(sink, x, z, w + 6, d + 6, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng);
   } else {
-    makeBuilding(sink, { x, z, w: w * 0.55, d, floors, baseY, color: col, rng });
+    makeBuilding(sink, { x, z, w: w * 0.55, d, floors, baseY: seat, color: col, rng });
     makeBuilding(sink, {
       x: x + w * 0.6, z, w: w * 0.45, d: d * 0.85,
-      floors: floors - 2, baseY, color: pick(rng, [C.glassDark, C.white, col]), rng,
+      floors: floors - 2, baseY: seat, color: pick(rng, [C.glassDark, C.white, col]), rng,
     });
+    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng);
   }
 
-  const roof = baseY + BUILDINGS.GROUND_FLOOR_HEIGHT + (floors - 1) * BUILDINGS.FLOOR_HEIGHT;
+  const roof = seat + BUILDINGS.GROUND_FLOOR_HEIGHT + (floors - 1) * BUILDINGS.FLOOR_HEIGHT;
   sink.addSpan(x + w * 0.2, roof, z + d * 0.2, x + w * 0.8, roof + 2.5, z + d * 0.8, col);
   post(sink, x + w / 2 - 0.25, roof + 2.5, z + d / 2 - 0.25, 14 + rng() * 10, 0.5, C.metalLite);
   neonStrip(sink, x + w / 2 - 0.4, roof + 14, z + d / 2 - 0.4, x + w / 2 + 0.4, roof + 16, z + d / 2 + 0.4, C.redHot);
 }
 
 /**
- * Full downtown district from satellite reference: street grid + packed towers.
- * Matches SD downtown density vibe — numerous high-rises, not sparse midblocks.
+ * Full downtown district from satellite reference: packed towers on a heightfield street grid.
+ * Streets are painted in Terrain via buildDowntownGridLines — no box asphalt or yellow paint.
  */
 export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, occ = null) {
   const grid = occ || new Occupancy(12);
+  // Keep in sync with Roads.downtownGridParams
   const cols = 6;
   const rows = 5;
   const streetW = 12;
@@ -520,30 +603,8 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
   const gy = (x, z, w = 0, d = 0) => groundY(terrain, x, z, w, d);
   const MIN_DRY = 2.8;
 
-  // Terrain-following street network (short segments, no floating slabs)
-  for (let c = 0; c <= cols; c++) {
-    const x = originX + c * stepX - streetW / 2;
-    for (let s = 0; s < rows * stepZ; s += 6) {
-      const z0 = originZ - streetW / 2 + s;
-      const z1 = z0 + 6;
-      const h = gy(x, (z0 + z1) / 2);
-      if (h < MIN_DRY) continue;
-      const y = h + 0.1;
-      sink.addSpan(x - streetW / 2, y, z0, x + streetW / 2, y + 0.12, z1, C.asphalt);
-      neonStrip(sink, x - 0.12, y + 0.13, z0 + 1, x + 0.12, y + 0.16, z1 - 1, C.yellowHot);
-    }
-  }
-  for (let r = 0; r <= rows; r++) {
-    const z = originZ + r * stepZ - streetW / 2;
-    for (let s = 0; s < cols * stepX; s += 6) {
-      const x0 = originX - streetW / 2 + s;
-      const x1 = x0 + 6;
-      const h = gy((x0 + x1) / 2, z);
-      if (h < MIN_DRY) continue;
-      const y = h + 0.1;
-      sink.addSpan(x0, y, z - streetW / 2, x1, y + 0.12, z + streetW / 2, C.asphalt);
-    }
-  }
+  // A couple of mid-grid surface lots (open asphalt + cars from parking props)
+  const parkingBlocks = new Set(['0,0', '5,4']);
 
   let towers = 0;
   for (let r = 0; r < rows; r++) {
@@ -553,18 +614,43 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
       const blockBase = gy(bx + blockW / 2, bz + blockD / 2);
       if (blockBase < MIN_DRY) continue;
 
+      // Streetlight at NE corner (cool white — not yellow ground paint)
+      post(sink, bx - 1.2, blockBase, bz - 1.2, 5.4, 0.16, C.metal);
+      sink.addSpan(bx - 1.45, blockBase + 5.15, bz - 1.45, bx - 0.85, blockBase + 5.4, bz - 0.85, 0xf0f4f8);
+
+      if (parkingBlocks.has(`${c},${r}`)) {
+        // Open surface lot inside the block
+        const lotX = bx + 3;
+        const lotZ = bz + 3;
+        const lotW = blockW - 6;
+        const lotD = blockD - 6;
+        // Claim so nothing stacks; asphalt already from heightfield if stamped,
+        // otherwise light curb outline only
+        grid.tryClaim(lotX, lotZ, lotW, lotD, 1);
+        for (let i = 0; i < 5; i++) {
+          if (rng() > 0.4) {
+            placeVehicle(sink, lotX + 2 + (i % 3) * 6, lotZ + 3 + Math.floor(i / 3) * 10, blockBase, rng);
+          }
+        }
+        continue;
+      }
+
       const distCore = Math.hypot(c - cols * 0.45, r - rows * 0.4);
       const waterfront = r >= rows - 2;
       const financial = distCore < 2.0;
-      // One tower per block — prevents the stacked-overlap mess
-      const ox = 4 + rng() * 4;
-      const oz = 4 + rng() * 4;
-      const tw = 14 + rng() * 10;
-      const td = 14 + rng() * 10;
-      if (ox + tw > blockW - 2 || oz + td > blockD - 2) continue;
+
+      // One tower per block, inset from street corridor
+      const margin = 5;
+      const maxW = blockW - margin * 2;
+      const maxD = blockD - margin * 2;
+      const tw = Math.min(maxW, 12 + rng() * 10);
+      const td = Math.min(maxD, 12 + rng() * 10);
+      const ox = margin + rng() * Math.max(0.5, maxW - tw);
+      const oz = margin + rng() * Math.max(0.5, maxD - td);
       const tx = bx + ox;
       const tz = bz + oz;
-      if (!grid.tryClaim(tx, tz, tw + 3, td + 1, 2)) continue;
+      // Claim full block footprint so nothing else stacks here
+      if (!grid.tryClaim(tx - 1, tz - 1, tw + 4, td + 3, 1.5)) continue;
       const baseY = gy(tx, tz, tw, td);
       if (baseY < MIN_DRY) continue;
 
@@ -575,26 +661,27 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
       else floors = 5 + Math.floor(rng() * 5);
 
       if (floors <= 7) {
+        const seat = baseY - 0.06;
         makeBuilding(sink, {
           x: tx, z: tz, w: tw, d: td, floors,
-          baseY, color: pick(rng, [C.glass, C.white, C.cream, C.brick, C.gray]),
+          baseY: seat,
+          color: pick(rng, [C.glass, C.white, C.cream, C.brick, C.gray]),
           rng,
         });
+        addBuildingAccess(sink, tx, tz, tw, td, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng);
       } else {
         placeSkylineTower(sink, tx, tz, baseY, rng, floors);
       }
       towers++;
-
-      post(sink, bx - 1.5, blockBase, bz - 1.5, 5.2, 0.18, C.metal);
-      neonStrip(sink, bx - 1.8, blockBase + 5.0, bz - 1.8, bx - 1.0, blockBase + 5.3, bz - 1.0, C.yellowHot);
     }
   }
 
   // Waterfront hotels (south) — spaced, occupancy checked
   for (let i = 0; i < 4; i++) {
-    const hx = originX + 15 + i * 40;
-    const hz = originZ + rows * stepZ + 10;
-    const tw = 16, td = 14;
+    const hx = originX + 18 + i * 42;
+    const hz = originZ + rows * stepZ + 12;
+    const tw = 16;
+    const td = 14;
     if (!grid.tryClaim(hx, hz, tw + 3, td + 1, 3)) continue;
     const by = gy(hx, hz, tw, td);
     if (by < MIN_DRY) continue;
@@ -667,31 +754,22 @@ export function placeBridge(sink, terrain, x0, z0, x1, z1, deckY, width = 14) {
 
   if (alongX) {
     const zc = (minZ + maxZ) / 2;
-    // Deck + shoulders
+    // Deck + shoulders (elevated bridge only — not ground road squares)
     sink.addSpan(minX, deckY, zc - width / 2, maxX, deckY + 0.6, zc + width / 2, C.asphalt);
-    neonStrip(sink, minX, deckY + 0.58, zc - 0.15, maxX, deckY + 0.72, zc + 0.15, C.yellowHot);
-    // Rails + cables aesthetic
+    // Rails
     sink.addSpan(minX, deckY + 0.6, zc - width / 2, maxX, deckY + 1.7, zc - width / 2 + 0.35, C.metalLite, 'thin');
     sink.addSpan(minX, deckY + 0.6, zc + width / 2 - 0.35, maxX, deckY + 1.7, zc + width / 2, C.metalLite, 'thin');
     const span = maxX - minX;
     const n = Math.max(3, Math.floor(span / 28));
     for (let i = 0; i <= n; i++) {
       const px = minX + (span * i) / n;
-      // Pier
       sink.addSpan(px - 1.6, -5, zc - 2.5, px + 1.6, deckY, zc + 2.5, C.concrete);
-      // Arch cable posts
       post(sink, px - 0.2, deckY, zc - width / 2 + 0.2, 8 + Math.sin(i) * 2, 0.4, C.metalLite);
       post(sink, px - 0.2, deckY, zc + width / 2 - 0.6, 8 + Math.sin(i) * 2, 0.4, C.metalLite);
-    }
-    // Light poles
-    for (let i = 0; i < n; i += 2) {
-      const px = minX + (span * i) / n;
-      neonStrip(sink, px - 0.3, deckY + 7, zc - width / 2, px + 0.5, deckY + 7.5, zc - width / 2 + 0.8, C.yellowHot);
     }
   } else {
     const xc = (minX + maxX) / 2;
     sink.addSpan(xc - width / 2, deckY, minZ, xc + width / 2, deckY + 0.6, maxZ, C.asphalt);
-    neonStrip(sink, xc - 0.15, deckY + 0.58, minZ, xc + 0.15, deckY + 0.72, maxZ, C.yellowHot);
     sink.addSpan(xc - width / 2, deckY + 0.6, minZ, xc - width / 2 + 0.35, deckY + 1.7, maxZ, C.metalLite, 'thin');
     sink.addSpan(xc + width / 2 - 0.35, deckY + 0.6, minZ, xc + width / 2, deckY + 1.7, maxZ, C.metalLite, 'thin');
     const span = maxZ - minZ;

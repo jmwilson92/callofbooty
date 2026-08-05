@@ -10,7 +10,6 @@ import { BoxSink } from './world/BoxSink.js';
 import { buildAllStructures } from './world/Buildings.js';
 import { scatterProps } from './world/Props.js';
 import { scatterStructures } from './world/structures/Scatter.js';
-import { layRoadDecks } from './world/Roads.js';
 import { Controller } from './player/Controller.js';
 import { PlayerCamera } from './player/Camera.js';
 import { DebugOverlay, createHud } from './ui/Debug.js';
@@ -27,12 +26,10 @@ function buildWorld() {
 
   buildAllStructures(sink, terrain, rng);
   const structureStats = scatterStructures(sink, terrain, rng);
-  // Visible road decks that follow terrain (no floating slabs)
-  const roadPieces = layRoadDecks(sink, terrain, terrain.roadLines || []);
   const propStats = scatterProps(sink, terrain, rng);
   sink.registerCollision(hash);
 
-  return { terrain, hash, sink, propStats, structureStats, roadPieces };
+  return { terrain, hash, sink, propStats, structureStats, roadPieces: terrain.roads?.length ?? 0 };
 }
 
 function setupLighting(scene) {

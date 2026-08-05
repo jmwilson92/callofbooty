@@ -3,7 +3,9 @@ import {
   WORLD, TERRAIN_COLORS, ROADS,
 } from '../config.js';
 import { Simplex, smoothstep, clamp, lerp } from '../core/Noise.js';
-import { buildRoadPolylines, polylinesToSegments } from './Roads.js';
+import {
+  buildRoadPolylines, polylinesToSegments, stampParkingLots, defaultParkingLots,
+} from './Roads.js';
 
 // San Diego heightfield shaped from satellite_view.png + terrain_map.png.
 // Same array backs render mesh and collision.
@@ -32,8 +34,11 @@ export class Terrain {
     }));
     this._applyRoads();
     this._reapplyWaterCuts();
-    // Re-stamp roads after water so decks stay dry and continuous.
+    // Re-stamp roads after water so corridors stay dry and continuous.
     this._applyRoads();
+    // Parking lots (smooth asphalt plates in the heightfield / road mask)
+    this.parkingLots = defaultParkingLots();
+    stampParkingLots(this, this.parkingLots);
   }
 
   idx(ix, iz) {

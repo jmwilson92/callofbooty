@@ -1,13 +1,14 @@
 import { BUILDINGS, POIS } from '../config.js';
 import { makeBuilding, makeShed, slab } from './BuildingKit.js';
-import { placeDowntownDistrict } from './structures/Catalog.js';
+import { placeDowntownDistrict, placeVehicle } from './structures/Catalog.js';
 import { Occupancy } from './Occupancy.js';
+import { claimRoadCorridors, placeParkingLotDetails } from './Roads.js';
 
 // San Diego POIs — anchors only; buildings seat on natural terrain.
 
 const PAL = BUILDINGS.PALETTE;
 // Shared world occupancy — prevents POI structures from stacking.
-export const worldOcc = new Occupancy(12);
+export const worldOcc = new Occupancy(10);
 
 export function resetOccupancy() {
   worldOcc.rects.length = 0;
@@ -18,17 +19,18 @@ function poi(id) {
   return POIS.find((p) => p.id === id);
 }
 
-// Highest terrain under a footprint (no flatten pads).
+// Highest terrain under a footprint (no flatten pads). Dense sample = no float.
 function seatY(terrain, p, x, z, w = 0, d = 0) {
   let m = terrain.heightAt(x, z);
   if (w || d) {
-    m = Math.max(
-      m,
-      terrain.heightAt(x + w, z),
-      terrain.heightAt(x, z + d),
-      terrain.heightAt(x + w, z + d),
-      terrain.heightAt(x + w / 2, z + d / 2)
-    );
+    const samples = [
+      [0, 0], [1, 0], [0, 1], [1, 1],
+      [0.5, 0], [0.5, 1], [0, 0.5], [1, 0.5], [0.5, 0.5],
+      [0.25, 0.25], [0.75, 0.75],
+    ];
+    for (const [u, v] of samples) {
+      m = Math.max(m, terrain.heightAt(x + w * u, z + d * v));
+    }
   }
   return m;
 }
@@ -38,9 +40,17 @@ function pick(rng, arr) {
 }
 
 // --- Downtown: satellite-style grid + packed high-rises (downtown.png) ---
+// Local occupancy only — world road claims use fat AABB stamps that blanketed
+// every block when freeways skimmed the district. Buildings still avoid roads
+// via terrain.roadAt inside placeDowntownDistrict.
 function buildDowntown(sink, terrain, rng) {
   const p = poi('downtown');
-  placeDowntownDistrict(sink, terrain, p.x, p.z, null, rng, worldOcc);
+  const local = new Occupancy(12);
+  placeDowntownDistrict(sink, terrain, p.x, p.z, null, rng, local);
+  // Publish footprints so scatter structures don't stack on towers
+  for (const r of local.rects) {
+    worldOcc.claim(r.x0, r.z0, r.x1 - r.x0, r.z1 - r.z0, 0, true);
+  }
 }
 
 function claimOrSkip(x, z, w, d) {
@@ -436,6 +446,8 @@ function buildRadioTower(sink, terrain, rng) {
 
 export function buildAllStructures(sink, terrain, rng) {
   resetOccupancy();
+  // Roads win: claim freeways/arterials/ramps/downtown streets before any building
+  if (terrain.roadLines) claimRoadCorridors(worldOcc, terrain.roadLines);
   buildDowntown(sink, terrain, rng);
   buildAirport(sink, terrain, rng);
   buildMcrd(sink, terrain, rng);
@@ -447,4 +459,8 @@ export function buildAllStructures(sink, terrain, rng) {
   buildCoronado(sink, terrain, rng);
   buildRadioTower(sink, terrain, rng);
   buildLaJolla(sink, terrain, rng);
+  // Parking lot curbs + white stalls + cars (asphalt already in heightfield)
+  if (terrain.parkingLots?.length) {
+    placeParkingLotDetails(sink, terrain, terrain.parkingLots, rng, placeVehicle);
+  }
 }

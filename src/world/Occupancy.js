@@ -24,13 +24,14 @@ export class Occupancy {
   /**
    * Try to claim [x, x+w] × [z, z+d] with optional margin.
    * Returns true if claimed, false if blocked.
+   * Pass force=true to always add (used for overlapping road corridor stamps).
    */
-  claim(x, z, w, d, margin = 1.5) {
+  claim(x, z, w, d, margin = 1.5, force = false) {
     const x0 = x - margin;
     const z0 = z - margin;
     const x1 = x + w + margin;
     const z1 = z + d + margin;
-    if (this.blocked(x0, z0, x1, z1)) return false;
+    if (!force && this.blocked(x0, z0, x1, z1)) return false;
     this.rects.push({ x0, z0, x1, z1 });
     const { ix0, iz0, ix1, iz1 } = this._bucketRange(x0, z0, x1, z1);
     const idx = this.rects.length - 1;
