@@ -224,12 +224,12 @@ export const POIS = [
   },
   {
     id: 'airport', name: 'San Diego International Airport',
-    x: -160, z: 200, loot: 'medium',
-    note: 'SAN hangars on bay flats (dry apron)',
+    x: -120, z: 100, loot: 'medium',
+    note: 'SAN hangars on dry apron north of the bay',
   },
   {
     id: 'mcrd', name: 'MCRD Depot',
-    x: 40, z: 260, loot: 'high',
+    x: 30, z: 180, loot: 'high',
     note: 'Barracks grid east of the airport',
   },
   {
