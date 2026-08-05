@@ -203,64 +203,64 @@ export const TERRAIN_COLORS = {
   NOISE_VARIATION: 0.015,
 };
 
-// Playable POIs — rectangular footprints (w×d metres), not circles.
+// Playable POIs — anchors only (x,z). No flatten pads / footprints.
+// Buildings seat on natural terrain height at their footprint.
 // Coord frame: +X east, -Z north, -X west (Pacific). Origin ≈ Mission Valley.
-// `padBlend` = soft edge of flatten pad (metres outside the rect).
 export const POIS = [
   {
     id: 'lajolla', name: 'La Jolla',
-    x: -560, z: -520, w: 160, d: 200, padBlend: 40, flatten: 26.0, loot: 'high',
-    note: 'NW coastal strip / village (elongated N–S along cliffs)',
+    x: -560, z: -520, loot: 'high',
+    note: 'NW coastal cliffs / village',
   },
   {
     id: 'kearnymesa', name: 'Kearny Mesa',
-    x: 140, z: -380, w: 240, d: 200, padBlend: 42, flatten: 44.0, loot: 'medium',
-    note: 'Industrial/commercial plateau (blocky mesa)',
+    x: 140, z: -380, loot: 'medium',
+    note: 'North mesa industrial/commercial',
   },
   {
     id: 'missionvalley', name: 'Mission Valley',
-    x: -20, z: 40, w: 320, d: 130, padBlend: 38, flatten: 10.0, loot: 'high',
-    note: 'I-8 corridor — wide E–W valley floor',
+    x: -20, z: 40, loot: 'high',
+    note: 'I-8 corridor valley floor — spawn hub',
   },
   {
     id: 'airport', name: 'San Diego International Airport',
-    x: -260, z: 180, w: 280, d: 150, padBlend: 36, flatten: 6.5, loot: 'medium',
-    note: 'SAN field — long E–W airfield plate',
+    x: -260, z: 180, loot: 'medium',
+    note: 'SAN hangars on bay flats',
   },
   {
     id: 'mcrd', name: 'MCRD Depot',
-    x: 20, z: 240, w: 200, d: 170, padBlend: 32, flatten: 8.0, loot: 'high',
-    note: 'Rectangular base / parade ground',
+    x: 20, z: 240, loot: 'high',
+    note: 'Barracks grid east of the airport',
   },
   {
     id: 'downtown', name: 'Downtown',
-    x: 40, z: 450, w: 340, d: 300, padBlend: 28, flatten: 9.0, loot: 'highest',
-    note: 'Street-grid skyline district (downtown.png)',
+    x: 40, z: 450, loot: 'highest',
+    note: 'Bayfront skyline (downtown.png)',
   },
   {
     id: 'pointloma', name: 'Point Loma',
-    x: -540, z: 360, w: 150, d: 240, padBlend: 40, flatten: 30.0, loot: 'high',
-    note: 'Peninsula ridge — tall N–S footprint',
+    x: -540, z: 360, loot: 'high',
+    note: 'Peninsula ridge west of the bay',
   },
   {
     id: 'balboa', name: 'Balboa Park',
-    x: 240, z: 320, w: 210, d: 190, padBlend: 36, flatten: 20.0, loot: 'high',
-    note: 'Park / museum rectangle',
+    x: 240, z: 320, loot: 'high',
+    note: 'Park / museum area NE of downtown',
   },
   {
     id: 'zoo', name: 'San Diego Zoo',
-    x: 360, z: 100, w: 170, d: 150, padBlend: 32, flatten: 24.0, loot: 'high',
-    note: 'Zoo grounds rectangle N of Balboa',
+    x: 360, z: 100, loot: 'high',
+    note: 'Zoo grounds north of Balboa',
   },
   {
     id: 'coronado', name: 'Coronado',
-    x: -260, z: 620, w: 220, d: 120, padBlend: 34, flatten: 7.5, loot: 'high',
-    note: 'Island strip — wide E–W, narrow N–S',
+    x: -260, z: 620, loot: 'high',
+    note: 'Island across San Diego Bay',
   },
   {
     id: 'radiotower', name: 'Radio Tower',
-    x: 720, z: -40, w: 90, d: 90, padBlend: 28, flatten: 142.0, loot: 'high',
-    note: 'Compact summit outpost pad',
+    x: 720, z: -40, loot: 'high',
+    note: 'Summit outpost on eastern mountain spine',
   },
 ];
 

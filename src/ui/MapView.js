@@ -1,5 +1,5 @@
 import { WORLD, POIS, ROAD_LINKS, FREEWAYS, MAP, TERRAIN_COLORS } from '../config.js';
-import { nearestPoi, poiHalfSize, poiContains } from '../world/Poi.js';
+import { nearestPoi, poiContains } from '../world/Poi.js';
 
 // Always-on square minimap (top-left) + full-map overlay toggled with M.
 // Both share a baked height-color raster so drawing stays cheap every frame.
@@ -296,35 +296,13 @@ export class MapView {
   _drawPois(ctx, toPx, markerR, withLabels) {
     for (const p of POIS) {
       const { px, py } = toPx(p.x, p.z);
-      const { hw, hd } = poiHalfSize(p);
-      // Rectangular district footprint (not a circle)
-      const c0 = toPx(p.x - hw, p.z - hd);
-      const c1 = toPx(p.x + hw, p.z + hd);
-      const rw = Math.max(2, c1.px - c0.px);
-      const rh = Math.max(2, c1.py - c0.py);
-
-      if (withLabels) {
-        ctx.fillStyle = 'rgba(240, 193, 74, 0.1)';
-        ctx.strokeStyle = 'rgba(240, 193, 74, 0.45)';
-        ctx.lineWidth = Math.max(1, this.fullDpr);
-        ctx.fillRect(c0.px, c0.py, rw, rh);
-        ctx.strokeRect(c0.px, c0.py, rw, rh);
-      } else {
-        // Minimap: small rect footprint
-        ctx.fillStyle = 'rgba(240, 193, 74, 0.22)';
-        ctx.strokeStyle = 'rgba(240, 193, 74, 0.65)';
-        ctx.lineWidth = Math.max(1, this.miniDpr * 0.8);
-        ctx.fillRect(c0.px, c0.py, rw, rh);
-        ctx.strokeRect(c0.px, c0.py, rw, rh);
-      }
-
-      // Center marker
+      // Anchor pin only — no footprint overlay (lay of the map)
       ctx.beginPath();
-      ctx.arc(px, py, markerR * 0.85, 0, Math.PI * 2);
+      ctx.arc(px, py, markerR * (withLabels ? 1.1 : 0.9), 0, Math.PI * 2);
       ctx.fillStyle = MAP.POI;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-      ctx.lineWidth = Math.max(1, markerR * 0.2);
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = Math.max(1, markerR * 0.22);
       ctx.stroke();
 
       if (withLabels) {
@@ -335,8 +313,8 @@ export class MapView {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         const label = p.name.toUpperCase();
-        ctx.strokeText(label, px, c0.py - 4 * this.fullDpr);
-        ctx.fillText(label, px, c0.py - 4 * this.fullDpr);
+        ctx.strokeText(label, px, py - markerR * 1.6 - 4 * this.fullDpr);
+        ctx.fillText(label, px, py - markerR * 1.6 - 4 * this.fullDpr);
       }
     }
   }

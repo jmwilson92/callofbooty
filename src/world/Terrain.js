@@ -3,7 +3,7 @@ import {
   WORLD, TERRAIN_COLORS, POIS, ROADS, ROAD_LINKS, FREEWAYS,
 } from '../config.js';
 import { Simplex, smoothstep, clamp, lerp } from '../core/Noise.js';
-import { poiPadWeight, poiHalfSize } from './Poi.js';
+
 
 // San Diego heightfield shaped from satellite_view.png + terrain_map.png.
 // Same array backs render mesh and collision.
@@ -24,7 +24,7 @@ export class Terrain {
     this.roadMask = new Float32Array(this.n * this.n);
 
     this._generateBase();
-    this._applyPoiPads();
+    // No artificial POI flatten pads — layout follows natural terrain.
     this.roads = this._buildRoadNetwork();
     this._applyRoads();
     this._reapplyWaterCuts();
@@ -253,37 +253,8 @@ export class Terrain {
     }
   }
 
-  // Rectangular district pads (not circular blobs) with soft edge blend.
-  _applyPoiPads() {
-    for (const poi of POIS) {
-      if (poi.flatten === null || poi.flatten === undefined) continue;
-      const pad = poi.flatten;
-      const { hw, hd } = poiHalfSize(poi);
-      const blend = poi.padBlend ?? 36;
-      const reachX = hw + blend;
-      const reachZ = hd + blend;
-
-      const minX = Math.max(0, Math.floor((poi.x - reachX + this.half) / this.cell));
-      const maxX = Math.min(this.n - 1, Math.ceil((poi.x + reachX + this.half) / this.cell));
-      const minZ = Math.max(0, Math.floor((poi.z - reachZ + this.half) / this.cell));
-      const maxZ = Math.min(this.n - 1, Math.ceil((poi.z + reachZ + this.half) / this.cell));
-
-      for (let iz = minZ; iz <= maxZ; iz++) {
-        const z = this.gx(iz);
-        for (let ix = minX; ix <= maxX; ix++) {
-          const x = this.gx(ix);
-          const w = poiPadWeight(poi, x, z, blend);
-          if (w <= 0) continue;
-          const i = this.idx(ix, iz);
-          this.heights[i] = lerp(this.heights[i], pad, w);
-        }
-      }
-    }
-  }
-
-  // Water wins over pads except protected dry POIs (and peninsula land).
+  // Water cuts; protect only authored land masses (Point Loma / Coronado).
   _reapplyWaterCuts() {
-    const dryPads = POIS.filter((p) => p.flatten !== null && p.flatten !== undefined);
     const pl = WORLD.POINT_LOMA;
     const cor = WORLD.CORONADO;
 
@@ -293,21 +264,14 @@ export class Terrain {
         const x = this.gx(ix);
         const i = this.idx(ix, iz);
 
-        let padProtect = 0;
-        for (const p of dryPads) {
-          // Protect rectangular pad + a bit of blend so bays don't flood districts
-          const w = poiPadWeight(p, x, z, (p.padBlend ?? 36) + 16);
-          if (w > padProtect) padProtect = w;
-        }
-
         // Always protect peninsula / island cores from being re-sunk
         const plW = 1 - smoothstep(0.55, 1.1, this._ellipse(x, z, pl.x, pl.z, pl.rx, pl.rz));
         const cW = 1 - smoothstep(0.65, 1.1, this._ellipse(x, z, cor.x, cor.z, cor.rx, cor.rz));
         const landProtect = Math.max(plW, cW);
-        if (padProtect > 0.85 || landProtect > 0.7) continue;
+        if (landProtect > 0.7) continue;
 
         let h = this.heights[i];
-        const sinkW = (1 - Math.max(padProtect, landProtect * 0.9));
+        const sinkW = (1 - landProtect * 0.9);
 
         const shoreNoise = this.detail.noise2D(z * 0.0035, 3.1) * 48;
         let coast = WORLD.COAST_X + shoreNoise;

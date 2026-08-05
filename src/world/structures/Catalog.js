@@ -440,11 +440,10 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
  * Full downtown district from satellite reference: street grid + packed towers.
  * Matches SD downtown density vibe — numerous high-rises, not sparse midblocks.
  */
-export function placeDowntownDistrict(sink, terrain, cx, cz, baseY, rng) {
-  // Street grid roughly like the satellite (N–S avenues × E–W streets).
-  // +X east, +Z south. Origin at district center.
-  const cols = 7; // N–S blocks
-  const rows = 6; // E–W blocks
+export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng) {
+  // Street grid follows natural terrain height per block (no flatten pad).
+  const cols = 7;
+  const rows = 6;
   const streetW = 10;
   const blockW = 28;
   const blockD = 26;
@@ -453,30 +452,25 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, baseY, rng) {
   const originX = cx - (cols * stepX - streetW) / 2;
   const originZ = cz - (rows * stepZ - streetW) / 2;
 
-  // Asphalt street grid
-  const gridX0 = originX - streetW;
-  const gridZ0 = originZ - streetW;
-  const gridX1 = originX + cols * stepX;
-  const gridZ1 = originZ + rows * stepZ;
-  sink.addSpan(gridX0, baseY - 0.08, gridZ0, gridX1, baseY + 0.02, gridZ1, C.asphalt);
+  const gy = (x, z, w = 0, d = 0) => groundY(terrain, x, z, w, d);
 
-  // Sidewalk pads under each block (lighter concrete)
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const bx = originX + c * stepX;
-      const bz = originZ + r * stepZ;
-      sink.addSpan(bx - 1.5, baseY - 0.02, bz - 1.5, bx + blockW + 1.5, baseY + 0.06, bz + blockD + 1.5, C.concrete);
+  // Street segments follow terrain at their midpoint (slightly below sidewalk)
+  for (let c = 0; c <= cols; c++) {
+    for (let r = 0; r < rows; r++) {
+      const sx = originX + c * stepX - streetW;
+      const sz = originZ + r * stepZ;
+      const y = gy(sx + streetW / 2, sz + blockD / 2) - 0.06;
+      sink.addSpan(sx, y, sz - 0.5, sx + streetW, y + 0.1, sz + blockD + 0.5, C.asphalt);
+      neonStrip(sink, sx + streetW / 2 - 0.15, y + 0.08, sz, sx + streetW / 2 + 0.15, y + 0.12, sz + blockD, C.yellowHot);
     }
   }
-
-  // Yellow center lines on main streets
-  for (let c = 0; c <= cols; c++) {
-    const sx = originX + c * stepX - streetW / 2;
-    neonStrip(sink, sx - 0.2, baseY + 0.03, gridZ0, sx + 0.2, baseY + 0.08, gridZ1, C.yellowHot);
-  }
   for (let r = 0; r <= rows; r++) {
-    const sz = originZ + r * stepZ - streetW / 2;
-    neonStrip(sink, gridX0, baseY + 0.03, sz - 0.2, gridX1, baseY + 0.08, sz + 0.2, C.yellowHot);
+    for (let c = 0; c < cols; c++) {
+      const sx = originX + c * stepX;
+      const sz = originZ + r * stepZ - streetW;
+      const y = gy(sx + blockW / 2, sz + streetW / 2) - 0.06;
+      sink.addSpan(sx - 0.5, y, sz, sx + blockW + 0.5, y + 0.1, sz + streetW, C.asphalt);
+    }
   }
 
   let towers = 0;
@@ -484,13 +478,14 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, baseY, rng) {
     for (let c = 0; c < cols; c++) {
       const bx = originX + c * stepX;
       const bz = originZ + r * stepZ;
+      const blockBase = gy(bx + blockW / 2, bz + blockD / 2);
 
-      // Waterfront south (high z) + core center = tallest
+      // Sidewalk plate at local grade
+      sink.addSpan(bx - 1, blockBase - 0.02, bz - 1, bx + blockW + 1, blockBase + 0.05, bz + blockD + 1, C.concrete);
+
       const distCore = Math.hypot(c - cols * 0.45, r - rows * 0.4);
       const waterfront = r >= rows - 2;
       const financial = distCore < 2.2;
-
-      // 1–3 towers per block (satellite is packed)
       const perBlock = financial ? 2 + Math.floor(rng() * 2) : 1 + Math.floor(rng() * 2);
 
       for (let t = 0; t < perBlock; t++) {
@@ -498,19 +493,14 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, baseY, rng) {
         const oz = 1.5 + Math.floor(t / 2) * (blockD * 0.4) + rng() * 2;
         const tw = Math.min(blockW * 0.42, 10 + rng() * 12);
         const td = Math.min(blockD * 0.42, 10 + rng() * 11);
+        const baseY = gy(bx + ox, bz + oz, tw, td);
 
         let floors;
-        if (financial && rng() > 0.25) {
-          floors = 18 + Math.floor(rng() * 14); // 18–31 super tall
-        } else if (waterfront && rng() > 0.35) {
-          floors = 14 + Math.floor(rng() * 10); // hotel towers
-        } else if (rng() > 0.4) {
-          floors = 10 + Math.floor(rng() * 10); // high-rise
-        } else {
-          floors = 5 + Math.floor(rng() * 6); // mid-rise fill
-        }
+        if (financial && rng() > 0.25) floors = 18 + Math.floor(rng() * 14);
+        else if (waterfront && rng() > 0.35) floors = 14 + Math.floor(rng() * 10);
+        else if (rng() > 0.4) floors = 10 + Math.floor(rng() * 10);
+        else floors = 5 + Math.floor(rng() * 6);
 
-        // A few enterable mid towers for gameplay; rest are silhouette skyline
         if (floors <= 8 && rng() > 0.5) {
           makeBuilding(sink, {
             x: bx + ox, z: bz + oz, w: tw, d: td, floors,
@@ -523,31 +513,32 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, baseY, rng) {
         towers++;
       }
 
-      // Street furniture: lights on corners
-      post(sink, bx - 2, baseY, bz - 2, 5.5, 0.2, C.metal);
-      neonStrip(sink, bx - 2.4, baseY + 5.2, bz - 2.4, bx - 1.4, baseY + 5.5, bz - 1.4, C.yellowHot);
+      post(sink, bx - 2, blockBase, bz - 2, 5.5, 0.2, C.metal);
+      neonStrip(sink, bx - 2.4, blockBase + 5.2, bz - 2.4, bx - 1.4, blockBase + 5.5, bz - 1.4, C.yellowHot);
     }
   }
 
-  // Harbor hotels strip on south edge (like marina / Hyatt row)
+  // Harbor hotels strip on south edge
   for (let i = 0; i < 5; i++) {
     const hx = originX + 10 + i * 32;
     const hz = originZ + rows * stepZ + 8;
-    placeSkylineTower(sink, hx, hz, baseY, rng, 12 + Math.floor(rng() * 8));
+    const by = gy(hx, hz, 16, 14);
+    placeSkylineTower(sink, hx, hz, by, rng, 12 + Math.floor(rng() * 8));
     towers++;
   }
 
-  // Parking garage (flat multi-level) east of core — satellite has big plates
+  // Parking garage east of core
   {
     const gx = originX + cols * stepX + 5;
     const gz = originZ + stepZ;
+    const by = gy(gx + 18, gz + 20);
     for (let lvl = 0; lvl < 5; lvl++) {
-      const y = baseY + lvl * 3.2;
+      const y = by + lvl * 3.2;
       sink.addSpan(gx, y, gz, gx + 36, y + 0.4, gz + 40, C.concrete);
-      post(sink, gx + 2, baseY, gz + 2, 5 * 3.2, 0.8, C.concrete);
-      post(sink, gx + 32, baseY, gz + 2, 5 * 3.2, 0.8, C.concrete);
-      post(sink, gx + 2, baseY, gz + 36, 5 * 3.2, 0.8, C.concrete);
-      post(sink, gx + 32, baseY, gz + 36, 5 * 3.2, 0.8, C.concrete);
+      post(sink, gx + 2, by, gz + 2, 5 * 3.2, 0.8, C.concrete);
+      post(sink, gx + 32, by, gz + 2, 5 * 3.2, 0.8, C.concrete);
+      post(sink, gx + 2, by, gz + 36, 5 * 3.2, 0.8, C.concrete);
+      post(sink, gx + 32, by, gz + 36, 5 * 3.2, 0.8, C.concrete);
     }
   }
 

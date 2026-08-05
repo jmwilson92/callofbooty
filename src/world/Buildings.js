@@ -2,8 +2,7 @@ import { BUILDINGS, POIS } from '../config.js';
 import { makeBuilding, makeShed, slab } from './BuildingKit.js';
 import { placeDowntownDistrict } from './structures/Catalog.js';
 
-// Six San Diego POIs — each with a distinct silhouette for readable rotations.
-// Structures sit on the POI's flattened pad where one exists.
+// San Diego POIs — anchors only; buildings seat on natural terrain.
 
 const PAL = BUILDINGS.PALETTE;
 
@@ -11,11 +10,17 @@ function poi(id) {
   return POIS.find((p) => p.id === id);
 }
 
-function seatY(terrain, p, x, z, w, d) {
-  if (p.flatten !== null && p.flatten !== undefined) return p.flatten;
-  let m = -Infinity;
-  for (const [ax, az] of [[x, z], [x + w, z], [x, z + d], [x + w, z + d], [x + w / 2, z + d / 2]]) {
-    m = Math.max(m, terrain.heightAt(ax, az));
+// Highest terrain under a footprint (no flatten pads).
+function seatY(terrain, p, x, z, w = 0, d = 0) {
+  let m = terrain.heightAt(x, z);
+  if (w || d) {
+    m = Math.max(
+      m,
+      terrain.heightAt(x + w, z),
+      terrain.heightAt(x, z + d),
+      terrain.heightAt(x + w, z + d),
+      terrain.heightAt(x + w / 2, z + d / 2)
+    );
   }
   return m;
 }
@@ -27,15 +32,13 @@ function pick(rng, arr) {
 // --- Downtown: satellite-style grid + packed high-rises (downtown.png) ---
 function buildDowntown(sink, terrain, rng) {
   const p = poi('downtown');
-  const base = p.flatten ?? seatY(terrain, p, p.x, p.z, 10, 10);
-  // Full district: street grid, mid-rises, tall towers, waterfront hotels
-  placeDowntownDistrict(sink, terrain, p.x, p.z, base, rng);
+  // Per-tower seating on natural terrain (no district flatten pad)
+  placeDowntownDistrict(sink, terrain, p.x, p.z, null, rng);
 }
 
 // --- San Diego International Airport: hangars + container/yard cover ---
 function buildAirport(sink, terrain, rng) {
   const p = poi('airport');
-  const base = p.flatten;
 
   // Terminal / hangar row
   for (let i = 0; i < 4; i++) {
@@ -50,9 +53,10 @@ function buildAirport(sink, terrain, rng) {
   }
 
   // Control / office block
+  const ox = p.x - 70, oz = p.z + 30;
   makeBuilding(sink, {
-    x: p.x - 70, z: p.z + 30, w: 22, d: 16, floors: 3,
-    baseY: base, color: PAL[0], rng,
+    x: ox, z: oz, w: 22, d: 16, floors: 3,
+    baseY: seatY(terrain, p, ox, oz, 22, 16), color: PAL[0], rng,
   });
 
   // Cargo containers on the apron
@@ -65,6 +69,7 @@ function buildAirport(sink, terrain, rng) {
     for (let col = 0; col < 6; col++) {
       const cx = yardX + col * (CW + 2.2);
       const cz = yardZ + row * (CD + 3.4);
+      const base = seatY(terrain, p, cx, cz, CW, CD);
       const stack = rng() > 0.55 ? 2 : 1;
       for (let s = 0; s < stack; s++) {
         sink.addSpan(
@@ -84,7 +89,7 @@ function buildAirport(sink, terrain, rng) {
 // --- MCRD Depot: disciplined barracks grid + drill field ---
 function buildMcrd(sink, terrain, rng) {
   const p = poi('mcrd');
-  const base = p.flatten;
+  const base = seatY(terrain, p, p.x, p.z, 24, 24);
 
   // Barracks rows — long low buildings in a grid
   for (let r = 0; r < 3; r++) {
@@ -122,7 +127,7 @@ function buildMcrd(sink, terrain, rng) {
 // --- Point Loma: ridge housing + lighthouse tower ---
 function buildPointLoma(sink, terrain, rng) {
   const p = poi('pointloma');
-  const base = p.flatten;
+  const base = seatY(terrain, p, p.x, p.z, 24, 24);
 
   makeBuilding(sink, {
     x: p.x - 6, z: p.z - 6, w: 12, d: 12, floors: 4,
@@ -154,7 +159,7 @@ function buildPointLoma(sink, terrain, rng) {
 // --- Mission Valley: hotel / mall blocks on the valley floor ---
 function buildMissionValley(sink, terrain, rng) {
   const p = poi('missionvalley');
-  const base = p.flatten;
+  const base = seatY(terrain, p, p.x, p.z, 24, 24);
 
   // Big box / mall sheds along the valley
   makeShed(sink, {
@@ -186,7 +191,7 @@ function buildMissionValley(sink, terrain, rng) {
 // --- Kearny Mesa: commercial / industrial plateau ---
 function buildKearnyMesa(sink, terrain, rng) {
   const p = poi('kearnymesa');
-  const base = p.flatten;
+  const base = seatY(terrain, p, p.x, p.z, 24, 24);
 
   // Office / light industrial grid
   for (let r = 0; r < 3; r++) {
@@ -219,7 +224,7 @@ function buildKearnyMesa(sink, terrain, rng) {
 // --- Balboa Park: museum halls + plaza walls ---
 function buildBalboa(sink, terrain, rng) {
   const p = poi('balboa');
-  const base = p.flatten;
+  const base = seatY(terrain, p, p.x, p.z, 24, 24);
 
   // Large exhibition halls
   makeShed(sink, {
@@ -250,7 +255,7 @@ function buildBalboa(sink, terrain, rng) {
 // --- San Diego Zoo: pavilions + winding low walls / habitat sheds ---
 function buildZoo(sink, terrain, rng) {
   const p = poi('zoo');
-  const base = p.flatten;
+  const base = seatY(terrain, p, p.x, p.z, 24, 24);
 
   // Entry / large pavilion
   makeShed(sink, {
@@ -301,7 +306,7 @@ function buildZoo(sink, terrain, rng) {
 // --- Coronado: resort strip across the bay ---
 function buildCoronado(sink, terrain, rng) {
   const p = poi('coronado');
-  const base = p.flatten;
+  const base = seatY(terrain, p, p.x, p.z, 24, 24);
 
   // Hotel del–scale block
   makeBuilding(sink, {
@@ -331,7 +336,7 @@ function buildCoronado(sink, terrain, rng) {
 // --- La Jolla: cliffside village on the NW coast ---
 function buildLaJolla(sink, terrain, rng) {
   const p = poi('lajolla');
-  const base = p.flatten;
+  const base = seatY(terrain, p, p.x, p.z, 24, 24);
 
   for (let i = 0; i < 7; i++) {
     const a = (i / 7) * Math.PI * 1.5 - 0.3;
@@ -361,7 +366,7 @@ function buildLaJolla(sink, terrain, rng) {
 // --- Radio Tower: summit outpost on the eastern mountain spine ---
 function buildRadioTower(sink, terrain, rng) {
   const p = poi('radiotower');
-  const base = p.flatten ?? seatY(terrain, p, p.x - 5, p.z - 5, 10, 10);
+  const base = seatY(terrain, p, p.x - 5, p.z - 5, 12, 12);
 
   // Equipment building under the mast
   const tw = 12, td = 12;
