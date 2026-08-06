@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { COMBAT } from '../config.js';
 
-// Tracers, impact sparks, floating damage numbers, hitmarkers.
+// Tracers, impact sparks, brass casings, floating damage numbers, hitmarkers.
 
 export class CombatEffects {
   constructor(scene, camera) {
@@ -13,10 +13,10 @@ export class CombatEffects {
 
     this.tracers = [];
     this.impacts = [];
+    this.casings = [];
     this.numbers = [];
     this.hitmarker = { t: 0, head: false };
 
-    // HUD hitmarker element
     this.hmEl = document.createElement('div');
     this.hmEl.id = 'hitmarker';
     this.hmEl.style.cssText = [
@@ -36,30 +36,83 @@ export class CombatEffects {
     this.dmgLayer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:11;overflow:hidden';
     document.body.appendChild(this.dmgLayer);
 
-    this._lineGeo = new THREE.BufferGeometry();
     this._lineMat = new THREE.LineBasicMaterial({
-      color: 0xffe0a0, transparent: true, opacity: 0.85, depthWidth: 1,
+      color: 0xffe0a0, transparent: true, opacity: 0.55, depthWidth: 1,
+    });
+    this._brassGeo = new THREE.CylinderGeometry(0.004, 0.0045, 0.018, 5);
+    this._brassMat = new THREE.MeshStandardMaterial({
+      color: 0xc4a050, metalness: 0.85, roughness: 0.35, emissive: 0x221100, emissiveIntensity: 0.15,
     });
   }
 
+  /** Thin short tracer — not a fat laser. */
   spawnTracer(from, to) {
-    const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);
+    // Only draw last ~18 m of the path so it doesn't fill the screen
+    const dir = to.clone().sub(from);
+    const len = dir.length();
+    if (len < 0.5) return;
+    dir.normalize();
+    const start = len > 22 ? from.clone().addScaledVector(dir, len - 22) : from.clone();
+    // Nudge slightly right of center so it doesn't sit on the crosshair
+    const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0));
+    if (right.lengthSq() > 1e-6) {
+      right.normalize();
+      start.addScaledVector(right, 0.04);
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints([start, to.clone()]);
     const mat = this._lineMat.clone();
-    mat.opacity = 0.9;
+    mat.opacity = 0.5;
     const line = new THREE.Line(geo, mat);
     this.group.add(line);
-    this.tracers.push({ line, mat, life: COMBAT.TRACER_LIFE });
+    this.tracers.push({ line, mat, life: COMBAT.TRACER_LIFE * 0.75 });
   }
 
+  /** Tiny impact spark, not a big ball. */
   spawnImpact(point, tag = 'solid') {
-    const col = tag === 'thin' ? 0xc0c0c0 : tag === 'target' ? 0xff4040 : 0xb0a080;
+    const col = tag === 'thin' ? 0xc0c0c0 : tag === 'target' ? 0xff5050 : 0xc8b890;
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.06, 6, 6),
-      new THREE.MeshBasicMaterial({ color: col })
+      new THREE.SphereGeometry(0.018, 5, 5),
+      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.9 })
     );
     mesh.position.copy(point);
     this.group.add(mesh);
-    this.impacts.push({ mesh, life: 0.25 });
+    this.impacts.push({ mesh, life: 0.12, max: 0.12 });
+  }
+
+  /**
+   * Spent brass — small, ejects to the RIGHT of the weapon, short life.
+   * @param {THREE.Vector3} origin world pos near ejection port
+   * @param {THREE.Vector3} right world right vector (camera/gun right)
+   * @param {THREE.Vector3} up world up
+   * @param {THREE.Vector3} forward world forward (−look)
+   */
+  spawnCasing(origin, right, up, forward) {
+    // Cap simultaneous casings
+    if (this.casings.length > 24) {
+      const old = this.casings.shift();
+      this.group.remove(old.mesh);
+      // geo is shared — don't dispose
+    }
+    const mesh = new THREE.Mesh(this._brassGeo, this._brassMat);
+    mesh.position.copy(origin);
+    // Start slightly to the right of the gun, not in your face
+    mesh.position.addScaledVector(right, 0.08);
+    mesh.position.addScaledVector(up, 0.02);
+    mesh.position.addScaledVector(forward, -0.05);
+    mesh.scale.setScalar(1);
+    this.group.add(mesh);
+
+    // Velocity: hard right + slight up + mild back, not toward camera center
+    const vel = new THREE.Vector3()
+      .addScaledVector(right, 1.6 + Math.random() * 0.8)
+      .addScaledVector(up, 0.9 + Math.random() * 0.5)
+      .addScaledVector(forward, -0.3 + Math.random() * 0.2);
+    const spin = new THREE.Vector3(
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18
+    );
+    this.casings.push({ mesh, vel, spin, life: 0.55 });
   }
 
   showHitmarker(headshot) {
@@ -84,11 +137,10 @@ export class CombatEffects {
   }
 
   update(dt) {
-    // Tracers
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const t = this.tracers[i];
       t.life -= dt;
-      t.mat.opacity = Math.max(0, t.life / COMBAT.TRACER_LIFE);
+      t.mat.opacity = Math.max(0, (t.life / (COMBAT.TRACER_LIFE * 0.75)) * 0.5);
       if (t.life <= 0) {
         this.group.remove(t.line);
         t.line.geometry.dispose();
@@ -96,11 +148,12 @@ export class CombatEffects {
         this.tracers.splice(i, 1);
       }
     }
-    // Impacts
     for (let i = this.impacts.length - 1; i >= 0; i--) {
       const p = this.impacts[i];
       p.life -= dt;
-      p.mesh.scale.setScalar(1 + (0.25 - p.life) * 4);
+      const u = 1 - p.life / p.max;
+      p.mesh.scale.setScalar(1 + u * 1.5);
+      p.mesh.material.opacity = Math.max(0, 1 - u);
       if (p.life <= 0) {
         this.group.remove(p.mesh);
         p.mesh.geometry.dispose();
@@ -108,12 +161,24 @@ export class CombatEffects {
         this.impacts.splice(i, 1);
       }
     }
-    // Hitmarker
+    // Brass physics (simple)
+    for (let i = this.casings.length - 1; i >= 0; i--) {
+      const c = this.casings[i];
+      c.life -= dt;
+      c.vel.y -= 12 * dt;
+      c.mesh.position.addScaledVector(c.vel, dt);
+      c.mesh.rotation.x += c.spin.x * dt;
+      c.mesh.rotation.y += c.spin.y * dt;
+      c.mesh.rotation.z += c.spin.z * dt;
+      if (c.life <= 0) {
+        this.group.remove(c.mesh);
+        this.casings.splice(i, 1);
+      }
+    }
     if (this.hitmarker.t > 0) {
       this.hitmarker.t -= dt;
       if (this.hitmarker.t <= 0) this.hmEl.style.opacity = '0';
     }
-    // Damage numbers — project to screen
     const cam = this.camera;
     for (let i = this.numbers.length - 1; i >= 0; i--) {
       const n = this.numbers[i];

@@ -239,14 +239,15 @@ export class WeaponSystem {
     this._muzzle = vm.muzzle;
     this.viewGroup.add(vm.root);
 
-    // Bright muzzle flash disc
+    // Compact muzzle flash (side-biased so it doesn't fill the aim point)
     const flash = new THREE.Mesh(
-      new THREE.SphereGeometry(0.06, 10, 10),
+      new THREE.SphereGeometry(0.028, 8, 8),
       new THREE.MeshBasicMaterial({
-        color: 0xffe8a0, transparent: true, opacity: 0, depthTest: false,
+        color: 0xffe8a0, transparent: true, opacity: 0, depthTest: false, depthWrite: false,
       })
     );
     flash.position.copy(vm.muzzle.position);
+    flash.position.x += 0.01;
     flash.frustumCulled = false;
     flash.renderOrder = 1000;
     vm.root.add(flash);
@@ -299,6 +300,20 @@ export class WeaponSystem {
     const hit = castHitscan(origin, dir, this.hash, targets, 500);
     this.effects.spawnTracer(origin, hit.point);
     this.effects.spawnImpact(hit.point, hit.tag || 'solid');
+
+    // Small brass eject to the RIGHT of the gun (not into the crosshair)
+    {
+      const cam = this.camera.camera;
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+      // Ejection port: slightly forward of eye, low-right of viewmodel
+      const eject = origin.clone()
+        .addScaledVector(right, 0.12)
+        .addScaledVector(up, -0.08)
+        .addScaledVector(forward, 0.2);
+      this.effects.spawnCasing(eject, right, up, forward);
+    }
 
     if (hit.target && hit.part) {
       let dmg = def.damage * rar.dmg;
@@ -355,11 +370,12 @@ export class WeaponSystem {
     this.lastShotAge = 0;
     this.boltReady = def.fireMode !== 'bolt';
     this._kick = Math.min(1, this._kick + 0.65);
+    // Small flash — not a big orb in the FOV
     if (this._muzzleFlash) {
-      this._muzzleFlash.material.opacity = 1;
-      this._muzzleFlash.scale.setScalar(1.6 + Math.random());
+      this._muzzleFlash.material.opacity = 0.85;
+      this._muzzleFlash.scale.setScalar(0.55 + Math.random() * 0.25);
     }
-    if (this._muzzleLight) this._muzzleLight.intensity = 3.5;
+    if (this._muzzleLight) this._muzzleLight.intensity = 1.8;
 
     // Recoil pattern (first shot deterministic)
     const pat = def.recoilPattern;

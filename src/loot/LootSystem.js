@@ -158,60 +158,65 @@ export class LootSystem {
   /** Hard pelican / rifle case — olive body, black latches, hinged lid. */
   _buildCaseMesh() {
     const g = new THREE.Group();
-    const bodyMat = mat(0x3a4a2e, { rough: 0.65, metal: 0.15 });
+    const bodyMat = mat(0x3d5230, { rough: 0.62, metal: 0.12 });
     const black = mat(0x1a1a1c, { rough: 0.4, metal: 0.5 });
-    const yellow = mat(0xd4a020, { rough: 0.45, metal: 0.2, em: 0.08 });
+    const yellow = mat(0xe8b020, { rough: 0.4, metal: 0.2, em: 0.15 });
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.38, 0.62), bodyMat);
-    body.position.y = 0.2;
+    // Slightly larger + taller so they read in dim interiors
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.42, 0.72), bodyMat);
+    body.position.y = 0.22;
     body.castShadow = true;
     body.receiveShadow = true;
     g.add(body);
 
-    // Lid (pivots on +Z rear edge)
+    // Beveled top edge lip
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.04, 0.74), bodyMat);
+    lip.position.y = 0.42;
+    g.add(lip);
+
     const lidPivot = new THREE.Group();
-    lidPivot.position.set(0, 0.39, -0.28);
+    lidPivot.position.set(0, 0.44, -0.32);
     lidPivot.name = 'lidPivot';
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.08, 0.58), bodyMat);
-    lid.position.set(0, 0.04, 0.28);
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.09, 0.68), bodyMat);
+    lid.position.set(0, 0.05, 0.32);
     lid.castShadow = true;
     lidPivot.add(lid);
-    // Foam interior visible when open
-    const foam = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.04, 0.5), mat(0x2a2a32, { rough: 0.9 }));
-    foam.position.set(0, -0.01, 0.28);
+    const foam = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.05, 0.58), mat(0x1e1e28, { rough: 0.92 }));
+    foam.position.set(0, -0.01, 0.32);
     lidPivot.add(foam);
     g.add(lidPivot);
 
-    // Latches
-    for (const lx of [-0.35, 0.0, 0.35]) {
-      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.06), black);
-      latch.position.set(lx, 0.4, 0.32);
+    for (const lx of [-0.4, 0.0, 0.4]) {
+      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.07), black);
+      latch.position.set(lx, 0.45, 0.38);
       g.add(latch);
     }
-    // Handle
-    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.015, 6, 12, Math.PI), black);
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.018, 6, 14, Math.PI), black);
     handle.rotation.x = Math.PI / 2;
-    handle.position.set(0, 0.28, 0.35);
+    handle.position.set(0, 0.3, 0.4);
     g.add(handle);
-    // Corner protectors
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const c = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.08), yellow);
-        c.position.set(sx * 0.54, 0.12, sz * 0.28);
+        const c = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.1), yellow);
+        c.position.set(sx * 0.64, 0.14, sz * 0.32);
         g.add(c);
       }
     }
-    // Rarity / loot glow stripe on top when closed
+    // Bright loot beacon (emissive) — easy to spot in towers
     const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.9, 0.015, 0.06),
-      mat(0x7fd4ff, { em: 0.25, metal: 0.1 })
+      new THREE.BoxGeometry(1.05, 0.03, 0.08),
+      mat(0x40e0ff, { em: 0.55, metal: 0.05, rough: 0.35 })
     );
-    stripe.position.set(0, 0.44, 0);
+    stripe.position.set(0, 0.5, 0);
     stripe.name = 'caseStripe';
     g.add(stripe);
-
+    // Soft point light so cases glow in dark floors
+    const light = new THREE.PointLight(0x50d0ff, 0.55, 6, 2);
+    light.position.set(0, 0.55, 0);
+    g.add(light);
     g.userData.lidPivot = lidPivot;
     g.userData.stripe = stripe;
+    g.userData.light = light;
     return g;
   }
 
@@ -314,30 +319,52 @@ export class LootSystem {
       this._rollAndSpawnOutdoor(rng, x, z);
     }
 
-    // Pelican cases — every building floor (random chance)
+    // Pelican cases — interior of every registered building (incl. skyline towers)
     let caseCount = 0;
+    const margin = 1.6;
     for (const b of worldBuildings) {
-      const margin = 1.4;
-      if (b.w < 6 || b.d < 6) continue;
-      for (let f = 0; f < b.floors; f++) {
-        if (rng() > CASES.PER_FLOOR_CHANCE) continue;
-        // 1–2 cases per selected floor
-        const n = rng() > 0.55 ? 2 : 1;
+      if (b.w < 5 || b.d < 5) continue;
+      let placedHere = 0;
+      const maxB = CASES.MAX_PER_BUILDING ?? 8;
+      // Cap floors scanned on super-tall towers (still cover low + mid + high)
+      const floors = b.floors;
+      const floorList = [];
+      for (let f = 0; f < floors; f++) floorList.push(f);
+      // Always include ground; sample upper floors
+      const sample = new Set([0]);
+      if (floors > 1) sample.add(Math.floor(floors * 0.35));
+      if (floors > 2) sample.add(Math.floor(floors * 0.65));
+      if (floors > 3) sample.add(floors - 1);
+      for (const f of floorList) {
+        if (sample.has(f)) continue;
+        if (rng() < (CASES.PER_FLOOR_CHANCE ?? 0.7)) sample.add(f);
+      }
+
+      for (const f of sample) {
+        if (placedHere >= maxB) break;
+        const guarantee = f === 0 && CASES.GUARANTEE_GROUND;
+        if (!guarantee && rng() > (CASES.PER_FLOOR_CHANCE ?? 0.7)) continue;
+        const n = Math.min(
+          CASES.MAX_PER_FLOOR ?? 2,
+          guarantee ? 1 + (rng() > 0.5 ? 1 : 0) : (rng() > 0.5 ? 2 : 1)
+        );
         for (let k = 0; k < n; k++) {
-          const lx = margin + rng() * (b.w - margin * 2);
-          const lz = margin + rng() * (b.d - margin * 2);
-          // Avoid stair core (roughly +X/+Z corner)
-          if (lx > b.w * 0.55 && lz > b.d * 0.55 && rng() > 0.4) continue;
+          if (placedHere >= maxB) break;
+          // Keep away from walls / stair corner (+X/+Z)
+          const lx = margin + rng() * Math.max(0.5, b.w - margin * 2);
+          const lz = margin + rng() * Math.max(0.5, b.d - margin * 2);
+          if (lx > b.w * 0.62 && lz > b.d * 0.62) continue;
           const x = b.x + lx;
           const z = b.z + lz;
-          const y = b.floorYs?.[f] ?? (b.baseY + 0.1 + f * 3.2);
-          const yaw = rng() * Math.PI * 2;
-          this._spawnCase(x, y, z, yaw, rng);
+          const y = b.floorYs?.[f] ?? (b.baseY + 0.15 + f * 3.4);
+          this._spawnCase(x, y, z, rng() * Math.PI * 2, rng);
           caseCount++;
+          placedHere++;
         }
       }
     }
 
+    console.info(`[loot] outdoor items ${this.items.length} · supply cases ${caseCount} · buildings ${worldBuildings.length}`);
     return { items: this.items.length, cases: caseCount };
   }
 
@@ -456,17 +483,15 @@ export class LootSystem {
     c.open = true;
     c.openT = 0;
     if (c.mesh.userData.stripe) c.mesh.userData.stripe.visible = false;
-    // Spit items in an arc in front of the case
+    if (c.mesh.userData.light) c.mesh.userData.light.intensity = 0.15;
+    // Spit items in a tight arc in front of the case
     const cos = Math.cos(c.yaw);
     const sin = Math.sin(c.yaw);
     c.contents.forEach((item, i) => {
-      const side = (i - (c.contents.length - 1) * 0.5) * 0.35;
-      const forward = 0.55 + i * 0.08;
-      const lx = side;
-      const lz = forward;
-      // local → world (yaw)
-      const wx = c.x + lx * cos - lz * sin;
-      const wz = c.z + lx * sin + lz * cos;
+      const side = (i - (c.contents.length - 1) * 0.5) * 0.38;
+      const forward = 0.7 + i * 0.1;
+      const wx = c.x + side * cos - forward * sin;
+      const wz = c.z + side * sin + forward * cos;
       this.spawnItem(item, wx, c.y + 0.05, wz);
     });
     c.contents = [];

@@ -161,171 +161,200 @@ RY90 = (0, math.radians(90), 0)
 
 # ── weapon builders ────────────────────────────────────────────────────────
 
+def _hands(skin, fire_loc, support_loc=None):
+    box(0.038, 0.048, 0.038, fire_loc, mat=skin, name="hand_fire", bevel_w=0.007)
+    if support_loc:
+        box(0.036, 0.044, 0.036, support_loc, mat=skin, name="hand_support", bevel_w=0.007)
+
+
 def build_ar(mats):
     dark, steel, body, glass, glow, skin = mats
-    # Stock (behind = −Y)
-    box(0.038, 0.13, 0.048, (0, -0.14, -0.015), mat=dark, name="stock", bevel_w=0.005)
-    cyl(0.012, 0.09, (0, -0.05, -0.012), RX90, 12, dark, "buffer")
-    # Lower / upper receiver
-    box(0.052, 0.15, 0.048, (0, 0.02, -0.028), mat=body, name="lower", bevel_w=0.004)
-    box(0.048, 0.17, 0.04, (0, 0.03, -0.002), mat=dark, name="upper", bevel_w=0.003)
-    # Magwell lip
-    box(0.05, 0.06, 0.02, (0, 0.02, -0.055), mat=steel, name="magwell", bevel_w=0.002)
-    # Handguard (rounded feel via bevel)
-    box(0.046, 0.2, 0.04, (0, 0.22, -0.008), mat=dark, name="handguard", bevel_w=0.004)
-    # Barrel + gas block + muzzle
-    cyl(0.008, 0.2, (0, 0.42, -0.004), RX90, 14, steel, "barrel")
-    box(0.016, 0.028, 0.016, (0, 0.32, -0.004), mat=steel, name="gas", do_bevel=True, bevel_w=0.002)
-    cyl(0.012, 0.03, (0, 0.54, -0.004), RX90, 10, steel, "flash_hider", r2=0.014)
-    # Rail
-    box(0.024, 0.2, 0.01, (0, 0.08, 0.022), mat=dark, name="rail", bevel_w=0.001)
-    # Red-dot optic (rounded housing)
-    box(0.036, 0.05, 0.028, (0, 0.02, 0.042), mat=dark, name="optic_base", bevel_w=0.003)
-    # Window frame + glass
-    box(0.03, 0.008, 0.03, (0, 0.04, 0.055), mat=glass, name="optic_glass", do_bevel=False)
-    box(0.007, 0.006, 0.007, (0, 0.038, 0.055), mat=glow, name="reticle", do_bevel=False)
-    # Pistol grip
-    box(0.036, 0.045, 0.1, (0, -0.01, -0.1), rot=(math.radians(18), 0, 0),
-        mat=dark, name="grip", bevel_w=0.005)
-    # Magazine (separate object name Mag)
-    box(0.038, 0.048, 0.13, (0, 0.02, -0.13), mat=body, name="Mag", bevel_w=0.003)
-    # Hands
-    box(0.042, 0.055, 0.042, (0.02, -0.01, -0.12), mat=skin, name="hand_fire", bevel_w=0.006)
-    box(0.04, 0.05, 0.04, (0.0, 0.2, -0.055), mat=skin, name="hand_support", bevel_w=0.006)
-
-    empty("Sight", (0, 0.03, 0.055))
-    empty("Muzzle", (0, 0.56, -0.004))
-    empty("Mag", (0, 0.02, -0.13))
+    # Collapsible stock — multi-piece silhouette
+    box(0.036, 0.11, 0.042, (0, -0.16, -0.012), mat=dark, name="stock", bevel_w=0.006)
+    box(0.028, 0.04, 0.05, (0, -0.2, -0.005), mat=dark, name="stock_pad", bevel_w=0.004)
+    cyl(0.011, 0.1, (0, -0.06, -0.01), RX90, 14, dark, "buffer")
+    # Receivers with slight step
+    box(0.05, 0.14, 0.046, (0, 0.02, -0.03), mat=body, name="lower", bevel_w=0.005)
+    box(0.046, 0.16, 0.038, (0, 0.03, -0.002), mat=dark, name="upper", bevel_w=0.004)
+    box(0.048, 0.055, 0.018, (0, 0.015, -0.055), mat=steel, name="magwell", bevel_w=0.002)
+    # M-LOK style handguard (tapered feel via two boxes)
+    box(0.044, 0.14, 0.038, (0, 0.18, -0.008), mat=dark, name="hg1", bevel_w=0.004)
+    box(0.04, 0.1, 0.034, (0, 0.28, -0.006), mat=dark, name="hg2", bevel_w=0.003)
+    # Side rails (thin)
+    box(0.006, 0.18, 0.014, (-0.024, 0.22, 0.0), mat=steel, name="side_l", bevel_w=0.001)
+    box(0.006, 0.18, 0.014, (0.024, 0.22, 0.0), mat=steel, name="side_r", bevel_w=0.001)
+    # Barrel assembly
+    cyl(0.0075, 0.18, (0, 0.42, -0.003), RX90, 16, steel, "barrel")
+    cyl(0.011, 0.03, (0, 0.33, -0.003), RX90, 12, steel, "gas_block")
+    cyl(0.009, 0.04, (0, 0.36, 0.012), (0, 0, 0), 10, steel, "gas_tube")  # vertical-ish stub
+    # 3-prong flash hider
+    cyl(0.01, 0.028, (0, 0.53, -0.003), RX90, 12, steel, "fh", r2=0.013)
+    for a in (-0.4, 0, 0.4):
+        box(0.004, 0.02, 0.01, (math.sin(a) * 0.012, 0.545, -0.003 + math.cos(a) * 0.002),
+            mat=steel, name="prong", do_bevel=False)
+    # Top picatinny
+    box(0.022, 0.22, 0.009, (0, 0.08, 0.02), mat=dark, name="rail", bevel_w=0.001)
+    # Micro red-dot (cylindrical housing)
+    cyl(0.016, 0.04, (0, 0.02, 0.04), RX90, 14, dark, "optic_body")
+    box(0.028, 0.012, 0.028, (0, 0.04, 0.04), mat=glass, name="optic_glass", do_bevel=False)
+    box(0.006, 0.005, 0.006, (0, 0.035, 0.04), mat=glow, name="reticle", do_bevel=False)
+    # Grip with finger ridges (beveled)
+    box(0.034, 0.042, 0.095, (0, -0.01, -0.1), rot=(math.radians(20), 0, 0),
+        mat=dark, name="grip", bevel_w=0.006)
+    box(0.036, 0.045, 0.125, (0, 0.02, -0.125), mat=body, name="Mag", bevel_w=0.004)
+    # Mag baseplate
+    box(0.038, 0.048, 0.012, (0, 0.02, -0.19), mat=dark, name="mag_base", bevel_w=0.002)
+    _hands(skin, (0.018, -0.01, -0.115), (0.0, 0.22, -0.05))
+    empty("Sight", (0, 0.03, 0.04))
+    empty("Muzzle", (0, 0.56, -0.003))
+    empty("Mag", (0, 0.02, -0.125))
 
 
 def build_smg(mats):
     dark, steel, body, glass, glow, skin = mats
-    box(0.048, 0.18, 0.045, (0, 0.02, -0.018), mat=body, name="receiver", bevel_w=0.004)
-    box(0.042, 0.1, 0.036, (0, 0.16, -0.008), mat=dark, name="shroud", bevel_w=0.003)
-    cyl(0.009, 0.12, (0, 0.28, -0.004), RX90, 14, steel, "barrel")
-    cyl(0.012, 0.025, (0, 0.35, -0.004), RX90, 10, steel, "muzzle_dev")
-    box(0.038, 0.09, 0.038, (0, -0.12, -0.015), mat=dark, name="stock", bevel_w=0.004)
-    box(0.036, 0.042, 0.09, (0, -0.02, -0.095), rot=(math.radians(14), 0, 0),
-        mat=dark, name="grip", bevel_w=0.004)
-    box(0.036, 0.042, 0.11, (0, 0.02, -0.12), mat=body, name="Mag", bevel_w=0.003)
-    box(0.018, 0.12, 0.008, (0, 0.05, 0.018), mat=dark, name="rail", bevel_w=0.001)
-    # Compact irons
-    box(0.004, 0.004, 0.012, (0, 0.18, 0.03), mat=glow, name="front_sight", do_bevel=False)
-    box(0.016, 0.006, 0.01, (0, -0.02, 0.024), mat=dark, name="rear_sight", bevel_w=0.001)
-    box(0.04, 0.05, 0.04, (0.015, -0.02, -0.11), mat=skin, name="hand_fire", bevel_w=0.005)
-    box(0.038, 0.045, 0.038, (0, 0.14, -0.05), mat=skin, name="hand_support", bevel_w=0.005)
-    empty("Sight", (0, 0.08, 0.028))
-    empty("Muzzle", (0, 0.38, -0.004))
+    box(0.046, 0.16, 0.042, (0, 0.02, -0.016), mat=body, name="receiver", bevel_w=0.005)
+    cyl(0.02, 0.1, (0, 0.16, -0.006), RX90, 14, dark, "shroud")
+    cyl(0.0085, 0.11, (0, 0.28, -0.003), RX90, 14, steel, "barrel")
+    cyl(0.012, 0.028, (0, 0.35, -0.003), RX90, 12, steel, "muzzle_dev", r2=0.01)
+    # Folding stock stub
+    box(0.03, 0.08, 0.032, (0, -0.1, -0.01), mat=dark, name="stock", bevel_w=0.004)
+    cyl(0.008, 0.06, (0, -0.14, -0.01), RX90, 10, dark, "stock_arm")
+    box(0.034, 0.04, 0.085, (0, -0.02, -0.09), rot=(math.radians(14), 0, 0),
+        mat=dark, name="grip", bevel_w=0.005)
+    box(0.034, 0.04, 0.11, (0, 0.02, -0.12), mat=body, name="Mag", bevel_w=0.003)
+    box(0.016, 0.12, 0.007, (0, 0.05, 0.016), mat=dark, name="rail", bevel_w=0.001)
+    box(0.0035, 0.0035, 0.011, (0, 0.18, 0.028), mat=glow, name="front_sight", do_bevel=False)
+    box(0.014, 0.005, 0.009, (0, -0.02, 0.022), mat=dark, name="rear_sight", bevel_w=0.001)
+    _hands(skin, (0.014, -0.02, -0.1), (0.0, 0.14, -0.045))
+    empty("Sight", (0, 0.08, 0.026))
+    empty("Muzzle", (0, 0.38, -0.003))
     empty("Mag", (0, 0.02, -0.12))
 
 
 def build_lmg(mats):
     dark, steel, body, glass, glow, skin = mats
-    box(0.062, 0.3, 0.052, (0, 0.02, -0.015), mat=dark, name="receiver", bevel_w=0.005)
-    cyl(0.012, 0.32, (0, 0.34, -0.002), RX90, 14, steel, "barrel")
-    cyl(0.016, 0.04, (0, 0.52, -0.002), RX90, 12, steel, "muzzle_dev")
-    box(0.068, 0.1, 0.075, (0, 0.0, -0.09), mat=body, name="Mag", bevel_w=0.004)
-    box(0.042, 0.045, 0.095, (0, -0.1, -0.095), rot=(math.radians(12), 0, 0),
-        mat=dark, name="grip", bevel_w=0.004)
-    box(0.048, 0.13, 0.048, (0, -0.2, -0.012), mat=dark, name="stock", bevel_w=0.004)
-    # Bipod legs (cylinders)
-    cyl(0.006, 0.1, (-0.04, 0.28, -0.07), (math.radians(70), 0, math.radians(-10)), 8, steel, "bipod_l")
-    cyl(0.006, 0.1, (0.04, 0.28, -0.07), (math.radians(70), 0, math.radians(10)), 8, steel, "bipod_r")
-    box(0.005, 0.005, 0.014, (0, 0.2, 0.03), mat=glow, name="front_sight", do_bevel=False)
-    box(0.04, 0.05, 0.04, (0.015, -0.1, -0.11), mat=skin, name="hand_fire", bevel_w=0.005)
-    empty("Sight", (0, 0.05, 0.028))
+    box(0.058, 0.28, 0.05, (0, 0.02, -0.014), mat=dark, name="receiver", bevel_w=0.006)
+    # Barrel with cooling holes suggestion (rings)
+    cyl(0.011, 0.3, (0, 0.34, -0.002), RX90, 16, steel, "barrel")
+    for i, y in enumerate((0.22, 0.28, 0.34, 0.4)):
+        cyl(0.014, 0.012, (0, y, -0.002), RX90, 12, steel, f"ring{i}")
+    cyl(0.015, 0.038, (0, 0.52, -0.002), RX90, 12, steel, "muzzle_dev")
+    box(0.065, 0.1, 0.08, (0, 0.0, -0.095), mat=body, name="Mag", bevel_w=0.005)
+    box(0.04, 0.042, 0.09, (0, -0.1, -0.09), rot=(math.radians(12), 0, 0),
+        mat=dark, name="grip", bevel_w=0.005)
+    box(0.046, 0.12, 0.046, (0, -0.2, -0.01), mat=dark, name="stock", bevel_w=0.005)
+    # Carrying handle
+    box(0.012, 0.06, 0.04, (0, 0.05, 0.04), mat=dark, name="carry", bevel_w=0.003)
+    cyl(0.0055, 0.11, (-0.04, 0.28, -0.07), (math.radians(68), 0, math.radians(-12)), 8, steel, "bipod_l")
+    cyl(0.0055, 0.11, (0.04, 0.28, -0.07), (math.radians(68), 0, math.radians(12)), 8, steel, "bipod_r")
+    box(0.004, 0.004, 0.012, (0, 0.2, 0.028), mat=glow, name="front_sight", do_bevel=False)
+    _hands(skin, (0.014, -0.1, -0.1))
+    empty("Sight", (0, 0.05, 0.026))
     empty("Muzzle", (0, 0.55, -0.002))
-    empty("Mag", (0, 0.0, -0.09))
+    empty("Mag", (0, 0.0, -0.095))
 
 
 def build_sniper(mats):
     dark, steel, body, glass, glow, skin = mats
     wood = make_mat("wood", (0.38, 0.24, 0.13), 0.04, 0.72)
-    box(0.048, 0.26, 0.048, (0, 0.0, -0.015), mat=dark, name="receiver", bevel_w=0.004)
-    box(0.05, 0.18, 0.055, (0, -0.18, -0.02), mat=wood, name="stock", bevel_w=0.006)
-    # Cheek riser
-    box(0.04, 0.1, 0.025, (0, -0.2, 0.02), mat=dark, name="cheek", bevel_w=0.003)
-    cyl(0.009, 0.4, (0, 0.35, -0.002), RX90, 14, steel, "barrel")
-    cyl(0.014, 0.035, (0, 0.56, -0.002), RX90, 12, steel, "brake")
-    # Scope tube (main + bells)
-    cyl(0.018, 0.18, (0, 0.02, 0.042), RX90, 16, dark, "scope")
-    cyl(0.022, 0.04, (0, -0.08, 0.042), RX90, 14, dark, "ocular", r2=0.016)
-    cyl(0.024, 0.04, (0, 0.12, 0.042), RX90, 14, dark, "objective", r2=0.016)
-    box(0.028, 0.008, 0.028, (0, -0.1, 0.042), mat=glass, name="ocular_glass", do_bevel=False)
-    box(0.005, 0.005, 0.005, (0, 0.02, 0.042), mat=glow, name="reticle", do_bevel=False)
-    # Mount rings
-    box(0.02, 0.02, 0.02, (0, -0.02, 0.022), mat=steel, name="ring1", bevel_w=0.002)
-    box(0.02, 0.02, 0.02, (0, 0.06, 0.022), mat=steel, name="ring2", bevel_w=0.002)
-    box(0.038, 0.042, 0.09, (0, -0.05, -0.095), rot=(math.radians(10), 0, 0),
+    box(0.046, 0.24, 0.046, (0, 0.0, -0.014), mat=dark, name="receiver", bevel_w=0.005)
+    # Thumbhole stock silhouette
+    box(0.048, 0.16, 0.052, (0, -0.18, -0.02), mat=wood, name="stock", bevel_w=0.007)
+    box(0.04, 0.08, 0.03, (0, -0.22, 0.015), mat=dark, name="cheek", bevel_w=0.004)
+    box(0.036, 0.05, 0.07, (0, -0.08, -0.08), mat=wood, name="grip_wood", bevel_w=0.005)
+    cyl(0.0085, 0.42, (0, 0.36, -0.002), RX90, 16, steel, "barrel")
+    # Fluted feel via thin rings
+    for y in (0.2, 0.28, 0.36, 0.44):
+        cyl(0.01, 0.008, (0, y, -0.002), RX90, 12, steel, "flute")
+    cyl(0.013, 0.04, (0, 0.58, -0.002), RX90, 12, steel, "brake")
+    # Scope — multi-section
+    cyl(0.017, 0.16, (0, 0.02, 0.042), RX90, 18, dark, "scope")
+    cyl(0.022, 0.045, (0, -0.08, 0.042), RX90, 14, dark, "ocular", r2=0.015)
+    cyl(0.024, 0.045, (0, 0.12, 0.042), RX90, 14, dark, "objective", r2=0.015)
+    # Turrets
+    cyl(0.01, 0.02, (0, 0.02, 0.06), (0, 0, 0), 10, dark, "turret_top")
+    cyl(0.008, 0.018, (0.02, 0.02, 0.042), RY90, 10, dark, "turret_side")
+    box(0.026, 0.008, 0.026, (0, -0.1, 0.042), mat=glass, name="ocular_glass", do_bevel=False)
+    box(0.004, 0.004, 0.004, (0, 0.02, 0.042), mat=glow, name="reticle", do_bevel=False)
+    box(0.018, 0.018, 0.018, (0, -0.02, 0.022), mat=steel, name="ring1", bevel_w=0.002)
+    box(0.018, 0.018, 0.018, (0, 0.06, 0.022), mat=steel, name="ring2", bevel_w=0.002)
+    box(0.036, 0.04, 0.085, (0, -0.04, -0.09), rot=(math.radians(8), 0, 0),
         mat=dark, name="grip", bevel_w=0.004)
-    box(0.032, 0.04, 0.08, (0, 0.0, -0.1), mat=body, name="Mag", bevel_w=0.003)
-    box(0.04, 0.048, 0.04, (0.015, -0.05, -0.11), mat=skin, name="hand_fire", bevel_w=0.005)
+    box(0.03, 0.038, 0.075, (0, 0.0, -0.1), mat=body, name="Mag", bevel_w=0.003)
+    _hands(skin, (0.014, -0.05, -0.1))
     empty("Sight", (0, 0.02, 0.042))
-    empty("Muzzle", (0, 0.58, -0.002))
+    empty("Muzzle", (0, 0.6, -0.002))
     empty("Mag", (0, 0.0, -0.1))
 
 
 def build_dmr(mats):
     dark, steel, body, glass, glow, skin = mats
     od = make_mat("od", (0.3, 0.36, 0.22), 0.18, 0.52)
-    box(0.042, 0.12, 0.048, (0, -0.14, -0.015), mat=od, name="stock", bevel_w=0.005)
-    box(0.052, 0.16, 0.048, (0, 0.0, -0.028), mat=od, name="lower", bevel_w=0.004)
-    box(0.048, 0.18, 0.04, (0, 0.02, -0.002), mat=dark, name="upper", bevel_w=0.003)
-    box(0.046, 0.22, 0.038, (0, 0.22, -0.008), mat=od, name="handguard", bevel_w=0.004)
-    cyl(0.0085, 0.26, (0, 0.45, -0.004), RX90, 14, steel, "barrel")
-    cyl(0.013, 0.032, (0, 0.6, -0.004), RX90, 10, steel, "muzzle")
-    # LPVO-style scope
-    cyl(0.015, 0.14, (0, 0.02, 0.04), RX90, 14, dark, "scope")
-    box(0.024, 0.008, 0.024, (0, -0.05, 0.04), mat=glass, name="glass", do_bevel=False)
-    box(0.005, 0.005, 0.005, (0, 0.02, 0.04), mat=glow, name="reticle", do_bevel=False)
-    box(0.036, 0.042, 0.1, (0, -0.02, -0.1), rot=(math.radians(15), 0, 0),
-        mat=dark, name="grip", bevel_w=0.004)
-    box(0.038, 0.045, 0.12, (0, 0.0, -0.125), mat=body, name="Mag", bevel_w=0.003)
-    box(0.04, 0.05, 0.04, (0.015, -0.02, -0.12), mat=skin, name="hand_fire", bevel_w=0.005)
-    box(0.038, 0.045, 0.038, (0, 0.18, -0.05), mat=skin, name="hand_support", bevel_w=0.005)
-    empty("Sight", (0, 0.02, 0.04))
-    empty("Muzzle", (0, 0.62, -0.004))
+    box(0.04, 0.11, 0.046, (0, -0.14, -0.014), mat=od, name="stock", bevel_w=0.006)
+    box(0.05, 0.15, 0.046, (0, 0.0, -0.028), mat=od, name="lower", bevel_w=0.005)
+    box(0.046, 0.17, 0.038, (0, 0.02, -0.002), mat=dark, name="upper", bevel_w=0.004)
+    box(0.044, 0.14, 0.036, (0, 0.18, -0.008), mat=od, name="hg1", bevel_w=0.004)
+    box(0.04, 0.1, 0.032, (0, 0.28, -0.006), mat=od, name="hg2", bevel_w=0.003)
+    cyl(0.008, 0.24, (0, 0.46, -0.003), RX90, 16, steel, "barrel")
+    cyl(0.012, 0.03, (0, 0.6, -0.003), RX90, 12, steel, "muzzle")
+    # LPVO
+    cyl(0.014, 0.13, (0, 0.02, 0.038), RX90, 16, dark, "scope")
+    cyl(0.018, 0.03, (0, -0.05, 0.038), RX90, 12, dark, "oc", r2=0.012)
+    box(0.022, 0.008, 0.022, (0, -0.06, 0.038), mat=glass, name="glass", do_bevel=False)
+    box(0.004, 0.004, 0.004, (0, 0.02, 0.038), mat=glow, name="reticle", do_bevel=False)
+    box(0.034, 0.04, 0.095, (0, -0.02, -0.1), rot=(math.radians(15), 0, 0),
+        mat=dark, name="grip", bevel_w=0.005)
+    box(0.036, 0.042, 0.115, (0, 0.0, -0.125), mat=body, name="Mag", bevel_w=0.003)
+    _hands(skin, (0.014, -0.02, -0.115), (0.0, 0.2, -0.05))
+    empty("Sight", (0, 0.02, 0.038))
+    empty("Muzzle", (0, 0.62, -0.003))
     empty("Mag", (0, 0.0, -0.125))
 
 
 def build_shotgun(mats):
     dark, steel, body, glass, glow, skin = mats
     wood = make_mat("wood", (0.42, 0.26, 0.14), 0.04, 0.75)
-    box(0.048, 0.15, 0.052, (0, -0.14, -0.02), mat=wood, name="stock", bevel_w=0.006)
-    box(0.052, 0.18, 0.052, (0, 0.02, -0.015), mat=dark, name="receiver", bevel_w=0.004)
-    # Pump forend
-    box(0.046, 0.11, 0.042, (0, 0.18, -0.02), mat=wood, name="Mag", bevel_w=0.005)
-    cyl(0.013, 0.32, (0, 0.36, 0.002), RX90, 14, steel, "barrel")
-    cyl(0.01, 0.26, (0, 0.32, -0.028), RX90, 12, steel, "tube")
-    # Bead
-    cyl(0.004, 0.012, (0, 0.4, 0.028), (0, 0, 0), 8, glow, "bead")
-    box(0.038, 0.042, 0.09, (0, -0.02, -0.095), rot=(math.radians(10), 0, 0),
-        mat=dark, name="grip", bevel_w=0.004)
-    box(0.04, 0.05, 0.04, (0.015, -0.02, -0.11), mat=skin, name="hand_fire", bevel_w=0.005)
-    box(0.038, 0.045, 0.038, (0, 0.18, -0.055), mat=skin, name="hand_support", bevel_w=0.005)
-    empty("Sight", (0, 0.38, 0.028))
+    # Curved stock feel via two boxes
+    box(0.046, 0.12, 0.05, (0, -0.14, -0.018), mat=wood, name="stock", bevel_w=0.008)
+    box(0.042, 0.06, 0.055, (0, -0.18, -0.005), mat=wood, name="butt", bevel_w=0.006)
+    box(0.05, 0.16, 0.05, (0, 0.02, -0.014), mat=dark, name="receiver", bevel_w=0.005)
+    # Pump — ribbed look
+    box(0.044, 0.1, 0.04, (0, 0.18, -0.018), mat=wood, name="Mag", bevel_w=0.006)
+    for i, oy in enumerate((-0.02, 0.0, 0.02, 0.04)):
+        box(0.046, 0.012, 0.042, (0, 0.16 + oy, -0.018), mat=wood, name=f"rib{i}", bevel_w=0.002)
+    cyl(0.012, 0.3, (0, 0.36, 0.002), RX90, 16, steel, "barrel")
+    cyl(0.009, 0.24, (0, 0.32, -0.026), RX90, 12, steel, "tube")
+    # Bead + barrel band
+    cyl(0.012, 0.02, (0, 0.28, -0.01), RX90, 10, steel, "band")
+    cyl(0.0035, 0.01, (0, 0.42, 0.026), (0, 0, 0), 8, glow, "bead")
+    box(0.036, 0.04, 0.085, (0, -0.02, -0.09), rot=(math.radians(10), 0, 0),
+        mat=dark, name="grip", bevel_w=0.005)
+    _hands(skin, (0.014, -0.02, -0.1), (0.0, 0.18, -0.05))
+    empty("Sight", (0, 0.4, 0.026))
     empty("Muzzle", (0, 0.53, 0.002))
-    empty("Mag", (0, 0.18, -0.02))
+    empty("Mag", (0, 0.18, -0.018))
 
 
 def build_pistol(mats):
     dark, steel, body, glass, glow, skin = mats
-    # Slide (beveled steel)
-    box(0.032, 0.16, 0.036, (0, 0.04, 0.002), mat=steel, name="slide", bevel_w=0.003)
-    box(0.03, 0.12, 0.028, (0, 0.02, -0.022), mat=dark, name="frame", bevel_w=0.003)
-    box(0.034, 0.042, 0.1, (0, -0.04, -0.085), rot=(math.radians(12), 0, 0),
-        mat=dark, name="grip", bevel_w=0.005)
-    cyl(0.007, 0.05, (0, 0.14, 0.0), RX90, 12, steel, "barrel")
-    box(0.028, 0.036, 0.085, (0, -0.03, -0.09), mat=body, name="Mag", bevel_w=0.002)
-    # Irons
-    box(0.0035, 0.0035, 0.01, (0, 0.1, 0.024), mat=glow, name="front_sight", do_bevel=False)
-    box(0.014, 0.005, 0.008, (0, -0.02, 0.022), mat=dark, name="rear_sight", bevel_w=0.001)
-    # Trigger guard as thin torus-ish boxes
-    box(0.008, 0.04, 0.035, (0, 0.02, -0.05), mat=dark, name="trig_guard", bevel_w=0.002)
-    box(0.04, 0.05, 0.04, (0.01, -0.04, -0.1), mat=skin, name="hand_fire", bevel_w=0.006)
-    empty("Sight", (0, 0.04, 0.024))
+    # Slide with serrations
+    box(0.03, 0.15, 0.034, (0, 0.04, 0.002), mat=steel, name="slide", bevel_w=0.003)
+    for i, oy in enumerate((0.08, 0.1, 0.12)):
+        box(0.032, 0.006, 0.02, (0, oy, 0.01), mat=dark, name=f"serr{i}", do_bevel=False)
+    box(0.028, 0.11, 0.026, (0, 0.02, -0.02), mat=dark, name="frame", bevel_w=0.003)
+    box(0.032, 0.04, 0.095, (0, -0.04, -0.08), rot=(math.radians(12), 0, 0),
+        mat=dark, name="grip", bevel_w=0.006)
+    cyl(0.0065, 0.048, (0, 0.14, 0.0), RX90, 12, steel, "barrel")
+    box(0.026, 0.034, 0.08, (0, -0.03, -0.085), mat=body, name="Mag", bevel_w=0.002)
+    box(0.003, 0.003, 0.009, (0, 0.1, 0.022), mat=glow, name="front_sight", do_bevel=False)
+    box(0.012, 0.004, 0.007, (0, -0.02, 0.02), mat=dark, name="rear_sight", bevel_w=0.001)
+    # Trigger guard curve approximation
+    box(0.008, 0.035, 0.03, (0, 0.02, -0.045), mat=dark, name="trig_guard", bevel_w=0.003)
+    box(0.006, 0.02, 0.02, (0, 0.02, -0.06), mat=steel, name="trigger", bevel_w=0.002)
+    _hands(skin, (0.01, -0.04, -0.095))
+    empty("Sight", (0, 0.04, 0.022))
     empty("Muzzle", (0, 0.17, 0.0))
-    empty("Mag", (0, -0.03, -0.09))
+    empty("Mag", (0, -0.03, -0.085))
 
 
 BUILDERS = {

@@ -1,5 +1,6 @@
 import { BUILDINGS, DOWNTOWN_PLATE } from '../../config.js';
 import { makeBuilding, makeShed, slab } from '../BuildingKit.js';
+import { registerBuilding } from '../BuildingRegistry.js';
 import { Occupancy } from '../Occupancy.js';
 import { worldLadders } from '../Ladders.js';
 import { worldDoors } from '../Doors.js';
@@ -947,6 +948,16 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null) {
     post(sink, x + bodyW / 2 - 0.25, roof + 1.4, z + d / 2 - 0.25, 10 + rng() * 12, 0.5, C.metalLite);
     neonStrip(sink, x + bodyW / 2 - 0.4, roof + 12, z + d / 2 - 0.4, x + bodyW / 2 + 0.4, roof + 14, z + d / 2 + 0.4, C.redHot);
   }
+
+  // Register interior floors for pelican-case loot (skyline towers were missing this)
+  const floorYs = [];
+  for (let f = 0; f < fCount; f++) {
+    floorYs.push(seat + (f === 0 ? 0.2 : f * floorH + 0.18));
+  }
+  registerBuilding({
+    x, z, w: bodyW, d, floors: fCount, baseY: seat, floorYs, roofY: roof,
+  });
+
   return { w: bodyW + 2.2, d: d + 1, h, floors: fCount, x, z };
 }
 

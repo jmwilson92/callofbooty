@@ -701,9 +701,14 @@ export const LOOT = {
 
 /** Pelican / hard cases inside buildings — open for 3–4 random items. */
 export const CASES = {
-  PER_FLOOR_CHANCE: 0.55,
+  // Chance a given floor gets a case (ground floors always get ≥1 if building registered)
+  PER_FLOOR_CHANCE: 0.72,
+  GUARANTEE_GROUND: true,
   MIN_ITEMS: 3,
   MAX_ITEMS: 4,
+  // Max cases per floor / building to avoid clutter
+  MAX_PER_FLOOR: 2,
+  MAX_PER_BUILDING: 8,
 };
 
 // Minimap (always-on square, top-left) + full map (toggle with M).
