@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { WEAPONS, RARITY, COMBAT, AMMO } from '../config.js';
 import { castHitscan, falloffMult, partMult } from './Hitscan.js';
 import { buildViewModel } from './ViewModels.js';
+import { classToModelKey } from './WeaponAssets.js';
 
 const DEG = Math.PI / 180;
 
@@ -55,6 +56,8 @@ export class WeaponSystem {
     this._kick = 0;
     this._muzzleFlash = null;
     this._muzzleLight = null;
+    /** @type {Record<string, THREE.Object3D>} class → GLB template */
+    this.weaponModels = {};
 
     // Give starter sidearm so player can shoot before finding loot
     this.giveWeapon('sidearm', 'common');
@@ -67,6 +70,12 @@ export class WeaponSystem {
     // Point light riding with the gun for specular pop
     this._muzzleLight = new THREE.PointLight(0xffcc88, 0, 1.2, 2);
     this.viewGroup.add(this._muzzleLight);
+    this._rebuildView();
+  }
+
+  /** Set Imagine→Blender viewmodel library (class → template root). */
+  setWeaponModels(byClass = {}) {
+    this.weaponModels = byClass || {};
     this._rebuildView();
   }
 
@@ -222,7 +231,9 @@ export class WeaponSystem {
     this._muzzleFlash = null;
     const def = this.def;
     if (!def) return;
-    const vm = buildViewModel(def);
+    const key = classToModelKey(def.class);
+    const glb = this.weaponModels[key] || null;
+    const vm = buildViewModel(def, glb);
     this._vmRoot = vm.root;
     this._vmMag = vm.mag;
     this._muzzle = vm.muzzle;

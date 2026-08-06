@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "weapons": {
+    "ar": {
+      "glb": "assets/models/weapons/ar.glb",
+      "ref": "assets/refs/weapons/ar_ref.jpg",
+      "source": "Imagine ref + Blender export_weapon.py"
+    },
+    "smg": {
+      "glb": "assets/models/weapons/smg.glb",
+      "ref": "assets/refs/weapons/smg_ref.jpg",
+      "source": "Imagine ref + Blender export_weapon.py"
+    },
+    "lmg": {
+      "glb": "assets/models/weapons/lmg.glb",
+      "ref": "assets/refs/weapons/lmg_ref.jpg",
+      "source": "Imagine ref + Blender export_weapon.py"
+    },
+    "sniper": {
+      "glb": "assets/models/weapons/sniper.glb",
+      "ref": "assets/refs/weapons/sniper_ref.jpg",
+      "source": "Imagine ref + Blender export_weapon.py"
+    },
+    "dmr": {
+      "glb": "assets/models/weapons/dmr.glb",
+      "ref": "assets/refs/weapons/dmr_ref.jpg",
+      "source": "Imagine ref + Blender export_weapon.py"
+    },
+    "shotgun": {
+      "glb": "assets/models/weapons/shotgun.glb",
+      "ref": "assets/refs/weapons/shotgun_ref.jpg",
+      "source": "Imagine ref + Blender export_weapon.py"
+    },
+    "pistol": {
+      "glb": "assets/models/weapons/pistol.glb",
+      "ref": "assets/refs/weapons/pistol_ref.jpg",
+      "source": "Imagine ref + Blender export_weapon.py"
+    }
+  }
+}

@@ -22,6 +22,7 @@ import { WeaponSystem } from './combat/WeaponSystem.js';
 import { WeaponOverlay } from './combat/WeaponOverlay.js';
 import { TargetRange } from './combat/Targets.js';
 import { BotSystem } from './combat/Bots.js';
+import { loadWeaponLibrary } from './combat/WeaponAssets.js';
 import { LootSystem } from './loot/LootSystem.js';
 import { CombatHud } from './ui/CombatHud.js';
 
@@ -133,6 +134,9 @@ async function start() {
   weaponOverlay.setAspect(window.innerWidth / window.innerHeight);
   const weapons = new WeaponSystem(playerCam, hash, bus, effects);
   weapons.attachOverlay(weaponOverlay);
+  // Imagine → Blender viewmodels (async; falls back to procedural until loaded)
+  const weaponLib = await loadWeaponLibrary();
+  weapons.setWeaponModels(weaponLib.byClass);
   weapons.giveWeapon('vector7', 'common'); // starter AR for testing
   const loot = new LootSystem(scene, terrain, bus);
   const lootCount = loot.populate(WORLD.SEED ^ 0x1007);

@@ -37,11 +37,18 @@ Pipeline for map props and environment objects. Served by Vite from `public/`.
 
 ## Current kit
 
-crate · barrel · traffic_cone · dumpster · fire_hydrant · bollard · newsbox · palm_tree
+**Props:** crate · barrel · traffic_cone · dumpster · fire_hydrant · bollard · newsbox · palm_tree  
+
+**Weapons (viewmodels):** ar · smg · lmg · sniper · dmr · shotgun · pistol  
+- Refs: `refs/weapons/<class>_ref.jpg` (Imagine)  
+- Models: `models/weapons/<class>.glb` (Blender)  
+- Catalog: `weapons_catalog.json`  
+- Rebuild: `./tools/build_weapons.sh`
 
 ## Conventions
 
 - **Units:** 1 unit = 1 meter  
 - **Up axis:** +Y  
-- **Origin:** feet at y=0, centered in XZ  
+- **Origin (props):** feet at y=0, centered in XZ  
+- **Origin (weapons):** near sight plane; barrel −Z (three.js); empties `Sight`, `Muzzle`, `Mag`  
 - **Collision:** `catalog.json` `collision: [sx, sy, sz]` full extents for AABB

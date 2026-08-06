@@ -1,16 +1,101 @@
 import * as THREE from 'three';
+import { VM_POSE, classToModelKey } from './WeaponAssets.js';
 
 /**
  * Classic FPS viewmodels (camera looks −Z).
  *
- * Layout convention:
- *   - Sight / optic reticle sits near local (0, 0.02, −0.05) so ADS can
- *     put that point on screen center.
- *   - Receiver + grip hang below the sight line (−Y).
- *   - Barrel extends forward (−Z).
- *   - Hip pose (WeaponSystem) parks the whole group lower-right, still
- *     fully in front of the camera (negative world Z).
+ * Prefer Imagine→Blender GLB when a template is provided; otherwise
+ * build procedural low-poly. Layout:
+ *   - Sight / optic near local origin for ADS
+ *   - Body hangs −Y, barrel −Z
  */
+
+/** Local position of object relative to root (root must be ancestor). */
+function localPos(root, obj, out = new THREE.Vector3()) {
+  obj.getWorldPosition(out);
+  root.worldToLocal(out);
+  return out;
+}
+
+/** Build viewmodel from a loaded GLB template (cloned). */
+function buildFromGlb(def, template) {
+  const root = new THREE.Group();
+  root.name = `vm_${def.id}_glb`;
+  root.frustumCulled = false;
+
+  const model = template.clone(true);
+  model.name = 'glbWeapon';
+  root.add(model);
+
+  let magObj = null;
+  let muzzleObj = null;
+  let sightObj = null;
+  model.traverse((o) => {
+    const n = (o.name || '').toLowerCase();
+    // Prefer mesh named Mag over Empty Mag
+    if (n === 'mag' || n === 'magazine') {
+      if (!magObj || o.isMesh) magObj = o;
+    }
+    if (n === 'muzzle') muzzleObj = o;
+    if (n === 'sight') sightObj = o;
+    if (o.isMesh) {
+      o.frustumCulled = false;
+      o.renderOrder = 999;
+    }
+  });
+
+  root.updateMatrixWorld(true);
+
+  // Shift so Sight sits at root origin (ADS crosshair)
+  if (sightObj) {
+    const s = localPos(root, sightObj);
+    model.position.sub(s);
+  }
+
+  const pose = VM_POSE[classToModelKey(def.class)] || VM_POSE.ar;
+  model.scale.setScalar(pose.scale);
+  model.position.add(pose.offset);
+  root.updateMatrixWorld(true);
+
+  // Mag group for reload yank (reparent mesh under anim group)
+  const magGroup = new THREE.Group();
+  magGroup.name = 'mag';
+  if (magObj && magObj.isMesh) {
+    const wp = localPos(root, magObj);
+    magGroup.position.copy(wp);
+    const parent = magObj.parent;
+    if (parent) parent.remove(magObj);
+    magObj.position.set(0, 0, 0);
+    magObj.rotation.set(0, 0, 0);
+    magObj.scale.set(1, 1, 1);
+    magGroup.add(magObj);
+  }
+  root.add(magGroup);
+
+  const muzzle = new THREE.Object3D();
+  muzzle.name = 'muzzle';
+  if (muzzleObj) {
+    muzzle.position.copy(localPos(root, muzzleObj));
+  } else {
+    muzzle.position.set(0, -0.02, -0.55);
+  }
+  root.add(muzzle);
+
+  root.traverse((o) => {
+    if (o.isMesh) {
+      o.frustumCulled = false;
+      o.renderOrder = 999;
+    }
+  });
+
+  return {
+    root,
+    mag: magGroup,
+    muzzle,
+    hasScope: def.class === 'sniper' || def.class === 'dmr',
+    source: 'glb',
+  };
+}
 
 function mat(hex, opts = {}) {
   return new THREE.MeshStandardMaterial({
@@ -77,7 +162,19 @@ function scope(root, black, glass, glow, steel, zCenter = -0.06) {
   box(root, 0.022, 0.016, 0.022, steel, 0, 0.01, zCenter - 0.05);
 }
 
-export function buildViewModel(def) {
+/**
+ * @param {object} def weapon def from config
+ * @param {THREE.Object3D|null} glbTemplate optional preloaded GLB scene for this class
+ */
+export function buildViewModel(def, glbTemplate = null) {
+  if (glbTemplate) {
+    try {
+      return buildFromGlb(def, glbTemplate);
+    } catch (e) {
+      console.warn('[viewmodel] GLB build failed, using procedural', def.id, e);
+    }
+  }
+
   const root = new THREE.Group();
   root.name = `vm_${def.id}`;
   root.frustumCulled = false;
@@ -198,5 +295,5 @@ export function buildViewModel(def) {
     }
   });
 
-  return { root, mag: magGroup, muzzle, hasScope: cls === 'sniper' };
+  return { root, mag: magGroup, muzzle, hasScope: cls === 'sniper', source: 'procedural' };
 }
