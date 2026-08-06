@@ -47,6 +47,9 @@ export class Ballistics {
       longRange,
       mesh,
       trailAcc: 0,
+      // Range accuracy: past effectiveRange, direction walks off-target
+      effectiveRange: def.effectiveRange ?? 80,
+      rangeScatterDeg: def.rangeScatterDeg ?? 0,
     });
   }
 
@@ -88,6 +91,24 @@ export class Ballistics {
         const stepDist = Math.min(maxStep, distThis);
         const stepT = stepDist / speed;
         const dir = _tmp.copy(p.vel).multiplyScalar(1 / speed);
+
+        // Past effective range, SMGs etc. walk off even if ADS was on target
+        if (p.rangeScatterDeg > 0 && p.pathDist > p.effectiveRange) {
+          const over = p.pathDist - p.effectiveRange;
+          const deg = (p.rangeScatterDeg / 100) * stepDist * (0.4 + Math.random() * 0.9);
+          const rad = deg * (Math.PI / 180) * Math.min(3, 1 + over / 40);
+          const yaw = (Math.random() - 0.5) * 2 * rad;
+          const pitch = (Math.random() - 0.5) * 2 * rad;
+          const sp = p.vel.length();
+          // yaw around world up, pitch around right
+          const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0));
+          if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
+          else right.normalize();
+          p.vel.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+          p.vel.applyAxisAngle(right, pitch);
+          p.vel.setLength(sp);
+          dir.copy(p.vel).multiplyScalar(1 / sp);
+        }
 
         p.prev.copy(p.pos);
         const next = p.pos.clone().addScaledVector(dir, stepDist);

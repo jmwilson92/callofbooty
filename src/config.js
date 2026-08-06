@@ -482,8 +482,9 @@ export const INPUT = {
 // ===================== COMBAT =====================
 export const COMBAT = {
   BASE_HEALTH: 100,
-  RECOIL_RECOVERY_DELAY: 0.25, // s after last shot before aim offset recovers
-  RECOIL_RECOVERY_RATE: 8, // deg/s
+  RECOIL_RECOVERY_DELAY: 0.18, // s after last shot before aim offset recovers
+  RECOIL_RECOVERY_RATE: 10, // deg/s
+  SPREAD_RECOVER: 4.2, // bloom decay deg/s (ADS faster via ads mult in code)
   HITMARKER_TIME: 0.12,
   DAMAGE_NUM_LIFE: 0.7,
   TRACER_LIFE: 0.06,
@@ -493,21 +494,35 @@ export const COMBAT = {
   GROUND_LOOT_RANGE: 3.0,
 };
 
-/** Passive practice bots — wander, take damage, do not fight back yet. */
+/**
+ * World bots — wander, enter building approaches, sometimes engage the player.
+ * TTK vs 100 HP: SMG CQC ~0.35s, AR mid ~0.4s, sniper head 1-shot / body 2.
+ */
 export const BOTS = {
-  COUNT: 16,
+  COUNT: 52,
   HEALTH: 100,
-  SPEED: 2.5,
-  SPEED_JITTER: 0.6,
+  SPEED: 2.7,
+  SPEED_JITTER: 0.7,
   // Spawn ring around player SPAWN (metres)
-  SPAWN_MIN: 16,
-  SPAWN_MAX: 100,
-  WANDER_RADIUS: 60,
-  WAYPOINT_REACH: 1.3,
-  WAYPOINT_PAUSE: 0.5,
-  RESPAWN_TIME: 6,
+  SPAWN_MIN: 18,
+  SPAWN_MAX: 220,
+  WANDER_RADIUS: 90,
+  WAYPOINT_REACH: 1.4,
+  WAYPOINT_PAUSE: 0.35,
+  RESPAWN_TIME: 8,
+  // Building approaches
+  BUILDING_WAYPOINT_CHANCE: 0.42,
+  // Combat
+  AGGRO_RANGE: 58,
+  LOSE_RANGE: 78,
+  FIRE_RANGE: 52,
+  FIRE_COOLDOWN: 0.14,
+  FIRE_DAMAGE: 9,
+  FIRE_SPREAD_DEG: 4.5,
+  AGGRESSIVE_FRACTION: 0.55, // fraction that will shoot when they see you
+  REACTION_TIME: 0.35,
   // Camo / kit palette
-  COLORS: [0x3d5234, 0x2c3d52, 0x4a3c2e, 0x3a3a3e, 0x4a5240, 0x2a3830],
+  COLORS: [0x3d5234, 0x2c3d52, 0x4a3c2e, 0x3a3a3e, 0x4a5240, 0x2a3830, 0x3a4540, 0x2e3540],
   RADIUS: 0.35,
   HEIGHT: 1.8,
 };
@@ -543,29 +558,30 @@ export const HEALING = {
 
 /**
  * Weapons are data. One generic WeaponSystem reads these entries.
- * recoilPattern: [hDeg, vDeg] per shot.
- * muzzleVelocity (m/s) + dropScale → ballistics (lead + drop).
- * falloff: damage mult by path distance (caliber / class).
- * TTK design: SMG wins CQC; AR wins mid; sniper/DMR win long.
+ * recoilPattern: [hDeg, vDeg] per shot. adsRecoilMult scales pattern when ADS.
+ * spreadHip/Ads in degrees. bloom (spreadPerShot) is extra, recovers to 0.
+ * effectiveRange + rangeScatterDeg: past effectiveRange, cone grows (deg/100m).
+ * falloff: damage mult by path distance. TTK @ 100 HP: SMG CQC best, sniper long.
  */
 export const WEAPONS = {
   vector7: {
     id: 'vector7', name: 'Vector-7', class: 'ar', fireMode: 'auto',
-    ammo: 'heavy', rpm: 680, magSize: 30,
+    ammo: 'heavy', rpm: 700, magSize: 30,
     reloadTime: 2.3, reloadTimeEmpty: 2.9, adsTime: 0.28, swapTime: 0.45,
-    // Mid-range king — slightly lower CQC DPS than SMG
-    damage: 24, headMult: 1.55, limbMult: 0.9,
-    falloffStart: 35, falloffEnd: 95, falloffMinMult: 0.72,
-    muzzleVelocity: 720, dropScale: 0.55, pellets: 1,
-    // Hip is loose; ADS is laser. Close range still hits via short miss distance.
-    spreadHip: 4.2, spreadAds: 0.1, spreadMove: 1.4, spreadMax: 7.5, spreadPerShot: 0.28,
+    // Mid-range king — solid to ~120 m ADS, loses to sniper past that
+    damage: 24, headMult: 1.6, limbMult: 0.88,
+    falloffStart: 45, falloffEnd: 130, falloffMinMult: 0.62,
+    muzzleVelocity: 740, dropScale: 0.5, pellets: 1,
+    effectiveRange: 95, rangeScatterDeg: 0.55,
+    spreadHip: 4.8, spreadAds: 0.11, spreadMove: 1.5, spreadMax: 8.5, spreadPerShot: 0.32,
+    adsRecoilMult: 0.42,
     recoilPattern: [
-      [0, 0.55], [0.02, 0.58], [-0.02, 0.6], [0.03, 0.62], [-0.03, 0.64],
-      [-0.18, 0.58], [-0.28, 0.55], [-0.35, 0.52], [-0.32, 0.5], [-0.22, 0.48],
-      [-0.08, 0.5], [0.12, 0.52], [0.42, 0.55], [0.38, 0.5], [0.25, 0.48],
-      [0.15, 0.46], [-0.1, 0.48], [0.2, 0.5], [-0.25, 0.47], [0.18, 0.45],
-      [-0.15, 0.44], [0.22, 0.46], [-0.2, 0.45], [0.1, 0.43], [-0.12, 0.44],
-      [0.16, 0.45], [-0.18, 0.43], [0.08, 0.42], [-0.1, 0.42], [0.12, 0.41],
+      [0, 0.62], [0.03, 0.65], [-0.03, 0.68], [0.04, 0.7], [-0.04, 0.72],
+      [-0.22, 0.65], [-0.32, 0.62], [-0.4, 0.58], [-0.36, 0.55], [-0.25, 0.52],
+      [-0.1, 0.55], [0.14, 0.58], [0.48, 0.62], [0.42, 0.55], [0.28, 0.52],
+      [0.16, 0.5], [-0.12, 0.52], [0.24, 0.55], [-0.28, 0.5], [0.2, 0.48],
+      [-0.18, 0.48], [0.25, 0.5], [-0.22, 0.48], [0.12, 0.46], [-0.14, 0.47],
+      [0.18, 0.48], [-0.2, 0.46], [0.1, 0.45], [-0.12, 0.45], [0.14, 0.44],
     ],
     color: 0x4a6a4a, viewModel: { len: 0.55, thick: 0.06 },
   },
@@ -573,112 +589,122 @@ export const WEAPONS = {
     id: 'kestrel', name: 'Kestrel', class: 'ar', fireMode: 'auto',
     ammo: 'heavy', rpm: 780, magSize: 25,
     reloadTime: 2.1, reloadTimeEmpty: 2.7, adsTime: 0.26, swapTime: 0.42,
-    damage: 21, headMult: 1.5, limbMult: 0.9,
-    falloffStart: 30, falloffEnd: 85, falloffMinMult: 0.7,
-    muzzleVelocity: 700, dropScale: 0.58, pellets: 1,
-    spreadHip: 4.5, spreadAds: 0.12, spreadMove: 1.5, spreadMax: 8.0, spreadPerShot: 0.3,
+    damage: 22, headMult: 1.55, limbMult: 0.88,
+    falloffStart: 40, falloffEnd: 115, falloffMinMult: 0.6,
+    muzzleVelocity: 720, dropScale: 0.52, pellets: 1,
+    effectiveRange: 85, rangeScatterDeg: 0.65,
+    spreadHip: 5.0, spreadAds: 0.14, spreadMove: 1.6, spreadMax: 9.0, spreadPerShot: 0.34,
+    adsRecoilMult: 0.4,
     recoilPattern: [
-      [0, 0.48], [0.05, 0.5], [-0.04, 0.52], [0.08, 0.5], [-0.1, 0.48],
-      [0.15, 0.46], [0.22, 0.45], [0.18, 0.44], [-0.12, 0.46], [-0.25, 0.48],
-      [-0.2, 0.45], [0.1, 0.44], [0.28, 0.46], [0.15, 0.43], [-0.18, 0.44],
-      [0.12, 0.42], [-0.15, 0.43], [0.2, 0.44], [-0.08, 0.41], [0.14, 0.42],
-      [-0.12, 0.41], [0.16, 0.42], [-0.2, 0.4], [0.1, 0.4], [-0.1, 0.4],
+      [0, 0.55], [0.06, 0.58], [-0.05, 0.6], [0.1, 0.56], [-0.12, 0.54],
+      [0.18, 0.52], [0.26, 0.5], [0.22, 0.48], [-0.14, 0.5], [-0.28, 0.52],
+      [-0.22, 0.48], [0.12, 0.48], [0.32, 0.5], [0.18, 0.46], [-0.2, 0.48],
+      [0.14, 0.45], [-0.16, 0.46], [0.22, 0.48], [-0.1, 0.44], [0.16, 0.45],
+      [-0.14, 0.44], [0.18, 0.45], [-0.22, 0.43], [0.12, 0.43], [-0.12, 0.43],
     ],
     color: 0x5a6a8a, viewModel: { len: 0.52, thick: 0.055 },
   },
   pike: {
     id: 'pike', name: 'Pike SMG', class: 'smg', fireMode: 'auto',
-    ammo: 'light', rpm: 920, magSize: 32,
-    reloadTime: 1.9, reloadTimeEmpty: 2.4, adsTime: 0.2, swapTime: 0.35,
-    // Best TTK up close; melts past ~25 m
-    damage: 20, headMult: 1.35, limbMult: 0.95,
-    falloffStart: 12, falloffEnd: 40, falloffMinMult: 0.32,
-    muzzleVelocity: 380, dropScale: 1.15, pellets: 1,
-    // SMG: hip is usable CQC only (low cone + short range)
-    spreadHip: 2.6, spreadAds: 0.2, spreadMove: 0.8, spreadMax: 5.5, spreadPerShot: 0.2,
+    ammo: 'light', rpm: 950, magSize: 32,
+    reloadTime: 1.85, reloadTimeEmpty: 2.35, adsTime: 0.18, swapTime: 0.32,
+    // CQC shredder — hipfire strong close; past ~30 m sprays / falls off hard
+    damage: 18, headMult: 1.4, limbMult: 0.92,
+    falloffStart: 10, falloffEnd: 38, falloffMinMult: 0.22,
+    muzzleVelocity: 360, dropScale: 1.25, pellets: 1,
+    effectiveRange: 22, rangeScatterDeg: 4.8, // past 22 m ADS still walks off target
+    spreadHip: 1.9, spreadAds: 0.55, spreadMove: 0.55, spreadMax: 7.5, spreadPerShot: 0.42,
+    adsRecoilMult: 0.55, // still bouncy ADS — SMG recoil character
     recoilPattern: [
-      [0, 0.38], [0.08, 0.4], [-0.1, 0.42], [0.14, 0.4], [-0.16, 0.38],
-      [0.2, 0.36], [-0.18, 0.36], [0.12, 0.35], [-0.22, 0.37], [0.18, 0.35],
-      [-0.14, 0.34], [0.16, 0.35], [-0.2, 0.36], [0.1, 0.33], [-0.12, 0.34],
-      [0.15, 0.34], [-0.18, 0.33], [0.08, 0.32], [-0.1, 0.33], [0.14, 0.33],
-      [-0.12, 0.32], [0.1, 0.32], [-0.15, 0.33], [0.12, 0.31], [-0.08, 0.31],
-      [0.1, 0.32], [-0.12, 0.31], [0.08, 0.3], [-0.1, 0.31], [0.1, 0.3],
-      [-0.08, 0.3], [0.06, 0.3],
+      [0, 0.55], [0.14, 0.62], [-0.18, 0.68], [0.22, 0.65], [-0.28, 0.7],
+      [0.32, 0.68], [-0.3, 0.72], [0.26, 0.7], [-0.35, 0.75], [0.3, 0.72],
+      [-0.28, 0.7], [0.34, 0.74], [-0.32, 0.76], [0.2, 0.7], [-0.24, 0.72],
+      [0.28, 0.74], [-0.3, 0.72], [0.18, 0.68], [-0.22, 0.7], [0.26, 0.72],
+      [-0.24, 0.7], [0.2, 0.68], [-0.28, 0.72], [0.22, 0.68], [-0.18, 0.66],
+      [0.2, 0.68], [-0.22, 0.66], [0.16, 0.64], [-0.2, 0.66], [0.18, 0.64],
+      [-0.16, 0.62], [0.14, 0.62],
     ],
     color: 0x6a5a4a, viewModel: { len: 0.42, thick: 0.05 },
   },
   warden: {
     id: 'warden', name: 'Warden', class: 'lmg', fireMode: 'auto',
-    ammo: 'heavy', rpm: 620, magSize: 75,
-    reloadTime: 4.2, reloadTimeEmpty: 5.0, adsTime: 0.4, swapTime: 0.65,
-    damage: 27, headMult: 1.4, limbMult: 0.9,
-    falloffStart: 45, falloffEnd: 120, falloffMinMult: 0.7,
-    muzzleVelocity: 680, dropScale: 0.7, pellets: 1,
-    spreadHip: 5.5, spreadAds: 0.22, spreadMove: 2.0, spreadMax: 9.0, spreadPerShot: 0.22,
+    ammo: 'heavy', rpm: 520, magSize: 75,
+    reloadTime: 4.4, reloadTimeEmpty: 5.2, adsTime: 0.42, swapTime: 0.7,
+    // Sustained mid-long — slower RoF, hits out further than AR slightly
+    damage: 29, headMult: 1.45, limbMult: 0.88,
+    falloffStart: 55, falloffEnd: 160, falloffMinMult: 0.66,
+    muzzleVelocity: 700, dropScale: 0.65, pellets: 1,
+    effectiveRange: 110, rangeScatterDeg: 0.7,
+    spreadHip: 6.2, spreadAds: 0.26, spreadMove: 2.2, spreadMax: 10.0, spreadPerShot: 0.2,
+    adsRecoilMult: 0.48,
     recoilPattern: [
-      [0, 0.7], [0.04, 0.72], [-0.05, 0.74], [0.08, 0.7], [-0.1, 0.68],
-      [0.15, 0.65], [0.22, 0.62], [0.28, 0.6], [0.25, 0.58], [0.15, 0.56],
-      [-0.1, 0.58], [-0.25, 0.6], [-0.3, 0.58], [-0.2, 0.55], [0.1, 0.56],
-      [0.25, 0.58], [0.18, 0.54], [-0.15, 0.55], [0.12, 0.53], [-0.2, 0.54],
+      [0, 0.78], [0.05, 0.82], [-0.06, 0.85], [0.1, 0.8], [-0.12, 0.78],
+      [0.18, 0.74], [0.26, 0.7], [0.32, 0.68], [0.28, 0.64], [0.16, 0.62],
+      [-0.12, 0.64], [-0.28, 0.68], [-0.34, 0.65], [-0.22, 0.62], [0.12, 0.63],
+      [0.28, 0.66], [0.2, 0.6], [-0.16, 0.62], [0.14, 0.58], [-0.22, 0.6],
     ],
     color: 0x3a3a3a, viewModel: { len: 0.62, thick: 0.08 },
   },
   longshot: {
     id: 'longshot', name: 'Longshot', class: 'sniper', fireMode: 'bolt',
-    ammo: 'long', rpm: 45, magSize: 5,
-    reloadTime: 3.1, reloadTimeEmpty: 3.6, adsTime: 0.45, swapTime: 0.7,
-    // Long-range: high velocity still needs lead + drop on far movers
-    damage: 100, headMult: 2.15, limbMult: 0.75,
-    falloffStart: 200, falloffEnd: 400, falloffMinMult: 0.88,
-    muzzleVelocity: 820, dropScale: 2.4, pellets: 1,
-    spreadHip: 8.5, spreadAds: 0.015, spreadMove: 3.5, spreadMax: 12.0, spreadPerShot: 0.6,
-    recoilPattern: [[0, 2.8], [0.15, 2.6], [-0.12, 2.5], [0.2, 2.4], [-0.15, 2.3]],
+    ammo: 'long', rpm: 42, magSize: 5,
+    reloadTime: 3.1, reloadTimeEmpty: 3.6, adsTime: 0.48, swapTime: 0.72,
+    // Laser ADS long-range; hipfire nearly unusable. Head = delete, body = 2 taps.
+    damage: 92, headMult: 2.25, limbMult: 0.72,
+    falloffStart: 220, falloffEnd: 450, falloffMinMult: 0.9,
+    muzzleVelocity: 860, dropScale: 2.2, pellets: 1,
+    effectiveRange: 320, rangeScatterDeg: 0.08,
+    spreadHip: 14.0, spreadAds: 0.018, spreadMove: 4.5, spreadMax: 16.0, spreadPerShot: 0.9,
+    adsRecoilMult: 0.55,
+    recoilPattern: [[0, 3.2], [0.18, 2.9], [-0.14, 2.7], [0.22, 2.6], [-0.18, 2.5]],
     color: 0x2a3a4a, viewModel: { len: 0.72, thick: 0.05 },
-    // True optic zoom + scope overlay when ADS
     scopeZoomFov: 14, scopeOverlay: true, hideViewOnAds: true,
   },
   marksman: {
     id: 'marksman', name: 'Marksman DM', class: 'dmr', fireMode: 'semi',
-    ammo: 'heavy', rpm: 300, magSize: 15,
-    reloadTime: 2.5, reloadTimeEmpty: 3.0, adsTime: 0.32, swapTime: 0.5,
-    damage: 48, headMult: 1.9, limbMult: 0.85,
-    falloffStart: 80, falloffEnd: 180, falloffMinMult: 0.78,
-    muzzleVelocity: 760, dropScale: 1.9, pellets: 1,
-    spreadHip: 5.8, spreadAds: 0.06, spreadMove: 1.8, spreadMax: 9.0, spreadPerShot: 0.35,
-    // Hide viewmodel on ADS so you look *through* the glass, not at the tube
+    ammo: 'heavy', rpm: 280, magSize: 15,
+    reloadTime: 2.5, reloadTimeEmpty: 3.0, adsTime: 0.34, swapTime: 0.52,
+    damage: 52, headMult: 2.0, limbMult: 0.82,
+    falloffStart: 90, falloffEnd: 220, falloffMinMult: 0.74,
+    muzzleVelocity: 780, dropScale: 1.75, pellets: 1,
+    effectiveRange: 160, rangeScatterDeg: 0.28,
+    spreadHip: 6.5, spreadAds: 0.05, spreadMove: 2.0, spreadMax: 10.0, spreadPerShot: 0.38,
+    adsRecoilMult: 0.4,
     scopeZoomFov: 28, scopeOverlay: true, hideViewOnAds: true,
     recoilPattern: [
-      [0, 1.1], [0.08, 1.05], [-0.1, 1.0], [0.12, 0.95], [-0.08, 0.92],
-      [0.15, 0.9], [-0.12, 0.88], [0.1, 0.85], [-0.15, 0.86], [0.08, 0.84],
-      [-0.1, 0.83], [0.12, 0.82], [-0.08, 0.8], [0.1, 0.8], [-0.1, 0.78],
+      [0, 1.2], [0.1, 1.15], [-0.12, 1.1], [0.14, 1.05], [-0.1, 1.0],
+      [0.16, 0.98], [-0.14, 0.95], [0.12, 0.92], [-0.16, 0.94], [0.1, 0.9],
+      [-0.12, 0.9], [0.14, 0.88], [-0.1, 0.86], [0.12, 0.86], [-0.12, 0.84],
     ],
     color: 0x4a5a3a, viewModel: { len: 0.6, thick: 0.05 },
   },
   breaker: {
     id: 'breaker', name: 'Breaker', class: 'shotgun', fireMode: 'pump',
-    ammo: 'shell', rpm: 70, magSize: 6,
-    reloadTime: 0.5, reloadTimeEmpty: 0.5, adsTime: 0.3, swapTime: 0.5,
-    // Devastating CQC; useless long range
-    damage: 12, headMult: 1.4, limbMult: 1.0,
-    falloffStart: 6, falloffEnd: 22, falloffMinMult: 0.12,
-    muzzleVelocity: 340, dropScale: 1.4, pellets: 9,
-    spreadHip: 6.5, spreadAds: 3.5, spreadMove: 1.2, spreadMax: 10.0, spreadPerShot: 0.45,
-    recoilPattern: [[0, 3.5], [0.3, 3.2], [-0.25, 3.0], [0.2, 2.9], [-0.3, 2.8], [0.15, 2.7]],
+    ammo: 'shell', rpm: 68, magSize: 6,
+    reloadTime: 0.5, reloadTimeEmpty: 0.5, adsTime: 0.28, swapTime: 0.48,
+    damage: 13, headMult: 1.35, limbMult: 1.0,
+    falloffStart: 5, falloffEnd: 20, falloffMinMult: 0.1,
+    muzzleVelocity: 330, dropScale: 1.5, pellets: 9,
+    effectiveRange: 12, rangeScatterDeg: 2.5,
+    spreadHip: 7.0, spreadAds: 3.8, spreadMove: 1.3, spreadMax: 11.0, spreadPerShot: 0.5,
+    adsRecoilMult: 0.7,
+    recoilPattern: [[0, 3.8], [0.35, 3.4], [-0.3, 3.2], [0.25, 3.0], [-0.32, 2.9], [0.18, 2.8]],
     color: 0x5a4030, viewModel: { len: 0.48, thick: 0.07 },
   },
   sidearm: {
     id: 'sidearm', name: 'Sidearm P9', class: 'pistol', fireMode: 'semi',
-    ammo: 'light', rpm: 400, magSize: 15,
-    reloadTime: 1.6, reloadTimeEmpty: 2.0, adsTime: 0.18, swapTime: 0.3,
-    damage: 22, headMult: 1.7, limbMult: 0.9,
-    falloffStart: 14, falloffEnd: 45, falloffMinMult: 0.35,
-    muzzleVelocity: 360, dropScale: 1.2, pellets: 1,
-    // Pistol: hip OK up close, still better ADS
-    spreadHip: 2.4, spreadAds: 0.14, spreadMove: 0.9, spreadMax: 4.5, spreadPerShot: 0.22,
+    ammo: 'light', rpm: 420, magSize: 15,
+    reloadTime: 1.55, reloadTimeEmpty: 1.95, adsTime: 0.16, swapTime: 0.28,
+    damage: 24, headMult: 1.75, limbMult: 0.88,
+    falloffStart: 12, falloffEnd: 42, falloffMinMult: 0.3,
+    muzzleVelocity: 370, dropScale: 1.15, pellets: 1,
+    effectiveRange: 28, rangeScatterDeg: 1.8,
+    spreadHip: 2.2, spreadAds: 0.16, spreadMove: 0.85, spreadMax: 5.0, spreadPerShot: 0.28,
+    adsRecoilMult: 0.5,
     recoilPattern: [
-      [0, 0.9], [0.1, 0.85], [-0.12, 0.8], [0.15, 0.78], [-0.1, 0.75],
-      [0.12, 0.72], [-0.14, 0.7], [0.08, 0.68], [-0.1, 0.66], [0.1, 0.65],
-      [-0.08, 0.64], [0.12, 0.63], [-0.1, 0.62], [0.08, 0.6], [-0.08, 0.6],
+      [0, 0.95], [0.12, 0.9], [-0.14, 0.85], [0.16, 0.82], [-0.12, 0.8],
+      [0.14, 0.76], [-0.16, 0.74], [0.1, 0.72], [-0.12, 0.7], [0.12, 0.68],
+      [-0.1, 0.68], [0.14, 0.66], [-0.12, 0.65], [0.1, 0.64], [-0.1, 0.64],
     ],
     color: 0x2a2a2a, viewModel: { len: 0.22, thick: 0.04 },
   },

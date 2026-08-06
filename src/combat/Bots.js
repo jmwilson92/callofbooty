@@ -1,15 +1,15 @@
 import * as THREE from 'three';
 import { BOTS, WORLD, PLAYER } from '../config.js';
 import { makeBotParts } from './Targets.js';
+import { worldBuildings } from '../world/BuildingRegistry.js';
+import { rayAABB } from './Hitscan.js';
 
 /**
- * Simple wandering practice bots.
- * - Walk between random ground waypoints near downtown
- * - Take hitscan damage / die / respawn
- * - Do not shoot the player (training dummies that move)
+ * World bots — wander, approach buildings, some engage the player with gunfire.
  */
 
 const _cand = [];
+const _losDir = new THREE.Vector3();
 
 function hash2(i, salt) {
   let n = (i * 374761393 + salt * 668265263) | 0;
@@ -70,6 +70,7 @@ export class BotSystem {
     local.position.set(x, y, z);
     this.group.add(local);
 
+    const aggressive = hash2(id, 19) < (BOTS.AGGRESSIVE_FRACTION ?? 0.5);
     const bot = {
       id,
       x,
@@ -92,6 +93,11 @@ export class BotSystem {
       mesh: local,
       color,
       applyDamage: null,
+      aggressive,
+      state: 'wander', // wander | engage
+      aggroT: 0,
+      fireCd: hash2(id, 23) * 0.4,
+      aimYaw: 0,
     };
     bot.applyDamage = (dmg, part) => this.applyDamage(bot, dmg, part);
     this._pickWaypoint(bot, id * 17 + 1);
@@ -246,7 +252,7 @@ export class BotSystem {
     this.hash.query(x - r - 0.2, z - r - 0.2, x + r + 0.2, z + r + 0.2, _cand);
     for (let i = 0; i < _cand.length; i++) {
       const b = _cand[i];
-      if (b.disabled || b.tag === 'trigger' || b.tag === 'door' || b.tag === 'thin') continue;
+      if (b.disabled || b.tag === 'trigger' || b.tag === 'door' || b.tag === 'thin' || b.tag === 'glass') continue;
       // Vertical overlap with body
       if (y + h < b.min.y || y + 0.3 > b.max.y) continue;
       // Horizontal capsule vs AABB
@@ -260,20 +266,74 @@ export class BotSystem {
   }
 
   _pickWaypoint(bot, salt = 0) {
-    for (let i = 0; i < 12; i++) {
+    // Often path toward a building entrance / ground-floor interior
+    const buildings = worldBuildings;
+    if (
+      buildings?.length
+      && hash2(bot.id + salt, 77) < (BOTS.BUILDING_WAYPOINT_CHANCE ?? 0.4)
+    ) {
+      const b = buildings[Math.floor(hash2(bot.id + salt, 79) * buildings.length) % buildings.length];
+      if (b && b.w > 5 && b.d > 5) {
+        const interior = hash2(bot.id + salt, 81) > 0.45;
+        let x;
+        let z;
+        if (interior) {
+          // Inside footprint (ground floor approach)
+          x = b.x + b.w * (0.25 + hash2(bot.id + salt, 83) * 0.5);
+          z = b.z + b.d * (0.25 + hash2(bot.id + salt, 85) * 0.5);
+        } else {
+          // South entrance approach (most buildings open on −Z)
+          x = b.x + b.w * 0.5 + (hash2(bot.id + salt, 87) - 0.5) * b.w * 0.3;
+          z = b.z - 1.5 - hash2(bot.id + salt, 89) * 3;
+        }
+        if (this._isWalkable(x, z)) {
+          bot.waypoint.x = x;
+          bot.waypoint.z = z;
+          return;
+        }
+      }
+    }
+
+    for (let i = 0; i < 14; i++) {
       const ang = hash2(bot.id + salt + i, 41) * Math.PI * 2;
-      const dist = 4 + hash2(bot.id + salt + i, 43) * BOTS.WANDER_RADIUS;
-      const x = bot.homeX + Math.cos(ang) * dist * (0.4 + hash2(bot.id + i, 47) * 0.6);
-      const z = bot.homeZ + Math.sin(ang) * dist * (0.4 + hash2(bot.id + i, 53) * 0.6);
+      const dist = 5 + hash2(bot.id + salt + i, 43) * BOTS.WANDER_RADIUS;
+      const x = bot.homeX + Math.cos(ang) * dist * (0.35 + hash2(bot.id + i, 47) * 0.65);
+      const z = bot.homeZ + Math.sin(ang) * dist * (0.35 + hash2(bot.id + i, 53) * 0.65);
       if (this._isWalkable(x, z)) {
         bot.waypoint.x = x;
         bot.waypoint.z = z;
         return;
       }
     }
-    // Stay near home
-    bot.waypoint.x = bot.homeX + (hash2(bot.id + salt, 59) - 0.5) * 8;
-    bot.waypoint.z = bot.homeZ + (hash2(bot.id + salt, 61) - 0.5) * 8;
+    bot.waypoint.x = bot.homeX + (hash2(bot.id + salt, 59) - 0.5) * 10;
+    bot.waypoint.z = bot.homeZ + (hash2(bot.id + salt, 61) - 0.5) * 10;
+  }
+
+  /** True if a solid wall blocks eye→target (glass does not count as full block). */
+  _hasLOS(fromX, fromY, fromZ, toX, toY, toZ) {
+    _losDir.set(toX - fromX, toY - fromY, toZ - fromZ);
+    const dist = _losDir.length();
+    if (dist < 0.5) return true;
+    _losDir.multiplyScalar(1 / dist);
+    const minX = Math.min(fromX, toX) - 0.5;
+    const maxX = Math.max(fromX, toX) + 0.5;
+    const minZ = Math.min(fromZ, toZ) - 0.5;
+    const maxZ = Math.max(fromZ, toZ) + 0.5;
+    this.hash.query(minX, minZ, maxX, maxZ, _cand);
+    const o = new THREE.Vector3(fromX, fromY, fromZ);
+    for (let i = 0; i < _cand.length; i++) {
+      const b = _cand[i];
+      if (b.disabled) continue;
+      const tag = b.tag || 'solid';
+      if (tag === 'trigger' || tag === 'door' || tag === 'ladder' || tag === 'glass' || tag === 'thin' || tag === 'elevator') {
+        continue;
+      }
+      // Skip floor slabs (horizontal)
+      if ((b.max.y - b.min.y) < 0.4 && (b.max.x - b.min.x) > 1.5) continue;
+      const t = rayAABB(o, _losDir, b.min, b.max, dist - 0.4);
+      if (t != null && t > 0.3 && t < dist - 0.5) return false;
+    }
+    return true;
   }
 
   _syncParts(bot) {
@@ -309,7 +369,12 @@ export class BotSystem {
     return { killed: false, applied: dmg };
   }
 
-  update(dt) {
+  /**
+   * @param {number} dt
+   * @param {{x:number,y:number,z:number}|null} playerPos
+   * @param {{ health:number, armor:number }|null} playerVitals  WeaponSystem vitals
+   */
+  update(dt, playerPos = null, playerVitals = null) {
     for (const bot of this.bots) {
       if (bot.dead) {
         bot.respawnT -= dt;
@@ -326,6 +391,70 @@ export class BotSystem {
               o.material.emissiveIntensity = 0;
             }
           });
+        }
+      }
+
+      // --- Combat awareness ---
+      if (bot.aggressive && playerPos && playerVitals && playerVitals.health > 0) {
+        const pdx = playerPos.x - bot.x;
+        const pdz = playerPos.z - bot.z;
+        const pDist = Math.hypot(pdx, pdz);
+        const eyeY = bot.y + 1.55;
+        const pEyeY = playerPos.y + 1.5;
+
+        if (bot.state === 'wander' && pDist < (BOTS.AGGRO_RANGE ?? 55)) {
+          if (this._hasLOS(bot.x, eyeY, bot.z, playerPos.x, pEyeY, playerPos.z)) {
+            bot.aggroT += dt;
+            if (bot.aggroT >= (BOTS.REACTION_TIME ?? 0.35)) {
+              bot.state = 'engage';
+              bot.pauseT = 0;
+            }
+          } else {
+            bot.aggroT = Math.max(0, bot.aggroT - dt * 0.5);
+          }
+        } else if (bot.state === 'engage') {
+          if (pDist > (BOTS.LOSE_RANGE ?? 75)) {
+            bot.state = 'wander';
+            bot.aggroT = 0;
+            this._pickWaypoint(bot, (performance.now() * 0.01) | 0);
+          } else {
+            // Face + shoot
+            bot.yaw = Math.atan2(pdx, pdz);
+            bot.mesh.rotation.y = bot.yaw;
+            bot.vx = 0;
+            bot.vz = 0;
+            // Slow strafe toward player if far
+            if (pDist > 18 && pDist < (BOTS.FIRE_RANGE ?? 50)) {
+              const nx = pdx / pDist;
+              const nz = pdz / pDist;
+              const step = bot.speed * 0.55 * dt;
+              const nx2 = bot.x + nx * step;
+              const nz2 = bot.z + nz * step;
+              if (this._isWalkable(nx2, nz2) && !this._blocked(nx2, this.terrain.heightAt(nx2, nz2), nz2)) {
+                bot.x = nx2;
+                bot.z = nz2;
+                bot.y = this.terrain.heightAt(bot.x, bot.z);
+              }
+            }
+            bot.fireCd -= dt;
+            if (
+              bot.fireCd <= 0
+              && pDist < (BOTS.FIRE_RANGE ?? 50)
+              && this._hasLOS(bot.x, eyeY, bot.z, playerPos.x, pEyeY, playerPos.z)
+            ) {
+              this._botShoot(bot, playerPos, playerVitals, pDist);
+              bot.fireCd = (BOTS.FIRE_COOLDOWN ?? 0.14) * (0.85 + hash2(bot.id, (performance.now() * 0.01) | 0) * 0.4);
+            }
+            bot.mesh.position.set(bot.x, bot.y, bot.z);
+            this._idleAnim(bot, dt);
+            // Aim pose — raise arms
+            const { lArm, rArm, gun } = bot.mesh.userData;
+            if (lArm) { lArm.rotation.x = -0.9; lArm.rotation.z = -0.15; }
+            if (rArm) { rArm.rotation.x = -0.95; rArm.rotation.z = 0.2; }
+            if (gun) gun.rotation.set(-0.05, 0.1, 0.05);
+            this._syncParts(bot);
+            continue;
+          }
         }
       }
 
@@ -354,10 +483,8 @@ export class BotSystem {
       let nextX = bot.x + nx * step;
       let nextZ = bot.z + nz * step;
 
-      // Simple collision: if blocked, try slide axes then new waypoint
       const nextY = this.terrain.heightAt(nextX, nextZ);
       if (!this._isWalkable(nextX, nextZ) || this._blocked(nextX, nextY, nextZ)) {
-        // try axis slide
         const onlyX = this._isWalkable(bot.x + nx * step, bot.z)
           && !this._blocked(bot.x + nx * step, this.terrain.heightAt(bot.x + nx * step, bot.z), bot.z);
         const onlyZ = this._isWalkable(bot.x, bot.z + nz * step)
@@ -386,6 +513,37 @@ export class BotSystem {
       bot.mesh.rotation.y = bot.yaw;
       this._walkAnim(bot, dt, dist);
       this._syncParts(bot);
+    }
+  }
+
+  _botShoot(bot, playerPos, vitals, dist) {
+    // Cone miss chance — worse at range
+    const spread = (BOTS.FIRE_SPREAD_DEG ?? 4.5) * (1 + dist / 40);
+    const miss = Math.abs(hash2(bot.id, (performance.now() * 0.1) | 0) - 0.5) * 2 * spread;
+    if (miss > 2.2) return; // wide miss
+
+    let dmg = BOTS.FIRE_DAMAGE ?? 9;
+    // Soft falloff for bot shots
+    if (dist > 30) dmg *= Math.max(0.45, 1 - (dist - 30) / 50);
+    // Armor then health
+    let remaining = dmg;
+    if (vitals.armor > 0) {
+      const absorbed = Math.min(vitals.armor, remaining);
+      vitals.armor -= absorbed;
+      remaining -= absorbed;
+    }
+    vitals.health = Math.max(0, vitals.health - remaining);
+    this.bus?.emit?.('bot:shot', { id: bot.id, dmg, dist });
+    // Muzzle flash tint on gun
+    const gun = bot.mesh.userData?.gun;
+    if (gun) {
+      gun.traverse((o) => {
+        if (o.isMesh && o.material?.emissive) {
+          o.material.emissive.setHex(0xffaa40);
+          o.material.emissiveIntensity = 1.2;
+        }
+      });
+      bot._muzzleT = 0.06;
     }
   }
 

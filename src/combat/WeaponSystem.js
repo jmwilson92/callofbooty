@@ -263,7 +263,8 @@ export class WeaponSystem {
 
   /**
    * Aim direction: camera look + recoil aim offset + hip/ADS spread cone.
-   * Hip is intentionally inaccurate except CQC (SMG/pistol have lower hip cone).
+   * Bloom (this.spread) is additive only — recovers to 0, not to hip base.
+   * Range scatter beyond effectiveRange is applied in Ballistics.
    */
   getAimDir(out, rng) {
     const cam = this.camera.camera;
@@ -279,17 +280,15 @@ export class WeaponSystem {
     const def = this.def;
     if (!def) return out;
 
-    // Base cone always applied: full hip → tight ADS
     const adsT = this.ads * this.ads * (3 - 2 * this.ads);
-    let baseCone = THREE.MathUtils.lerp(def.spreadHip, def.spreadAds, adsT);
-    // Moving hip is worse
-    if (this.ads < 0.5) baseCone += (def.spreadMove || 0) * (1 - adsT * 2);
-    // Bloom stacks on top of base (recoil spray)
-    const cone = baseCone + this.spread * (1 - adsT * 0.65);
+    let cone = THREE.MathUtils.lerp(def.spreadHip, def.spreadAds, adsT);
+    // Movement penalty is mostly a hip problem
+    cone += (def.spreadMove || 0) * (1 - adsT);
+    // Recoil bloom (deg) — less of it when fully ADS
+    cone += this.spread * THREE.MathUtils.lerp(1.0, 0.35, adsT);
 
     if (cone > 0.02 && rng) {
-      // Full cone sample (not 0.3–0.7) so hip feels loose
-      const ang = cone * DEG * (0.15 + rng() * 0.85);
+      const ang = cone * DEG * (0.2 + rng() * 0.8);
       const theta = rng() * Math.PI * 2;
       const up = new THREE.Vector3(0, 1, 0);
       const r = new THREE.Vector3().crossVectors(out, up);
@@ -382,21 +381,23 @@ export class WeaponSystem {
     }
     if (this._muzzleLight) this._muzzleLight.intensity = 1.8;
 
-    // Recoil pattern (first shot deterministic)
+    // Recoil pattern — much milder when ADS (class adsRecoilMult)
+    const adsT = this.ads * this.ads * (3 - 2 * this.ads);
+    const recM = THREE.MathUtils.lerp(1.0, def.adsRecoilMult ?? 0.45, adsT);
     const pat = def.recoilPattern;
     const idx = this.shotIndex % pat.length;
     const [h, v] = pat[idx];
-    this.aimOffsetH += h;
-    this.aimOffsetV += v;
-    // Visual kick (camera recovers separately)
-    this.camera.recoilPitch += v * DEG * 0.55;
-    this.camera.recoilYaw += h * DEG * 0.35;
+    this.aimOffsetH += h * recM;
+    this.aimOffsetV += v * recM;
+    this.camera.recoilPitch += v * DEG * 0.55 * recM;
+    this.camera.recoilYaw += h * DEG * 0.35 * recM;
     this.shotIndex++;
 
-    // Spread bloom
-    const adsStill = this.ads > 0.8 && !moving;
-    if (!adsStill || def.pellets > 1) {
-      this.spread = Math.min(def.spreadMax, this.spread + def.spreadPerShot);
+    // Bloom stacks; ADS still blooms less (sniper ADS barely blooms)
+    const bloomScale = THREE.MathUtils.lerp(1.0, def.pellets > 1 ? 0.85 : 0.28, adsT);
+    if (bloomScale > 0.05 || def.pellets > 1) {
+      const add = def.spreadPerShot * bloomScale * (moving && this.ads < 0.5 ? 1.25 : 1);
+      this.spread = Math.min(def.spreadMax, this.spread + add);
     }
 
     if (targetRange) targetRange.stats.shots++;
@@ -524,13 +525,10 @@ export class WeaponSystem {
       else if (this.aimOffsetH < 0) this.aimOffsetH = Math.min(0, this.aimOffsetH + rec);
     }
 
-    // Spread recovery
+    // Bloom recovery → 0 (base hip/ADS cone is separate in getAimDir)
     if (def) {
-      const base = this.ads > 0.5 ? def.spreadAds : def.spreadHip;
-      const moveAdd = moving ? def.spreadMove : 0;
-      const target = base + moveAdd;
-      this.spread = Math.max(target, this.spread - dt * 2.5);
-      if (this.spread < target) this.spread = target;
+      const rec = (COMBAT.SPREAD_RECOVER ?? 4) * (1 + this.ads * 1.6) * dt;
+      this.spread = Math.max(0, this.spread - rec);
     }
 
     if (this.shotCooldown > 0) this.shotCooldown -= dt;

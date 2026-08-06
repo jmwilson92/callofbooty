@@ -243,9 +243,9 @@ async function start() {
         controller.tick(dt, input, playerCam.yaw);
         elevators.update(dt, controller);
 
-        // Combat: move bots first so bullets test current hitboxes (wall-hugs / lead)
+        // Combat: bots move/engage first so bullets test current hitboxes
         const moving = controller.speed > 0.6;
-        bots.update(dt);
+        bots.update(dt, controller.pos, weapons);
         combatTargets.length = 0;
         const liveBots = bots.getLiveTargets();
         for (let i = 0; i < liveBots.length; i++) combatTargets.push(liveBots[i]);
@@ -263,7 +263,7 @@ async function start() {
         // Keep gravity and collision alive so the player settles while unlocked / on map.
         controller.tick(dt, IDLE_INPUT, playerCam.yaw);
         elevators.update(dt, null);
-        bots.update(dt);
+        bots.update(dt, null, null);
         prevFire = false;
       }
       doors.update(dt);
