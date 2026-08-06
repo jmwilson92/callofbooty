@@ -281,9 +281,12 @@ async function start() {
         }
         const fireDown = input.buttons.has(0);
         if (vehicles.rideType === 'helicopter') {
-          // Heli rockets only (no small arms while flying)
+          // Heli guided rockets (aim with look; locks bots / buildings / ground)
           if (fireDown && !prevFire) {
-            vehicles.tryFireRockets(combatTargets);
+            vehicles.tryFireRockets(combatTargets, {
+              yaw: playerCam.yaw,
+              pitch: playerCam.pitch,
+            });
           }
           prevFire = fireDown;
         } else if (!vehicles.riding) {

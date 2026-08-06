@@ -104,7 +104,7 @@ export function createHud() {
       <tr><td>Shift+E</td><td>elevator / rappel express to TOP</td></tr>
       <tr><td>Rappel (gold)</td><td>W/S floor-by-floor · Shift+E or Shift+W express roof</td></tr>
       <tr><td>Zipline (blue)</td><td>E · ride between rooftops</td></tr>
-      <tr><td>Moto / Heli</td><td>WASD · Space up / C down · LMB rockets · E exit</td></tr>
+      <tr><td>Moto / Heli</td><td>WASD · Space up / C down · LMB guided rockets · E bail (heli crashes unless remounted)</td></tr>
       <tr><td>RMB (sniper)</td><td>scope zoom + reticle</td></tr>
       <tr><td>LMB</td><td>fire</td></tr>
       <tr><td>RMB</td><td>ADS</td></tr>

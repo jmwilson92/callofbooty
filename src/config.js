@@ -534,12 +534,21 @@ export const VEHICLES = {
     halfW: 3.6,
     halfH: 1.6,
     halfD: 4.2,
+    // Bail-out crash: unmanned heli falls unless someone remounts (takes over)
+    crashGravity: 26,
+    crashMaxFall: 55,
+    crashBailHeight: 4.5, // AGL above this → crash; lower just lands
     // 8 pods per side; each LMB fires L+R together (8 dual volleys)
     rocketsPerSide: 8,
-    rocketSpeed: 95,
+    rocketSpeed: 88,
     rocketDamage: 90,
-    rocketSplash: 5.0,
+    rocketSplash: 5.5,
     rocketCooldown: 0.4,
+    // Guided missiles — steer toward look lock (bots / buildings / ground)
+    rocketTurnRate: 3.4, // rad/s seek rate
+    rocketLockRange: 260,
+    rocketLockConeDeg: 14, // soft lock cone around reticle
+    rocketGuideDelay: 0.08, // s before seek engages
   },
 };
 
