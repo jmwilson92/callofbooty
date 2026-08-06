@@ -111,30 +111,25 @@ export class CombatHud {
       <div id="ch-range" class="panel" style="position:absolute;left:50%;top:12px;transform:translateX(-50%);
         padding:7px 14px;font-size:11px;display:none"></div>
 
-      <!-- Sniper / DMR scope: black ring + mildot crosshairs -->
+      <!-- Scope: clear center (look-through) + ring so peripherals stay; no outer tube mesh -->
       <div id="ch-scope" style="
         position:absolute;inset:0;display:none;pointer-events:none;
         background: radial-gradient(circle at center,
-          transparent 0%, transparent 28%,
-          rgba(0,0,0,0.55) 32%, rgba(0,0,0,0.92) 38%, #000 42%);
+          transparent 0%, transparent 34%,
+          rgba(0,0,0,0.35) 38%, rgba(0,0,0,0.85) 44%, #000 50%);
       ">
         <svg id="ch-scope-reticle" width="100%" height="100%" style="position:absolute;inset:0">
-          <g stroke="#1a1a1a" stroke-width="1.2" opacity="0.85">
-            <line x1="50%" y1="35%" x2="50%" y2="65%" />
-            <line x1="35%" y1="50%" x2="65%" y2="50%" />
+          <g stroke="#c8d0d8" stroke-width="1" opacity="0.75">
+            <line x1="50%" y1="36%" x2="50%" y2="46.5%" />
+            <line x1="50%" y1="53.5%" x2="50%" y2="64%" />
+            <line x1="36%" y1="50%" x2="46.5%" y2="50%" />
+            <line x1="53.5%" y1="50%" x2="64%" y2="50%" />
+            <circle cx="50%" cy="45%" r="1.2" fill="#c8d0d8" />
+            <circle cx="50%" cy="55%" r="1.2" fill="#c8d0d8" />
+            <circle cx="45%" cy="50%" r="1.2" fill="#c8d0d8" />
+            <circle cx="55%" cy="50%" r="1.2" fill="#c8d0d8" />
           </g>
-          <g stroke="#c8d0d8" stroke-width="1" opacity="0.7">
-            <line x1="50%" y1="38%" x2="50%" y2="47%" />
-            <line x1="50%" y1="53%" x2="50%" y2="62%" />
-            <line x1="38%" y1="50%" x2="47%" y2="50%" />
-            <line x1="53%" y1="50%" x2="62%" y2="50%" />
-            <!-- mildots -->
-            <circle cx="50%" cy="46%" r="1.5" fill="#c8d0d8" />
-            <circle cx="50%" cy="54%" r="1.5" fill="#c8d0d8" />
-            <circle cx="46%" cy="50%" r="1.5" fill="#c8d0d8" />
-            <circle cx="54%" cy="50%" r="1.5" fill="#c8d0d8" />
-          </g>
-          <circle cx="50%" cy="50%" r="2" fill="#ff3030" opacity="0.9" />
+          <circle cx="50%" cy="50%" r="1.8" fill="#ff3030" opacity="0.95" />
         </svg>
       </div>
     `;

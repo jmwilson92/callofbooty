@@ -85,7 +85,10 @@ export function castHitscan(origin, dir, hash, targets, maxDist = 400) {
 
   let thinCount = 0;
   let dmgMult = 1;
-  for (const h of worldHits) {
+  // Prefer targets over world when nearly coplanar (bot standing near wall/door)
+  const TARGET_BIAS = 0.2; // metres
+  for (let i = 0; i < worldHits.length; i++) {
+    const h = worldHits[i];
     if (h.kind === 'target') {
       result.hit = true;
       result.dist = h.t;
@@ -97,8 +100,25 @@ export function castHitscan(origin, dir, hash, targets, maxDist = 400) {
       result.damageMult = dmgMult;
       return result;
     }
-    // world surface
+    // If a target is almost as close as this wall, hit the target instead
+    for (let j = i + 1; j < worldHits.length; j++) {
+      const n = worldHits[j];
+      if (n.t > h.t + TARGET_BIAS) break;
+      if (n.kind === 'target') {
+        result.hit = true;
+        result.dist = n.t;
+        result.point.copy(origin).addScaledVector(dir, n.t);
+        result.part = n.part;
+        result.target = n.target;
+        result.tag = 'target';
+        result.surfaces = thinCount;
+        result.damageMult = dmgMult;
+        return result;
+      }
+    }
     const tag = h.box.tag || 'solid';
+    // Don't let floor slabs steal horizontal shots at nearby targets
+    if (tag === 'ladder' || tag === 'trigger') continue;
     if (tag === 'thin') {
       thinCount++;
       dmgMult *= (1 - COMBAT.PENETRATION_LOSS);
@@ -111,9 +131,21 @@ export function castHitscan(origin, dir, hash, targets, maxDist = 400) {
         result.damageMult = 0;
         return result;
       }
-      continue; // pass through
+      continue;
     }
-    // solid stop
+    // Thin horizontal floors: if ray is mostly horizontal and a target is nearby, skip floor
+    const box = h.box;
+    const isFloorish = (box.max.y - box.min.y) < 0.35 && (box.max.x - box.min.x) > 1.5;
+    if (isFloorish && Math.abs(dir.y) < 0.25) {
+      let nearbyTarget = false;
+      for (let j = i + 1; j < worldHits.length; j++) {
+        if (worldHits[j].kind === 'target' && worldHits[j].t < h.t + 2.5) {
+          nearbyTarget = true;
+          break;
+        }
+      }
+      if (nearbyTarget) continue;
+    }
     result.hit = true;
     result.dist = h.t;
     result.point.copy(origin).addScaledVector(dir, h.t);

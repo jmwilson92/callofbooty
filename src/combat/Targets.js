@@ -14,18 +14,32 @@ function boxPart(name, cx, cy, cz, sx, sy, sz) {
 
 /**
  * Build hitboxes relative to feet at (x, z) with ground y.
- * head sphere approximated as box r=0.18 at eye height.
+ * Axis-aligned — use fat volumes so rotated meshes still register.
  */
 export function makeHumanoidParts(x, feetY, z) {
-  const eye = feetY + 1.65;
+  const eye = feetY + 1.68;
   return [
-    boxPart('head', x, eye, z, 0.36, 0.36, 0.36),
-    boxPart('chest', x, feetY + 1.2, z, 0.5, 0.55, 0.28),
-    boxPart('abdomen', x, feetY + 0.8, z, 0.45, 0.4, 0.26),
-    boxPart('arm', x - 0.38, feetY + 1.15, z, 0.16, 0.7, 0.16),
-    boxPart('arm', x + 0.38, feetY + 1.15, z, 0.16, 0.7, 0.16),
-    boxPart('leg', x - 0.14, feetY + 0.4, z, 0.18, 0.8, 0.18),
-    boxPart('leg', x + 0.14, feetY + 0.4, z, 0.18, 0.8, 0.18),
+    boxPart('head', x, eye, z, 0.4, 0.4, 0.4),
+    boxPart('chest', x, feetY + 1.25, z, 0.58, 0.6, 0.5),
+    boxPart('abdomen', x, feetY + 0.85, z, 0.52, 0.45, 0.45),
+    boxPart('arm', x - 0.32, feetY + 1.2, z, 0.28, 0.65, 0.35),
+    boxPart('arm', x + 0.32, feetY + 1.2, z, 0.28, 0.65, 0.35),
+    boxPart('leg', x - 0.14, feetY + 0.42, z, 0.28, 0.85, 0.35),
+    boxPart('leg', x + 0.14, feetY + 0.42, z, 0.28, 0.85, 0.35),
+  ];
+}
+
+/**
+ * Bot hitboxes — fewer, fatter AABBs so yaw doesn't create misses.
+ * Covers plate carrier + limbs regardless of facing.
+ */
+export function makeBotParts(x, feetY, z) {
+  return [
+    boxPart('head', x, feetY + 1.72, z, 0.45, 0.42, 0.45),
+    // Full torso volume (wide in XZ so side-on shots still hit)
+    boxPart('chest', x, feetY + 1.22, z, 0.75, 0.75, 0.75),
+    // Legs as one lower mass
+    boxPart('leg', x, feetY + 0.45, z, 0.6, 0.95, 0.6),
   ];
 }
 

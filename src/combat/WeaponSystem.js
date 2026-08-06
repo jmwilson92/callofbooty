@@ -239,15 +239,16 @@ export class WeaponSystem {
     this._muzzle = vm.muzzle;
     this.viewGroup.add(vm.root);
 
-    // Compact muzzle flash (side-biased so it doesn't fill the aim point)
+    // Compact muzzle flash — sniper/DMR keep it tiny so hip tip isn't a blob
+    const isLong = def.class === 'sniper' || def.class === 'dmr';
     const flash = new THREE.Mesh(
-      new THREE.SphereGeometry(0.028, 8, 8),
+      new THREE.SphereGeometry(isLong ? 0.016 : 0.026, 8, 8),
       new THREE.MeshBasicMaterial({
         color: 0xffe8a0, transparent: true, opacity: 0, depthTest: false, depthWrite: false,
       })
     );
     flash.position.copy(vm.muzzle.position);
-    flash.position.x += 0.01;
+    flash.position.x += 0.008;
     flash.frustumCulled = false;
     flash.renderOrder = 1000;
     vm.root.add(flash);

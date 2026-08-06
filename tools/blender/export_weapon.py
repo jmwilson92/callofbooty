@@ -305,13 +305,13 @@ def build_sniper(mats):
     # Bolt handle
     cyl(0.008, 0.05, (0.04, -0.02, 0.01), RY90, 8, steel, "bolt")
     box(0.02, 0.02, 0.03, (0.06, -0.02, 0.01), mat=dark, name="bolt_knob", bevel_w=0.002)
-    # Long free-float barrel
-    cyl(0.008, 0.45, (0, 0.38, -0.002), RX90, 16, steel, "barrel")
-    cyl(0.012, 0.035, (0, 0.62, -0.002), RX90, 12, steel, "brake")
-    # Big scope
-    cyl(0.018, 0.18, (0, 0.02, 0.045), RX90, 18, dark, "scope")
-    cyl(0.024, 0.05, (0, -0.09, 0.045), RX90, 14, dark, "ocular", r2=0.016)
-    cyl(0.026, 0.05, (0, 0.13, 0.045), RX90, 14, dark, "objective", r2=0.016)
+    # Long free-float barrel — compact brake so hip tip isn't a floating blob
+    cyl(0.008, 0.42, (0, 0.36, -0.002), RX90, 16, steel, "barrel")
+    cyl(0.01, 0.022, (0, 0.58, -0.002), RX90, 12, steel, "brake", r2=0.011)
+    # Big scope (mid-gun, not at tip)
+    cyl(0.018, 0.16, (0, 0.0, 0.045), RX90, 18, dark, "scope")
+    cyl(0.022, 0.04, (0, -0.09, 0.045), RX90, 14, dark, "ocular", r2=0.016)
+    cyl(0.024, 0.04, (0, 0.1, 0.045), RX90, 14, dark, "objective", r2=0.016)
     cyl(0.012, 0.022, (0, 0.02, 0.065), (0, 0, 0), 10, dark, "turret_top")
     cyl(0.01, 0.02, (0.025, 0.02, 0.045), RY90, 10, dark, "turret_side")
     box(0.028, 0.006, 0.028, (0, -0.11, 0.045), mat=glass, name="ocular_glass", do_bevel=False)
@@ -325,13 +325,13 @@ def build_sniper(mats):
         mat=dark, name="grip", bevel_w=0.004)
     box(0.028, 0.036, 0.07, (0, 0.0, -0.1), mat=dark, name="Mag", bevel_w=0.003)
     _hands(skin, (0.014, -0.05, -0.1), (0.0, 0.2, -0.04))
-    empty("Sight", (0, 0.02, 0.045))
-    empty("Muzzle", (0, 0.64, -0.002))
+    empty("Sight", (0, 0.0, 0.045))
+    empty("Muzzle", (0, 0.6, -0.002))
     empty("Mag", (0, 0.0, -0.1))
 
 
 def build_dmr(mats):
-    """Olive DMR with LPVO — matches dmr_ref."""
+    """Olive DMR with LPVO — matches dmr_ref. Scope hides on ADS via hideViewOnAds."""
     dark, steel, body, glass, glow, skin = mats
     od = body
     box(0.038, 0.11, 0.048, (0, -0.14, -0.012), mat=od, name="stock", bevel_w=0.005)
@@ -339,22 +339,21 @@ def build_dmr(mats):
     box(0.044, 0.16, 0.04, (0, 0.02, -0.002), mat=dark, name="upper", bevel_w=0.003)
     box(0.042, 0.14, 0.036, (0, 0.18, -0.006), mat=od, name="hg1", bevel_w=0.004)
     box(0.038, 0.1, 0.032, (0, 0.28, -0.004), mat=od, name="hg2", bevel_w=0.003)
-    # Vertical grip
     box(0.028, 0.035, 0.07, (0, 0.22, -0.055), mat=dark, name="vgrip", bevel_w=0.003)
-    cyl(0.0075, 0.26, (0, 0.48, -0.002), RX90, 16, steel, "barrel")
-    cyl(0.012, 0.03, (0, 0.62, -0.002), RX90, 12, steel, "muzzle")
-    # LPVO scope
-    cyl(0.014, 0.14, (0, 0.02, 0.04), RX90, 16, dark, "scope")
-    cyl(0.018, 0.03, (0, -0.06, 0.04), RX90, 12, dark, "oc", r2=0.012)
-    cyl(0.018, 0.03, (0, 0.1, 0.04), RX90, 12, dark, "obj", r2=0.012)
-    box(0.022, 0.006, 0.022, (0, -0.07, 0.04), mat=glass, name="glass", do_bevel=False)
-    box(0.004, 0.004, 0.004, (0, 0.02, 0.04), mat=glow, name="reticle", do_bevel=False)
+    cyl(0.0075, 0.24, (0, 0.46, -0.002), RX90, 16, steel, "barrel")
+    cyl(0.011, 0.024, (0, 0.59, -0.002), RX90, 12, steel, "muzzle")
+    # Slimmer LPVO (less bulk when fading out for ADS)
+    cyl(0.012, 0.12, (0, 0.0, 0.038), RX90, 14, dark, "scope")
+    cyl(0.015, 0.025, (0, -0.07, 0.038), RX90, 12, dark, "oc", r2=0.011)
+    cyl(0.015, 0.025, (0, 0.08, 0.038), RX90, 12, dark, "obj", r2=0.011)
+    box(0.018, 0.004, 0.018, (0, -0.08, 0.038), mat=glass, name="glass", do_bevel=False)
+    box(0.0035, 0.0035, 0.0035, (0, 0.0, 0.038), mat=glow, name="reticle", do_bevel=False)
     box(0.032, 0.038, 0.095, (0, -0.02, -0.1), rot=(math.radians(15), 0, 0),
         mat=dark, name="grip", bevel_w=0.005)
     box(0.034, 0.04, 0.12, (0, 0.0, -0.13), mat=dark, name="Mag", bevel_w=0.003)
     _hands(skin, (0.014, -0.02, -0.115), (0.0, 0.2, -0.055))
-    empty("Sight", (0, 0.02, 0.04))
-    empty("Muzzle", (0, 0.64, -0.002))
+    empty("Sight", (0, 0.0, 0.038))
+    empty("Muzzle", (0, 0.61, -0.002))
     empty("Mag", (0, 0.0, -0.13))
 
 

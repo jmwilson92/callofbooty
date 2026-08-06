@@ -373,45 +373,36 @@ export class LootSystem {
       this._rollAndSpawnOutdoor(rng, x, z);
     }
 
-    // Pelican cases — interior of every registered building (incl. skyline towers)
+    // Pelican cases — along walls, facing open room, never clustered
     let caseCount = 0;
-    const margin = 1.6;
+    const placedXZ = []; // world XZ for min-separation across all buildings
+    const MIN_SEP = CASES.MIN_SEPARATION ?? 2.8;
+
     for (const b of worldBuildings) {
-      if (b.w < 5 || b.d < 5) continue;
+      if (b.w < 6 || b.d < 6) continue;
       let placedHere = 0;
-      const maxB = CASES.MAX_PER_BUILDING ?? 8;
-      // Cap floors scanned on super-tall towers (still cover low + mid + high)
+      const maxB = CASES.MAX_PER_BUILDING ?? 6;
       const floors = b.floors;
-      const floorList = [];
-      for (let f = 0; f < floors; f++) floorList.push(f);
-      // Always include ground; sample upper floors
       const sample = new Set([0]);
-      if (floors > 1) sample.add(Math.floor(floors * 0.35));
-      if (floors > 2) sample.add(Math.floor(floors * 0.65));
-      if (floors > 3) sample.add(floors - 1);
-      for (const f of floorList) {
-        if (sample.has(f)) continue;
-        if (rng() < (CASES.PER_FLOOR_CHANCE ?? 0.7)) sample.add(f);
+      if (floors > 1) sample.add(Math.floor(floors * 0.4));
+      if (floors > 3) sample.add(Math.floor(floors * 0.7));
+      if (floors > 2) sample.add(floors - 1);
+      for (let f = 0; f < floors; f++) {
+        if (rng() < (CASES.PER_FLOOR_CHANCE ?? 0.55) * 0.5) sample.add(f);
       }
 
-      for (const f of sample) {
+      for (const f of [...sample]) {
         if (placedHere >= maxB) break;
         const guarantee = f === 0 && CASES.GUARANTEE_GROUND;
-        if (!guarantee && rng() > (CASES.PER_FLOOR_CHANCE ?? 0.7)) continue;
-        const n = Math.min(
-          CASES.MAX_PER_FLOOR ?? 2,
-          guarantee ? 1 + (rng() > 0.5 ? 1 : 0) : (rng() > 0.5 ? 2 : 1)
-        );
-        for (let k = 0; k < n; k++) {
+        if (!guarantee && rng() > (CASES.PER_FLOOR_CHANCE ?? 0.55)) continue;
+
+        const want = Math.min(CASES.MAX_PER_FLOOR ?? 1, guarantee ? 1 : 1);
+        for (let k = 0; k < want; k++) {
           if (placedHere >= maxB) break;
-          // Keep away from walls / stair corner (+X/+Z)
-          const lx = margin + rng() * Math.max(0.5, b.w - margin * 2);
-          const lz = margin + rng() * Math.max(0.5, b.d - margin * 2);
-          if (lx > b.w * 0.62 && lz > b.d * 0.62) continue;
-          const x = b.x + lx;
-          const z = b.z + lz;
-          const y = b.floorYs?.[f] ?? (b.baseY + 0.15 + f * 3.4);
-          this._spawnCase(x, y, z, rng() * Math.PI * 2, rng);
+          const spot = this._pickWallCaseSpot(b, f, rng, placedXZ, MIN_SEP);
+          if (!spot) continue;
+          this._spawnCase(spot.x, spot.y, spot.z, spot.yaw, rng);
+          placedXZ.push({ x: spot.x, z: spot.z });
           caseCount++;
           placedHere++;
         }
@@ -420,6 +411,95 @@ export class LootSystem {
 
     console.info(`[loot] outdoor items ${this.items.length} · supply cases ${caseCount} · buildings ${worldBuildings.length}`);
     return { items: this.items.length, cases: caseCount };
+  }
+
+  /**
+   * Place case against a wall, facing room center (opens outward).
+   * Avoids doorways (south mid for kit buildings), elevators (inner core),
+   * stair corner (+X/+Z), and other cases.
+   */
+  _pickWallCaseSpot(b, floorIdx, rng, placedXZ, minSep) {
+    const wallInset = 0.75; // off wall so lid/body fit
+    const doorKeepout = 1.8; // no cases mid-south facade (door)
+    const elevKeep = 2.2; // clear center/core
+    const y = b.floorYs?.[floorIdx] ?? (b.baseY + 0.15 + floorIdx * 3.4);
+
+    // Candidate wall slots: N/S/E/W edges, several positions along each
+    const candidates = [];
+    const along = (len) => {
+      const n = Math.max(2, Math.floor(len / 2.5));
+      const out = [];
+      for (let i = 0; i < n; i++) out.push((i + 0.5) / n);
+      return out;
+    };
+
+    // South wall (z = min) — skip middle (doorway)
+    for (const t of along(b.w)) {
+      if (Math.abs(t - 0.5) < 0.22) continue; // doorway keepout
+      candidates.push({
+        lx: b.w * t, lz: wallInset,
+        yaw: 0, // front (+local Z) faces +world Z = into room
+      });
+    }
+    // North wall (z = max) — front faces -Z into room
+    for (const t of along(b.w)) {
+      candidates.push({
+        lx: b.w * t, lz: b.d - wallInset,
+        yaw: Math.PI,
+      });
+    }
+    // West wall (x = min) — front faces +X into room
+    for (const t of along(b.d)) {
+      if (t < 0.15) continue; // near south door corner
+      candidates.push({
+        lx: wallInset, lz: b.d * t,
+        yaw: -Math.PI / 2,
+      });
+    }
+    // East wall (x = max) — avoid stair/elev core in +X/+Z
+    for (const t of along(b.d)) {
+      if (t > 0.55) continue; // skip stair core region
+      candidates.push({
+        lx: b.w - wallInset, lz: b.d * t,
+        yaw: Math.PI / 2,
+      });
+    }
+
+    // Shuffle
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = candidates[i];
+      candidates[i] = candidates[j];
+      candidates[j] = tmp;
+    }
+
+    const cx = b.x + b.w * 0.5;
+    const cz = b.z + b.d * 0.5;
+
+    for (const c of candidates) {
+      const x = b.x + c.lx;
+      const z = b.z + c.lz;
+      // Not in building core (elevators / open shaft)
+      if (Math.hypot(x - cx, z - cz) < elevKeep * 0.55 && b.w > 10 && b.d > 10) {
+        // Only reject deep-center placements; wall spots are fine
+        if (c.lx > b.w * 0.3 && c.lx < b.w * 0.7 && c.lz > b.d * 0.3 && c.lz < b.d * 0.7) {
+          continue;
+        }
+      }
+      // Stair/elev corner +X/+Z of footprint
+      if (c.lx > b.w * 0.65 && c.lz > b.d * 0.65) continue;
+      // Separation from other cases
+      let ok = true;
+      for (const p of placedXZ) {
+        if (Math.hypot(p.x - x, p.z - z) < minSep) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) continue;
+      return { x, y, z, yaw: c.yaw };
+    }
+    return null;
   }
 
   _rollAndSpawnOutdoor(rng, x, z) {

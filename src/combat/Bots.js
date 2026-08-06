@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BOTS, WORLD, PLAYER } from '../config.js';
-import { makeHumanoidParts } from './Targets.js';
+import { makeBotParts } from './Targets.js';
 
 /**
  * Simple wandering practice bots.
@@ -86,7 +86,7 @@ export class BotSystem {
       pauseT: 0.2 + hash2(id, 5) * BOTS.WAYPOINT_PAUSE,
       homeX: x,
       homeZ: z,
-      parts: makeHumanoidParts(x, y, z),
+      parts: makeBotParts(x, y, z),
       mesh: local,
       color,
       applyDamage: null,
@@ -275,8 +275,8 @@ export class BotSystem {
   }
 
   _syncParts(bot) {
-    const parts = makeHumanoidParts(bot.x, bot.y, bot.z);
-    bot.parts = parts;
+    // Always sync from feet position (not bobbed mesh Y) for stable hit reg
+    bot.parts = makeBotParts(bot.x, bot.y, bot.z);
   }
 
   applyDamage(bot, dmg, part) {

@@ -638,7 +638,8 @@ export const WEAPONS = {
     falloffStart: 90, falloffEnd: 150, falloffMinMult: 0.8,
     muzzleVelocity: null, pellets: 1,
     spreadHip: 2.2, spreadAds: 0.08, spreadMove: 1.2, spreadMax: 3.0, spreadPerShot: 0.25,
-    scopeZoomFov: 32, scopeOverlay: true, hideViewOnAds: false,
+    // Hide viewmodel on ADS so you look *through* the glass, not at the tube
+    scopeZoomFov: 28, scopeOverlay: true, hideViewOnAds: true,
     recoilPattern: [
       [0, 1.1], [0.08, 1.05], [-0.1, 1.0], [0.12, 0.95], [-0.08, 0.92],
       [0.15, 0.9], [-0.12, 0.88], [0.1, 0.85], [-0.15, 0.86], [0.08, 0.84],
@@ -703,13 +704,14 @@ export const LOOT = {
 /** Pelican / hard cases inside buildings — open for 3–4 random items. */
 export const CASES = {
   // Chance a given floor gets a case (ground floors always get ≥1 if building registered)
-  PER_FLOOR_CHANCE: 0.72,
+  PER_FLOOR_CHANCE: 0.6,
   GUARANTEE_GROUND: true,
   MIN_ITEMS: 3,
   MAX_ITEMS: 4,
-  // Max cases per floor / building to avoid clutter
-  MAX_PER_FLOOR: 2,
-  MAX_PER_BUILDING: 8,
+  MAX_PER_FLOOR: 1,
+  MAX_PER_BUILDING: 5,
+  /** Min distance between any two cases (metres) */
+  MIN_SEPARATION: 3.0,
 };
 
 // Minimap (always-on square, top-left) + full map (toggle with M).
