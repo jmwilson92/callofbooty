@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { COMBAT } from '../config.js';
 
-// Tracers, impact sparks, brass casings, floating damage numbers, hitmarkers.
+// Tracers, ballistic bullet meshes, impact sparks, brass, hitmarkers, damage numbers.
 
 export class CombatEffects {
   constructor(scene, camera) {
@@ -37,85 +37,111 @@ export class CombatEffects {
     document.body.appendChild(this.dmgLayer);
 
     this._lineMat = new THREE.LineBasicMaterial({
-      color: 0xffe0a0, transparent: true, opacity: 0.55, depthWidth: 1,
+      color: 0xffe0a0, transparent: true, opacity: 0.55, linewidth: 1,
     });
     this._brassGeo = new THREE.CylinderGeometry(0.004, 0.0045, 0.018, 5);
     this._brassMat = new THREE.MeshStandardMaterial({
       color: 0xc4a050, metalness: 0.85, roughness: 0.35, emissive: 0x221100, emissiveIntensity: 0.15,
     });
+    this._bulletGeo = new THREE.SphereGeometry(0.05, 6, 6);
+    this._flashLight = new THREE.PointLight(0xffcc88, 0, 12, 2);
+    this.group.add(this._flashLight);
+    this._flashLightT = 0;
   }
 
-  /** Short in-flight ballistic segment (moving bullets). */
-  spawnBallisticTrace(from, to) {
+  /**
+   * In-flight trail. Sniper/DMR: bright + long life so drop/arc is visible.
+   * @param {{ bright?: boolean, life?: number }} opts
+   */
+  spawnBallisticTrace(from, to, opts = {}) {
     if (!from || !to) return;
-    if (from.distanceToSquared(to) < 1e-4) return;
+    if (from.distanceToSquared(to) < 1e-5) return;
+    const bright = !!opts.bright;
     const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);
     const mat = this._lineMat.clone();
-    mat.opacity = 0.35;
-    mat.color = new THREE.Color(0xfff0c0);
+    mat.opacity = bright ? 0.92 : 0.5;
+    mat.color = new THREE.Color(bright ? 0xffe090 : 0xfff0c0);
     const line = new THREE.Line(geo, mat);
     this.group.add(line);
-    this.tracers.push({ line, mat, life: 0.04 });
+    this.tracers.push({ line, mat, life: opts.life ?? (bright ? 0.45 : 0.1) });
   }
 
-  /** Thin short tracer — muzzle flash streak. */
-  spawnTracer(from, to) {
-    // Only draw last ~18 m of the path so it doesn't fill the screen
+  /** Glowing projectile head that rides the bullet through the world. */
+  createBulletMesh(bright = false) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: bright ? 0xfff2a8 : 0xffe8c0,
+      transparent: true,
+      opacity: bright ? 1 : 0.8,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(this._bulletGeo, mat);
+    mesh.scale.setScalar(bright ? 1.8 : 1.0);
+    mesh.frustumCulled = false;
+    this.group.add(mesh);
+    return mesh;
+  }
+
+  releaseBulletMesh(mesh) {
+    if (!mesh) return;
+    this.group.remove(mesh);
+    if (mesh.material) mesh.material.dispose();
+  }
+
+  /** World-space muzzle bloom (all weapons, including sniper/DMR). */
+  spawnMuzzleBloom(worldPos, power = 1) {
+    this._flashLight.position.copy(worldPos);
+    this._flashLight.intensity = 6 * power;
+    this._flashLightT = 0.08 + 0.05 * power;
+  }
+
+  /**
+   * Muzzle flash streak along aim.
+   * @param {{ long?: boolean }} opts
+   */
+  spawnTracer(from, to, opts = {}) {
     const dir = to.clone().sub(from);
     const len = dir.length();
-    if (len < 0.5) return;
+    if (len < 0.2) return;
     dir.normalize();
-    const start = len > 22 ? from.clone().addScaledVector(dir, len - 22) : from.clone();
-    // Nudge slightly right of center so it doesn't sit on the crosshair
+    const maxLen = opts.long ? 55 : 18;
+    const start = len > maxLen ? from.clone().addScaledVector(dir, len - maxLen) : from.clone();
     const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0));
     if (right.lengthSq() > 1e-6) {
       right.normalize();
-      start.addScaledVector(right, 0.04);
+      start.addScaledVector(right, 0.03);
     }
     const geo = new THREE.BufferGeometry().setFromPoints([start, to.clone()]);
     const mat = this._lineMat.clone();
-    mat.opacity = 0.5;
+    mat.opacity = opts.long ? 0.9 : 0.55;
+    mat.color = new THREE.Color(opts.long ? 0xffe090 : 0xffe0a0);
     const line = new THREE.Line(geo, mat);
     this.group.add(line);
-    this.tracers.push({ line, mat, life: COMBAT.TRACER_LIFE * 0.75 });
+    this.tracers.push({ line, mat, life: opts.long ? 0.25 : COMBAT.TRACER_LIFE * 0.9 });
   }
 
-  /** Tiny impact spark, not a big ball. */
+  /** Tiny impact spark. */
   spawnImpact(point, tag = 'solid') {
     const col = tag === 'thin' ? 0xc0c0c0 : tag === 'target' ? 0xff5050 : 0xc8b890;
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.018, 5, 5),
+      new THREE.SphereGeometry(0.02, 5, 5),
       new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.9 })
     );
     mesh.position.copy(point);
     this.group.add(mesh);
-    this.impacts.push({ mesh, life: 0.12, max: 0.12 });
+    this.impacts.push({ mesh, life: 0.14, max: 0.14 });
   }
 
-  /**
-   * Spent brass — small, ejects to the RIGHT of the weapon, short life.
-   * @param {THREE.Vector3} origin world pos near ejection port
-   * @param {THREE.Vector3} right world right vector (camera/gun right)
-   * @param {THREE.Vector3} up world up
-   * @param {THREE.Vector3} forward world forward (−look)
-   */
   spawnCasing(origin, right, up, forward) {
-    // Cap simultaneous casings
     if (this.casings.length > 24) {
       const old = this.casings.shift();
       this.group.remove(old.mesh);
-      // geo is shared — don't dispose
     }
     const mesh = new THREE.Mesh(this._brassGeo, this._brassMat);
     mesh.position.copy(origin);
-    // Start slightly to the right of the gun, not in your face
     mesh.position.addScaledVector(right, 0.08);
     mesh.position.addScaledVector(up, 0.02);
     mesh.position.addScaledVector(forward, -0.05);
-    mesh.scale.setScalar(1);
     this.group.add(mesh);
-
-    // Velocity: hard right + slight up + mild back, not toward camera center
     const vel = new THREE.Vector3()
       .addScaledVector(right, 1.6 + Math.random() * 0.8)
       .addScaledVector(up, 0.9 + Math.random() * 0.5)
@@ -146,11 +172,13 @@ export class CombatEffects {
       'text-shadow:0 1px 2px #000', 'opacity:1', 'pointer-events:none',
     ].join(';');
     this.dmgLayer.appendChild(el);
-    this.numbers.push({ el, world: worldPos.clone(), life: COMBAT.DAMAGE_NUM_LIFE, max: COMBAT.DAMAGE_NUM_LIFE });
+    this.numbers.push({
+      el, world: worldPos.clone(), life: COMBAT.DAMAGE_NUM_LIFE, max: COMBAT.DAMAGE_NUM_LIFE,
+    });
   }
 
   update(dt) {
-    if (this._flashLight && this._flashLightT > 0) {
+    if (this._flashLightT > 0) {
       this._flashLightT -= dt;
       this._flashLight.intensity = Math.max(0, this._flashLight.intensity - dt * 70);
       if (this._flashLightT <= 0) this._flashLight.intensity = 0;
@@ -180,7 +208,6 @@ export class CombatEffects {
         this.impacts.splice(i, 1);
       }
     }
-    // Brass physics (simple)
     for (let i = this.casings.length - 1; i >= 0; i--) {
       const c = this.casings[i];
       c.life -= dt;
