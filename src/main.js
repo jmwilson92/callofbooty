@@ -28,8 +28,12 @@ import { loadWeaponLibrary } from './combat/WeaponAssets.js';
 import { LootSystem } from './loot/LootSystem.js';
 import { CombatHud } from './ui/CombatHud.js';
 import { PartyClient } from './net/Party.js';
-import { VEHICLES } from './config.js';
+import { VEHICLES, BR } from './config.js';
 import { worldBuildings } from './world/BuildingRegistry.js';
+import { BuyCacheSystem } from './world/BuyCaches.js';
+import { Loadout } from './player/Loadout.js';
+import { SpottingSystem } from './combat/Spotting.js';
+import { MatchController } from './game/Match.js';
 
 // Bootstrap and system wiring. Systems receive their dependencies here and
 // otherwise talk through the event bus.
@@ -165,8 +169,8 @@ async function start() {
   // Friends multiplayer lobby UI
   const party = new PartyClient(bus);
   party.mountUi();
-  // Map: rearm pads + gunner targeting (rooftop-aware)
-  mapView.setRearmPads(VEHICLES.HELICOPTER?.rearmPads ?? []);
+  // Map: rearm pads (live positions after terrain seat) + gunner targeting
+  mapView.setRearmPads(vehicles.getRearmPads());
   mapView.setBuildings(worldBuildings);
   mapView.onTargetSelect = (t) => {
     vehicles.setMapTarget(t);
@@ -178,13 +182,23 @@ async function start() {
   const weaponLib = await loadWeaponLibrary();
   weapons.setWeaponModels(weaponLib.byClass);
   weapons.giveWeapon('vector7', 'common'); // starter AR for testing
+  const loadout = new Loadout(weapons);
   const loot = new LootSystem(scene, terrain, bus);
   loot.setWeaponModels(weaponLib.byClass); // ground loot uses same GLB silhouettes
   const lootStats = loot.populate(WORLD.SEED ^ 0x1007);
   const lootCount = lootStats.items ?? lootStats;
+  const buyCaches = new BuyCacheSystem(scene, terrain, bus);
+  const cacheCount = buyCaches.spawn();
   const testRange = new TargetRange(scene, terrain);
   const bots = new BotSystem(scene, terrain, hash, bus, loot);
   const botCount = bots.spawn();
+  const spotting = new SpottingSystem(hash);
+  const match = new MatchController(bus, bots, party);
+  match.prepareBots();
+  if (BR.enabled) {
+    match.setHardcore(true); // no bot respawn during BR
+    match.start();
+  }
   const combatRng = mulberry32(WORLD.SEED ^ 0xc0b7);
   let prevFire = false;
   // Scratch list: live bots + optional P-key test range
@@ -197,8 +211,8 @@ async function start() {
       combatHud.setVisible(true);
       return;
     }
-    // Unlocked: map temporarily releases lock — do NOT show pause overlay
-    if (mapView.open || mapView._suppressLockClose) {
+    // Unlocked: map / shop temporarily release lock — do NOT show pause overlay
+    if (mapView.open || mapView._suppressLockClose || buyCaches.openCache) {
       hud.setLocked(false, { keepPlaying: true });
       combatHud.setVisible(true);
       return;
@@ -224,6 +238,13 @@ async function start() {
   mapView.onClose = () => {
     setTimeout(() => input.requestLock(), 30);
   };
+  bus.on('shop:open', () => {
+    // keepPlaying so pause menu doesn't appear while shopping
+    hud.setLocked(false, { keepPlaying: true });
+  });
+  bus.on('shop:close', (ev) => {
+    if (ev?.relock) setTimeout(() => input.requestLock(), 40);
+  });
 
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -242,8 +263,8 @@ async function start() {
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
     `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
     `${assetPropStats.placed} glb-props · doors ${doorCount} · elevators ${elevCount} · ` +
-    `vehicles ${vehicleCount} · rappels ${typeof rappelCount === 'object' ? `V${rappelCount.vertical}/H${rappelCount.horizontal}` : rappelCount} · loot ${lootStats.items ?? 0} items + ${lootStats.cases ?? 0} cases · bots ${botCount} · ` +
-    `road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
+    `vehicles ${vehicleCount} · rappels ${typeof rappelCount === 'object' ? `V${rappelCount.vertical}/H${rappelCount.horizontal}` : rappelCount} · loot ${lootStats.items ?? 0} items + ${lootStats.cases ?? 0} cases · caches ${cacheCount} · bots ${botCount} · ` +
+    `road segs ${roadPieces} · structures ${JSON.stringify(structureStats)} · BR ${match.phase}`
   );
 
   const loading = document.getElementById('loading');
@@ -282,45 +303,64 @@ async function start() {
           vehicles.swapSeat();
         }
 
-        // E = vehicle → rappel/zipline → loot → elevator → door
-        if (input.actionPressed('interact')) {
-          const usedVeh = vehicles.tryUse(controller);
-          if (!usedVeh) {
-            // E = one floor; Shift+E = express to roof (or down if near top)
-            const usedRappel = rappels.tryUse(controller, {
-              express: input.action('sprint'),
-            });
-            if (!usedRappel) {
-              const gotLoot = loot.tryPickup(
-                weapons,
-                controller.pos.x,
-                controller.pos.y + controller.height * 0.35,
-                controller.pos.z
-              );
-              if (!gotLoot) {
-                // Shift+E = elevator express to top (or ground if already top)
-                const usedElev = elevators.tryUse(controller, {
-                  express: input.action('sprint'),
-                });
-                if (!usedElev) {
-                  doors.tryToggle(
-                    controller.pos.x,
-                    controller.pos.y + controller.height * 0.5,
-                    controller.pos.z
-                  );
+        // Close shop without locking if Esc while shop open
+        if (buyCaches.openCache && input.actionPressed('interact')) {
+          buyCaches.closeShop();
+        } else if (input.actionPressed('interact')) {
+          // E = shop → vehicle → rappel → loot → elevator → door
+          const usedShop = buyCaches.tryUse(controller, loadout);
+          if (!usedShop) {
+            const usedVeh = vehicles.tryUse(controller);
+            if (!usedVeh) {
+              const usedRappel = rappels.tryUse(controller, {
+                express: input.action('sprint'),
+              });
+              if (!usedRappel) {
+                const gotLoot = loot.tryPickup(
+                  weapons,
+                  controller.pos.x,
+                  controller.pos.y + controller.height * 0.35,
+                  controller.pos.z
+                );
+                if (!gotLoot) {
+                  const usedElev = elevators.tryUse(controller, {
+                    express: input.action('sprint'),
+                  });
+                  if (!usedElev) {
+                    doors.tryToggle(
+                      controller.pos.x,
+                      controller.pos.y + controller.height * 0.5,
+                      controller.pos.z
+                    );
+                  }
                 }
               }
             }
           }
         }
 
-        // Riding: vehicle → rappel express → on foot
-        if (!vehicles.update(dt, controller, input, playerCam.yaw)) {
-          if (!rappels.update(dt, controller, input)) {
-            controller.tick(dt, input, playerCam.yaw);
-          }
+        // Consumables
+        if (input.actionPressed('reload') && input.action('sprint')) loadout.usePlate();
+        // F-key style: use digit keys already taken — use crouch+interact handled above
+        // Instant revive while downed: jump; slow revive: crouch
+        if (loadout.downed) {
+          if (input.actionPressed('jump')) loadout.tryRevive(true);
+          else if (input.actionPressed('crouch')) loadout.tryRevive(false);
         }
-        elevators.update(dt, vehicles.riding || rappels.riding ? null : controller);
+
+        // Riding: vehicle → rappel express → on foot
+        if (!loadout.downed) {
+          if (!vehicles.update(dt, controller, input, playerCam.yaw)) {
+            if (!rappels.update(dt, controller, input)) {
+              controller.tick(dt, input, playerCam.yaw);
+            }
+          }
+        } else {
+          // Downed: freeze movement
+          controller.vel.set(0, 0, 0);
+          vehicles.update(dt, null, input, playerCam.yaw);
+        }
+        elevators.update(dt, vehicles.riding || rappels.riding || loadout.downed ? null : controller);
 
         // Gunner map mode
         mapView.setGunnerMode(
@@ -328,9 +368,25 @@ async function start() {
           vehicles.isGunner ? vehicles.getMapTargets(bots.getLiveTargets()) : []
         );
 
+        // Aerial spotting (heli or owned UAV kit while airborne)
+        const aerial = vehicles.rideType === 'helicopter' && vehicles.active
+          ? vehicles.active
+          : null;
+        const canSpot = !!aerial || (loadout.hasUav && controller.pos.y > terrain.heightAt(controller.pos.x, controller.pos.z) + 12);
+        const spotOrigin = aerial
+          ? { x: aerial.x, y: aerial.y, z: aerial.z }
+          : (canSpot ? controller.pos : null);
+        spotting.update(dt, spotOrigin, bots.getLiveTargets(), canSpot);
+        mapView.setSpotPings(spotting.pings);
+
         // Combat: bots move/engage first so bullets test current hitboxes
         const moving = controller.speed > 0.6;
-        bots.update(dt, controller.pos, weapons);
+        if (!loadout.downed) {
+          bots.update(dt, controller.pos, weapons);
+        } else {
+          bots.update(dt, null, null);
+        }
+        match.update(dt, weapons, loadout);
         combatTargets.length = 0;
         const liveBots = bots.getLiveTargets();
         for (let i = 0; i < liveBots.length; i++) combatTargets.push(liveBots[i]);
@@ -442,7 +498,15 @@ async function start() {
       const py = controller.pos.y + controller.height * 0.5;
       const pz = controller.pos.z;
       hud.setPrompt(
-        vehicles.prompt(px, py, pz)
+        (loadout.downed
+          ? (loadout.instantRevives > 0
+            ? 'DOWNED · Space silver-bullet revive'
+            : loadout.revives > 0
+              ? 'DOWNED · C socks+ibuprofen revive'
+              : 'DOWNED · waiting…')
+          : null)
+        || buyCaches.prompt(px, py, pz)
+        || vehicles.prompt(px, py, pz)
         || loot.prompt(px, py, pz)
         || elevators.prompt(px, py, pz)
         || rappels.prompt(px, py, pz)

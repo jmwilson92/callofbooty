@@ -101,13 +101,13 @@ export function createHud() {
     <button type="button" id="hint-play" class="hint-play">CLICK TO PLAY</button>
     <table>
       <tr><td>WASD</td><td>move</td></tr>
-      <tr><td>Shift</td><td>sprint</td></tr>
-      <tr><td>Space</td><td>jump / mantle</td></tr>
+      <tr><td>Shift</td><td>sprint / heli descend</td></tr>
+      <tr><td>Space</td><td>jump / heli ascend</td></tr>
       <tr><td>C</td><td>crouch</td></tr>
-      <tr><td>E</td><td>vehicle / loot / door / elevator</td></tr>
-      <tr><td>V / T</td><td>heli gunner seat · map/free aim</td></tr>
-      <tr><td>M</td><td>tactical map</td></tr>
-      <tr><td>Esc</td><td>pause / release pointer</td></tr>
+      <tr><td>E</td><td>shop / vehicle / loot / door</td></tr>
+      <tr><td>V / T</td><td>heli gunner · map/free aim</td></tr>
+      <tr><td>M</td><td>map · gold H+ = rearm · red = UAV pings</td></tr>
+      <tr><td>Esc</td><td>pause (only way back to this screen)</td></tr>
     </table>
     <p class="err"></p>`;
   document.body.appendChild(hint);

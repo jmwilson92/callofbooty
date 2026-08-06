@@ -412,6 +412,7 @@ export class VehicleSystem {
     const range = VEHICLES.ENTER_RANGE ?? 3.4;
     for (const v of this.vehicles) {
       if (this.active === v) continue;
+      if (v.wrecked || v.destroyed) continue; // wreckage is not boardable
       const d = Math.hypot(v.x - px, v.z - pz);
       const pad = v.type === 'helicopter' ? (v.crashing ? 3.5 : 1.5) : 0;
       if (d > range + pad) continue;
@@ -428,6 +429,13 @@ export class VehicleSystem {
     return best;
   }
 
+  /** Pads for minimap / full map markers. */
+  getRearmPads() {
+    return this._rearmPads.map((p) => ({
+      id: p.id, name: p.name, x: p.x, z: p.z, r: p.r, y: p.y,
+    }));
+  }
+
   tryUse(controller) {
     if (this.active) {
       this._dismount(controller);
@@ -435,15 +443,17 @@ export class VehicleSystem {
     }
     const v = this.findNear(controller.pos.x, controller.pos.y, controller.pos.z);
     if (!v) return false;
+    if (v.wrecked || v.destroyed) return false;
     this._mount(v, controller);
     return true;
   }
 
   _mount(v, controller) {
+    if (v.wrecked || v.destroyed) return;
     this.active = v;
-    // Passenger / new pilot takes over — cancel unmanned crash
+    // Passenger / new pilot takes over — cancel unmanned crash (only if still flyable)
     v.crashing = false;
-    v.wrecked = false;
+    // Do not clear wrecked — already blocked above
     v.speed = 0;
     if (v.type === 'helicopter') {
       v.vy = Math.min(0, v.vy * 0.35);
@@ -998,21 +1008,41 @@ export class VehicleSystem {
     v.vz = 0;
     v.crashing = false;
     v.wrecked = true;
+    v.destroyed = true; // permanent — never board again
     v.wreckT = 0;
+    v.rocketsLeft = 0;
+    v.rocketsRight = 0;
+    v.flares = 0;
+    if (this.active === v) this.active = null;
     if (v.root) {
       v.root.position.set(v.x, v.y, v.z);
-      v.root.rotation.x = 0.15 + Math.min(0.4, speed * 0.01);
-      v.root.rotation.z = (Math.random() - 0.5) * 0.35;
+      v.root.rotation.x = 0.25 + Math.min(0.5, speed * 0.012);
+      v.root.rotation.z = (Math.random() - 0.5) * 0.55;
+      // Charred wreckage look
+      v.root.traverse((o) => {
+        if (o.isMesh && o.material) {
+          const m = o.material.clone?.() || o.material;
+          if (m.color) m.color.setHex(0x1a1614);
+          if (m.emissive) {
+            m.emissive.setHex(0x2a1008);
+            m.emissiveIntensity = 0.35;
+          }
+          if (m.metalness != null) m.metalness = 0.15;
+          if (m.roughness != null) m.roughness = 0.92;
+          o.material = m;
+        }
+      });
+      // Hide rotors / tubes on wreck
+      if (v.root.userData.rotor) v.root.userData.rotor.visible = false;
+      if (v.root.userData.tailRotor) v.root.userData.tailRotor.visible = false;
     }
     const pt = new THREE.Vector3(v.x, v.y + 0.5, v.z);
-    this.effects?.spawnExplosion?.(pt, 2.1 + Math.min(1.2, speed * 0.03));
-    this.effects?.spawnMuzzleBloom?.(pt, 4.5 + Math.min(2, speed * 0.04));
+    this.effects?.spawnExplosion?.(pt, 2.6 + Math.min(1.4, speed * 0.035));
+    this.effects?.spawnMuzzleBloom?.(pt, 5.5 + Math.min(2, speed * 0.04));
     this.effects?.spawnImpact?.(pt, 'solid');
-    // Splash damage near crash
-    const splash = 8;
-    const dmg = 40 + Math.min(80, speed * 1.2);
-    // Damage is applied when rockets know targets; crash uses bus for future hooks
-    this.bus?.emit?.('vehicle:crash', { x: v.x, y: v.y, z: v.z, speed, splash, dmg });
+    const splash = 10;
+    const dmg = 55 + Math.min(90, speed * 1.3);
+    this.bus?.emit?.('vehicle:crash', { x: v.x, y: v.y, z: v.z, speed, splash, dmg, destroyed: true });
   }
 
   _sanitizeVehicle(v) {
@@ -1807,10 +1837,10 @@ export class VehicleSystem {
       v.vz *= maxSp / hsp;
     }
 
-    // Space = climb, C = descend
+    // Space = climb, Shift = descend (C stays crouch on foot only)
     let climbWish = 0;
     if (input?.action?.('jump')) climbWish += 1;
-    if (input?.action?.('crouch')) climbWish -= 1;
+    if (input?.action?.('sprint')) climbWish -= 1;
     v.vy += climbWish * climb * dt;
     if (climbWish === 0) v.vy *= Math.exp(-1.8 * dt);
     v.vy = THREE.MathUtils.clamp(v.vy, -climb * 1.05, climb);
@@ -1916,15 +1946,15 @@ export class VehicleSystem {
           const mode = v.aimMode === 'map' ? 'MAP' : 'FREE';
           return `${seat} [${mode}] · T mode · M map-lock · LMB fire ${volleys}/8 · G flares (${v.flares}) · X ${ecm} · V pilot${tgt}${rearm}`;
         }
-        return `${seat} · fly WASD Space/C · V gunner · E bail · rkt ${volleys}/8${rearm}`;
+        return `${seat} · WASD · Space↑ Shift↓ · V gunner · E bail · rkt ${volleys}/8${rearm}`;
       }
       return 'E · Exit motorcycle';
     }
     const v = this.findNear(px, py, pz);
     if (!v) return null;
     if (v.type === 'helicopter') {
+      if (v.wrecked || v.destroyed) return null; // wreckage — no prompt
       if (v.crashing) return 'E · Take over (falling!)';
-      if (v.wrecked) return 'E · Board wrecked heli';
       return 'E · Board helicopter';
     }
     return 'E · Ride motorcycle';

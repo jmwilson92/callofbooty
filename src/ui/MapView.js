@@ -464,6 +464,8 @@ export class MapView {
     });
 
     this._drawBuildings(ctx, toPx, { minPx: 1.5, stroke: false, alpha: 0.55 });
+    this._drawRearmPads(ctx, toPx, false);
+    this._drawSpotPings(ctx, toPx, false);
     this._drawVehicles(ctx, toPx, 4.5 * dpr, false);
     this._drawPois(ctx, toPx, 3.2 * dpr, false);
     this._drawPlayer(ctx, side / 2, side / 2, yaw, 7 * dpr);
@@ -527,20 +529,8 @@ export class MapView {
       ctx.stroke();
     }
 
-    // Rearm pads
-    for (const pad of (this._rearmPads || [])) {
-      const { px, py } = toPx(pad.x, pad.z);
-      ctx.strokeStyle = 'rgba(200,180,40,0.85)';
-      ctx.lineWidth = 1.5 * dpr;
-      ctx.beginPath();
-      ctx.arc(px, py, Math.max(6, (pad.r / this._viewWorldSize()) * side * 0.5), 0, Math.PI * 2);
-      ctx.stroke();
-      if (this.zoom >= 1.5) {
-        ctx.fillStyle = 'rgba(230,200,80,0.9)';
-        ctx.font = `${Math.round(10 * dpr)}px sans-serif`;
-        ctx.fillText(pad.name || 'REARM', px + 6 * dpr, py - 4 * dpr);
-      }
-    }
+    this._drawRearmPads(ctx, toPx, true);
+    this._drawSpotPings(ctx, toPx, true);
 
     const p = toPx(pos.x, pos.z);
     this._drawPlayer(ctx, p.px, p.py, yaw, 8 * dpr * Math.min(1.6, Math.sqrt(this.zoom)));
@@ -560,6 +550,75 @@ export class MapView {
 
   setRearmPads(pads) {
     this._rearmPads = pads || [];
+  }
+
+  /**
+   * Aerial / UAV LOS pings: [{ x, z, life, max }]
+   * Call each frame; list is owned by the game loop.
+   */
+  setSpotPings(pings) {
+    this._spotPings = pings || [];
+  }
+
+  _drawRearmPads(ctx, toPx, withLabels) {
+    const pads = this._rearmPads;
+    if (!pads?.length) return;
+    const dpr = this.fullDpr || this.miniDpr || 1;
+    for (const pad of pads) {
+      const { px, py } = toPx(pad.x, pad.z);
+      if (px < -30 || py < -30 || px > 5000 || py > 5000) continue;
+      // Gold filled pad so military rearm is obvious on both maps
+      const rad = withLabels
+        ? Math.max(8, Math.min(28, ((pad.r || 20) / Math.max(40, this._viewWorldSize())) * (this.fullSide || 400)))
+        : 5 * dpr;
+      ctx.fillStyle = 'rgba(230, 190, 40, 0.35)';
+      ctx.strokeStyle = 'rgba(255, 210, 60, 0.95)';
+      ctx.lineWidth = Math.max(1.5, 2 * dpr);
+      ctx.beginPath();
+      ctx.arc(px, py, rad, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // H mark
+      ctx.fillStyle = '#fff2a0';
+      ctx.font = `bold ${Math.round((withLabels ? 11 : 9) * dpr)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('H+', px, py);
+      if (withLabels) {
+        ctx.fillStyle = 'rgba(255, 220, 100, 0.95)';
+        ctx.font = `${Math.round(10 * dpr)}px sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.fillText(pad.name || 'REARM', px + rad + 4 * dpr, py);
+      }
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  _drawSpotPings(ctx, toPx, withLabels) {
+    const list = this._spotPings;
+    if (!list?.length) return;
+    const dpr = this.fullDpr || this.miniDpr || 1;
+    const t = performance.now() * 0.001;
+    for (const p of list) {
+      const { px, py } = toPx(p.x, p.z);
+      if (px < -20 || py < -20 || px > 5000 || py > 5000) continue;
+      const u = p.max > 0 ? p.life / p.max : 1;
+      const pulse = 0.65 + 0.35 * Math.sin(t * 8 + (p.x + p.z) * 0.01);
+      const r = (withLabels ? 6 : 4.5) * dpr * (0.85 + (1 - u) * 0.4);
+      ctx.strokeStyle = `rgba(255, 70, 70, ${0.9 * u * pulse})`;
+      ctx.fillStyle = `rgba(255, 40, 40, ${0.45 * u})`;
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Radar ring
+      ctx.beginPath();
+      ctx.arc(px, py, r * (1.6 + (1 - u)), 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255, 120, 80, ${0.5 * u})`;
+      ctx.stroke();
+    }
   }
 
   /**

@@ -470,7 +470,13 @@ export class BotSystem {
             });
           }
         }
-        if (bot.respawnT <= 0) this._respawn(bot);
+        if (bot.respawnT <= 0) {
+          if (bot.noRespawn) {
+            bot.mesh.visible = false;
+            continue;
+          }
+          this._respawn(bot);
+        }
         continue;
       }
 

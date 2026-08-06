@@ -573,13 +573,61 @@ export const VEHICLES = {
     flareDuration: 2.8, // how long a cloud spoofs seekers
     flareRadius: 28,
     ecmDefaultAuto: true,
-    // Rearm at military pads (missiles + flares; fuel later)
+    // Rearm at military POIs (coords match POIS list — missiles + flares; fuel later)
     rearmPads: [
-      { id: 'coronado_nas', name: 'Coronado NAS', x: -210, z: 500, r: 22 },
-      { id: 'mcrd', name: 'MCRD Depot', x: 30, z: 180, r: 18 },
+      { id: 'coronado', name: 'Coronado NAS', x: -200, z: 520, r: 28 },
+      { id: 'mcrd', name: 'MCRD Depot', x: 30, z: 180, r: 24 },
     ],
     rearmHoverTime: 2.2, // s skids on pad before rearm completes
   },
+};
+
+/** Aerial spotting (heli / UAV): reveal people with LOS under the craft. */
+export const UAV = {
+  // Horizontal radius under heli that can be pinged
+  spotRadius: 55,
+  // Max vertical distance below the craft
+  spotDepth: 120,
+  // How long a ping stays on the minimap (s)
+  pingTtl: 2.8,
+  // Refresh while continuously in LOS
+  pingInterval: 0.35,
+};
+
+/** Buy caches — black-market / supply shops across the map. */
+export const BUY_CACHES = {
+  count: 14,
+  interactRange: 2.8,
+  startCash: 2500,
+  // Catalog id → { label, cost, kind, ... }
+  catalog: {
+    uav: { label: 'UAV recon kit', cost: 800, kind: 'uav' },
+    ar: { label: 'Assault rifle', cost: 450, kind: 'weapon', weaponId: 'vector7', rarity: 'uncommon' },
+    smg: { label: 'SMG', cost: 350, kind: 'weapon', weaponId: 'pike', rarity: 'common' },
+    sniper: { label: 'Sniper', cost: 650, kind: 'weapon', weaponId: 'longshot', rarity: 'rare' },
+    plates: { label: 'Sappi plates (×2)', cost: 200, kind: 'plates', amount: 2 },
+    flak: { label: 'Flak jacket', cost: 400, kind: 'armor', level: 2 },
+    kevlar: { label: 'Kevlar vest', cost: 600, kind: 'armor', level: 3 },
+    grenade: { label: 'Frag grenade', cost: 150, kind: 'grenade', amount: 1 },
+    smoke: { label: 'Smoke grenade', cost: 100, kind: 'smoke', amount: 1 },
+    stim: { label: 'Stim shot', cost: 175, kind: 'stim', amount: 1 },
+    socks: { label: 'Socks + ibuprofen (revive)', cost: 300, kind: 'revive', amount: 1 },
+    silver: { label: 'Silver bullets (instant revive)', cost: 750, kind: 'instant_revive', amount: 1 },
+  },
+};
+
+/** Battle Royale match settings (friends + bot squads). */
+export const BR = {
+  enabled: true,
+  // Human squad size for party
+  teamSize: 4,
+  // Enemy bot squads in the match
+  botSquads: 8,
+  squadSizeMin: 4,
+  squadSizeMax: 5,
+  // Soft circle shrink later — for now just match state
+  matchDuration: 1200,
+  startingCash: 2500,
 };
 
 /** Friends multiplayer (small lobby). */
