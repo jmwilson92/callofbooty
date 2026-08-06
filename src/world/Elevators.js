@@ -161,33 +161,6 @@ export class ElevatorSystem {
     return py >= car.y - 0.5 && py <= car.y + 2.6;
   }
 
-  /** Brief nudge toward the open door after arrival so jambs don't trap the capsule. */
-  _exitAssist(car, controller, dt) {
-    if (!controller || !car.justArrived) return;
-    car.arriveT = (car.arriveT || 0) + dt;
-    // Short window only — long enough to clear the threshold, not force you out
-    if (car.arriveT > 0.45) {
-      car.justArrived = false;
-      car.arriveT = 0;
-      return;
-    }
-    const px = controller.pos.x;
-    const pz = controller.pos.z;
-    if (!this.playerInCabin(car, px, controller.pos.y, pz)) {
-      car.justArrived = false;
-      car.arriveT = 0;
-      return;
-    }
-    // Keep feet on the cabin deck during the settle
-    controller.pos.y = car.y + 0.04;
-    controller.vel.y = 0;
-    controller.grounded = true;
-    // Soft push toward hallway through the open face
-    const push = 2.4 * dt;
-    controller.pos.x += car.exitX * push;
-    controller.pos.z += car.exitZ * push;
-  }
-
   findNear(px, py, pz) {
     let best = null;
     let bestD = Infinity;
@@ -268,16 +241,13 @@ export class ElevatorSystem {
           this._setCarY(car, car.targetY);
           car.floor = car.targetFloor;
           car.moving = false;
-          car.justArrived = true;
-          car.arriveT = 0;
+          car.justArrived = false;
           car.ridePlayer = false;
+          // Only settle feet Y — never push XZ (that felt like a drag each floor)
           if (controller && this.playerInCabin(car, controller.pos.x, controller.pos.y, controller.pos.z)) {
             controller.pos.y = car.y + 0.04;
             controller.vel.y = 0;
             controller.grounded = true;
-            // On arrival, start slightly toward the door so the first step clears the jamb
-            controller.pos.x += car.exitX * 0.25;
-            controller.pos.z += car.exitZ * 0.25;
           }
         } else {
           const step = Math.sign(dy) * speed * dt;
@@ -300,9 +270,6 @@ export class ElevatorSystem {
         controller.grounded = true;
         controller.coyote = 0.12;
       }
-
-      // After stop: brief assist out the door (top floor was worst for jambs)
-      if (!car.moving) this._exitAssist(car, controller, dt);
     }
   }
 

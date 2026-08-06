@@ -407,7 +407,7 @@ export const BUILDINGS = {
   DOOR_HEIGHT: 2.2,
   WINDOW_SILL: 0.9,
   WINDOW_HEIGHT: 1.3,
-  STAIR_WIDTH: 1.4,
+  STAIR_WIDTH: 1.55, // clear tread width (uniform); capsule r=0.4 needs ≥1.3
   STAIR_STEPS_PER_FLOOR: 14,
   // Stairs are a thick stringer rather than solid columns from the floor, so
   // the flight above leaves real head clearance over the flight below.

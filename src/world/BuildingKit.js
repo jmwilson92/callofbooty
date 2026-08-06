@@ -148,16 +148,16 @@ export function makeBuilding(sink, opts) {
   const floorColor = BUILDINGS.FLOOR_COLOR;
   const ys = levelHeights(floors);
 
-  // Stair core in the +X/+Z corner, sized to fit small footprints too.
-  const coreW = Math.min(3.8, w * 0.42);
-  const coreD = Math.min(5.0, d * 0.45);
-  const sx0 = x + w - coreW - 0.4;
-  const sx1 = x + w - 0.4;
+  // Stair run: fixed clear width (≥ capsule diameter + margin) every floor
+  const stairW = Math.min(Math.max(BUILDINGS.STAIR_WIDTH ?? 1.55, 1.5), Math.max(1.5, w * 0.38));
+  const coreD = Math.min(5.4, Math.max(4.2, d * 0.48));
+  const sx0 = x + w - stairW - 0.45;
+  const sx1 = x + w - 0.45;
   const sz0 = z + d - coreD - 0.4;
   const sz1 = z + d - 0.4;
-  const landing = 1.3;
+  const landing = 1.4;
   const runZ1 = sz1 - landing;
-  const hole = { x0: sx0 - 0.1, z0: sz0 - 0.1, x1: sx1 + 0.1, z1: runZ1 + 0.1 };
+  const hole = { x0: sx0 - 0.12, z0: sz0 - 0.12, x1: sx1 + 0.12, z1: runZ1 + 0.12 };
 
   // Ground slab -- solid, no hole (nothing below it). Lifted clear of the
   // terrain so the two surfaces are not coplanar.

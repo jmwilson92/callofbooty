@@ -677,33 +677,46 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
 }
 
 /**
- * Interior switchback stair core — side-by-side lanes (never stacked).
- * Builds flights for every story PLUS a final run onto the roof deck with
- * a clear walk-out pad onto the roof (not sealed by bulkhead walls).
+ * Interior switchback stair core — two equal-width lanes (never stacked).
+ * Same lane width on every floor + roof flight. Clear walk-out onto the roof.
  * Returns a hole rect to punch through floor + roof slabs.
  */
 function addInteriorStairs(sink, x, z, w, d, baseY, floors, floorH, elevHole) {
-  let sx0 = x + 0.55;
-  let sz0 = z + 0.55;
-  const coreW = Math.min(3.8, Math.max(3.2, w * 0.32));
-  const landD = 1.15;
-  const flightLen = 2.7;
+  // Fixed geometry so every flight is the same width (capsule r=0.4 needs ≥1.3 clear)
+  const LANE_W = 1.55;
+  const GAP = 0.28; // middle gap between switchback lanes
+  const EDGE = 0.14; // outer margin / rail space
+  const coreW = EDGE * 2 + LANE_W * 2 + GAP;
+  const landD = 1.45;
+  const flightLen = 3.1;
   const coreD = landD * 2 + flightLen;
+
+  // Prefer opposite corner from elevator so paths don't collide
+  let sx0 = x + 0.5;
+  let sz0 = z + 0.5;
   if (elevHole) {
     const elevCX = (elevHole.x0 + elevHole.x1) * 0.5;
     const elevCZ = (elevHole.z0 + elevHole.z1) * 0.5;
-    if (elevCX < x + w * 0.5) sx0 = x + w - coreW - 0.55;
-    else sx0 = x + 0.55;
-    if (elevCZ < z + d * 0.5) sz0 = z + d - coreD - 0.55;
-    else sz0 = z + 0.55;
+    if (elevCX < x + w * 0.5) sx0 = x + w - coreW - 0.5;
+    else sx0 = x + 0.5;
+    if (elevCZ < z + d * 0.5) sz0 = z + d - coreD - 0.5;
+    else sz0 = z + 0.5;
+  } else {
+    // Default NE corner
+    sx0 = x + w - coreW - 0.5;
+    sz0 = z + d - coreD - 0.5;
   }
+  // Clamp inside footprint
+  sx0 = Math.max(x + 0.4, Math.min(sx0, x + w - coreW - 0.4));
+  sz0 = Math.max(z + 0.4, Math.min(sz0, z + d - coreD - 0.4));
+
   const sx1 = sx0 + coreW;
   const sz1 = sz0 + coreD;
-  const laneW = Math.min(1.4, (coreW - 0.3) * 0.48);
-  const laneAx0 = sx0 + 0.12;
-  const laneAx1 = laneAx0 + laneW;
-  const laneBx0 = sx1 - 0.12 - laneW;
-  const laneBx1 = laneBx0 + laneW;
+  // Both lanes identical width every floor
+  const laneAx0 = sx0 + EDGE;
+  const laneAx1 = laneAx0 + LANE_W;
+  const laneBx1 = sx1 - EDGE;
+  const laneBx0 = laneBx1 - LANE_W;
 
   // Direction from stair core toward building center (roof exit)
   const scx = (sx0 + sx1) * 0.5;
@@ -712,38 +725,34 @@ function addInteriorStairs(sink, x, z, w, d, baseY, floors, floorH, elevHole) {
   const bcz = z + d * 0.5;
   const toCx = bcx - scx;
   const toCz = bcz - scz;
-  // Prefer exit on the side facing center
   const exitSouth = Math.abs(toCz) >= Math.abs(toCx) ? toCz < 0 : false;
   const exitNorth = Math.abs(toCz) >= Math.abs(toCx) ? toCz >= 0 : false;
   const exitWest = Math.abs(toCx) > Math.abs(toCz) ? toCx < 0 : false;
   const exitEast = Math.abs(toCx) > Math.abs(toCz) ? toCx >= 0 : false;
 
   const maxF = floors; // last flight tops at roof
-  const steps = Math.max(10, Math.ceil(floorH / 0.34));
-  const rise = floorH / steps;
-  const treadH = 0.11;
+  const steps = Math.max(10, Math.ceil(floorH / 0.32));
+  const treadH = 0.12;
   const roofY = baseY + floors * floorH;
-  // Match roof slab top (slab ends at roofY + 0.16)
   const roofDeckY = roofY + 0.16;
 
   for (let f = 0; f <= maxF; f++) {
     const y = f < maxF ? baseY + f * floorH : roofDeckY;
-    // Shared landings
-    sink.addSpan(sx0, y, sz0, sx1, y + 0.13, sz0 + landD, C.concrete);
-    sink.addSpan(sx0, y, sz1 - landD, sx1, y + 0.13, sz1, C.concrete);
+    // Full-width landings (same size every story)
+    sink.addSpan(sx0, y, sz0, sx1, y + 0.14, sz0 + landD, C.concrete);
+    sink.addSpan(sx0, y, sz1 - landD, sx1, y + 0.14, sz1, C.concrete);
 
     if (f >= maxF) break;
 
     const useA = f % 2 === 0;
     const x0 = useA ? laneAx0 : laneBx0;
     const x1 = useA ? laneAx1 : laneBx1;
-    // Last flight ends at roof deck height, not nominal floorH above top floor
     const yBot = baseY + f * floorH;
     const yTop = f === maxF - 1 ? roofDeckY : yBot + floorH;
     const flightRise = yTop - yBot;
     const stepRise = flightRise / steps;
-    const zStart = useA ? sz0 + landD - 0.04 : sz1 - landD + 0.04;
-    const zEnd = useA ? sz1 - landD + 0.04 : sz0 + landD - 0.04;
+    const zStart = useA ? sz0 + landD - 0.02 : sz1 - landD + 0.02;
+    const zEnd = useA ? sz1 - landD + 0.02 : sz0 + landD - 0.02;
     const stepRun = (zEnd - zStart) / steps;
     for (let k = 0; k < steps; k++) {
       const top = yBot + (k + 1) * stepRise;
@@ -755,37 +764,33 @@ function addInteriorStairs(sink, x, z, w, d, baseY, floors, floorH, elevHole) {
     }
   }
 
-  // Outer rails stop below roof so they don't cage the exit
-  sink.addSpan(sx0, baseY + 0.13, sz0, sx0 + 0.05, roofY - 0.2, sz1, C.metal, 'thin');
-  sink.addSpan(sx1 - 0.05, baseY + 0.13, sz0, sx1, roofY - 0.2, sz1, C.metal, 'thin');
+  // Thin outer rails only (stop below roof so exit is open)
+  sink.addSpan(sx0, baseY + 0.14, sz0, sx0 + 0.04, roofY - 0.25, sz1, C.metal, 'thin');
+  sink.addSpan(sx1 - 0.04, baseY + 0.14, sz0, sx1, roofY - 0.25, sz1, C.metal, 'thin');
 
-  // Roof exit pad — extends from stair landings onto the solid roof deck
-  const exitLen = 1.8;
+  // Roof exit pad
+  const exitLen = 2.0;
   if (exitSouth || (!exitNorth && !exitEast && !exitWest)) {
-    // Walk out south of stair well onto roof
-    sink.addSpan(sx0 - 0.15, roofDeckY, sz0 - exitLen, sx1 + 0.15, roofDeckY + 0.12, sz0 + 0.1, C.concrete);
+    sink.addSpan(sx0 - 0.2, roofDeckY, sz0 - exitLen, sx1 + 0.2, roofDeckY + 0.12, sz0 + 0.1, C.concrete);
   }
   if (exitNorth) {
-    sink.addSpan(sx0 - 0.15, roofDeckY, sz1 - 0.1, sx1 + 0.15, roofDeckY + 0.12, sz1 + exitLen, C.concrete);
+    sink.addSpan(sx0 - 0.2, roofDeckY, sz1 - 0.1, sx1 + 0.2, roofDeckY + 0.12, sz1 + exitLen, C.concrete);
   }
   if (exitWest) {
-    sink.addSpan(sx0 - exitLen, roofDeckY, sz0 - 0.15, sx0 + 0.1, roofDeckY + 0.12, sz1 + 0.15, C.concrete);
+    sink.addSpan(sx0 - exitLen, roofDeckY, sz0 - 0.2, sx0 + 0.1, roofDeckY + 0.12, sz1 + 0.2, C.concrete);
   }
   if (exitEast) {
-    sink.addSpan(sx1 - 0.1, roofDeckY, sz0 - 0.15, sx1 + exitLen, roofDeckY + 0.12, sz1 + 0.15, C.concrete);
+    sink.addSpan(sx1 - 0.1, roofDeckY, sz0 - 0.2, sx1 + exitLen, roofDeckY + 0.12, sz1 + 0.2, C.concrete);
   }
 
-  // Light bulkhead posts only (no sealed walls) — marks the hatch without trapping you
-  const bh = 1.1;
+  // Corner posts only (no sealed bulkhead)
+  const bh = 1.0;
   post(sink, sx0, roofDeckY, sz0, bh, 0.12, C.metalLite);
   post(sink, sx1 - 0.12, roofDeckY, sz0, bh, 0.12, C.metalLite);
   post(sink, sx0, roofDeckY, sz1 - 0.12, bh, 0.12, C.metalLite);
   post(sink, sx1 - 0.12, roofDeckY, sz1 - 0.12, bh, 0.12, C.metalLite);
-  // Thin rail around well (gaps for exit)
-  sink.addSpan(sx0, roofDeckY, sz0, sx1, roofDeckY + 0.9, sz0 + 0.06, C.metal, 'thin');
-  sink.addSpan(sx0, roofDeckY, sz1 - 0.06, sx1, roofDeckY + 0.9, sz1, C.metal, 'thin');
 
-  return { x0: sx0 - 0.08, z0: sz0 - 0.08, x1: sx1 + 0.08, z1: sz1 + 0.08 };
+  return { x0: sx0 - 0.1, z0: sz0 - 0.1, x1: sx1 + 0.1, z1: sz1 + 0.1 };
 }
 
 /**
@@ -880,33 +885,39 @@ function addMainEntrance(sink, x, z, w, d, baseY, terrain = null) {
 }
 
 /**
- * Attach entrances + optional interior elevator + varied exterior access.
- * accessMode: 0 fire escape, 1 ladder, 2 open stairs, -1 auto from rng.
+ * Attach entrances + optional interior elevator + optional exterior access.
+ * accessMode: 0 fire escape, 1 ladder, 2 open stairs, 3 none, -1 auto from rng.
  * includeElevator: set false for solid makeBuilding shells (they use kit stairs).
+ * exteriorAccess: false for city towers (interior stairs + elevators only).
  * Returns elevator hole for floor slabs (or null).
  */
-export function addBuildingAccess(sink, x, z, w, d, baseY, floors, floorH, rng, accessMode = -1, includeElevator = true, terrain = null) {
+export function addBuildingAccess(
+  sink, x, z, w, d, baseY, floors, floorH, rng,
+  accessMode = -1, includeElevator = true, terrain = null, exteriorAccess = true
+) {
   addMainEntrance(sink, x, z, w, d, baseY, terrain);
   let elevHole = null;
   if (includeElevator && floors >= 3) {
     elevHole = addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng);
   }
-  // Exterior access: fire escape or ladder only (open multi-story stairs removed —
-  // they grew into neighboring lots). Rare short entry stoop on low-rises.
+  // City / tall buildings: no exterior fire escapes or ladders
+  if (!exteriorAccess || accessMode === 3 || floors >= 6) return elevHole;
+
   let mode = accessMode;
   if (mode < 0) {
-    if (floors <= 4 && rng() > 0.7) mode = 2; // short stoop
+    if (floors <= 3 && rng() > 0.75) mode = 2; // rare short stoop on low-rises only
+    else if (rng() > 0.55) mode = 3; // often none even on low buildings
     else mode = Math.floor(rng() * 2); // 0 fire escape, 1 ladder
   }
   if (mode === 0) addFireEscapeStairs(sink, x, z, w, d, baseY, floors, floorH);
   else if (mode === 1) addLadder(sink, x, z, w, d, baseY, floors, floorH);
-  else addOpenStaircase(sink, x, z, w, d, baseY, floors, floorH);
+  else if (mode === 2) addOpenStaircase(sink, x, z, w, d, baseY, floors, floorH);
   return elevHole;
 }
 
 /**
- * Hollow skyline tower: exterior shell walls + floor slabs with elevator hole,
- * interior elevator, exterior fire escape / ladder / stairs.
+ * Hollow skyline tower: exterior shell + floor slabs, interior elevator + stairs.
+ * No exterior fire escapes / ladders (city skyline = internal circulation only).
  */
 export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain = null) {
   const fCount = Math.min(24, floors ?? (8 + Math.floor(rng() * 16)));
@@ -1009,13 +1020,8 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain
     sink.addSpan(x - 0.04, y, z + d - 0.08, x + bodyW + 0.04, y + 0.1, z + d + 0.04, band);
   }
 
-  // Exterior street entrance (outside the facade) — steps follow street grade
+  // Exterior street entrance only — no outside stairs/ladders on skyline towers
   addMainEntrance(sink, x, z, bodyW, d, seat, terrain);
-
-  // Exterior vertical access — fire escape or ladder only on towers
-  const mode = Math.floor(rng() * 2);
-  if (mode === 0) addFireEscapeStairs(sink, x, z, bodyW, d, seat, fCount, floorH);
-  else addLadder(sink, x, z, bodyW, d, seat, fCount, floorH);
 
   // Low parapet (gap on +X for ladder hop-on)
   sink.addSpan(x + bodyW * 0.08, roof + 0.16, z + d * 0.08, x + bodyW * 0.96, roof + 0.55, z + d * 0.08 + 0.2, C.concrete);
@@ -1061,7 +1067,7 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
 
   if (variant === 0) {
     makeBuilding(sink, { x, z, w, d, floors, baseY: seat, color: col, rng });
-    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
+    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, 3, false, terrain, false);
   } else if (variant === 1) {
     makeBuilding(sink, { x, z, w: w + 6, d: d + 6, floors: 3, baseY: seat, color: C.concrete, rng });
     makeBuilding(sink, {
@@ -1069,14 +1075,14 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
       baseY: seat + BUILDINGS.GROUND_FLOOR_HEIGHT + 2 * BUILDINGS.FLOOR_HEIGHT,
       color: col, rng,
     });
-    addBuildingAccess(sink, x, z, w + 6, d + 6, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
+    addBuildingAccess(sink, x, z, w + 6, d + 6, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, 3, false, terrain, false);
   } else {
     makeBuilding(sink, { x, z, w: w * 0.55, d, floors, baseY: seat, color: col, rng });
     makeBuilding(sink, {
       x: x + w * 0.6, z, w: w * 0.45, d: d * 0.85,
       floors: floors - 2, baseY: seat, color: pick(rng, [C.glassDark, C.white, col]), rng,
     });
-    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
+    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, 3, false, terrain, false);
   }
 
   const roof = seat + BUILDINGS.GROUND_FLOOR_HEIGHT + (floors - 1) * BUILDINGS.FLOOR_HEIGHT;
@@ -1191,7 +1197,8 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
           color: pick(rng, [C.glass, C.white, C.cream, C.brick, C.gray]),
           rng,
         });
-        addBuildingAccess(sink, tx, tz, tw, td, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
+        // Downtown mid-rises: entrance only, no exterior fire escapes
+        addBuildingAccess(sink, tx, tz, tw, td, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, 3, false, terrain, false);
       } else {
         placeSkylineTower(sink, tx, tz, seatY, rng, floors, terrain);
       }
