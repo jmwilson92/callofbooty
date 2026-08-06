@@ -17,6 +17,11 @@ import { Controller } from './player/Controller.js';
 import { PlayerCamera } from './player/Camera.js';
 import { DebugOverlay, createHud } from './ui/Debug.js';
 import { MapView } from './ui/MapView.js';
+import { CombatEffects } from './combat/Effects.js';
+import { WeaponSystem } from './combat/WeaponSystem.js';
+import { TargetRange } from './combat/Targets.js';
+import { LootSystem } from './loot/LootSystem.js';
+import { CombatHud } from './ui/CombatHud.js';
 
 // Bootstrap and system wiring. Systems receive their dependencies here and
 // otherwise talk through the event bus.
@@ -115,12 +120,24 @@ async function start() {
   const playerCam = new PlayerCamera(window.innerWidth / window.innerHeight);
   const input = new Input(renderer.domElement, bus);
   const hud = createHud();
+  const combatHud = new CombatHud();
   const debug = new DebugOverlay(renderer);
   const mapView = new MapView(terrain);
   const clock = new Clock();
 
+  // Combat + loot
+  const effects = new CombatEffects(scene, playerCam.camera);
+  const weapons = new WeaponSystem(playerCam, hash, bus, effects);
+  weapons.giveWeapon('vector7', 'common'); // starter AR for testing
+  const loot = new LootSystem(scene, terrain, bus);
+  const lootCount = loot.populate(WORLD.SEED ^ 0x1007);
+  const testRange = new TargetRange(scene, terrain);
+  const combatRng = mulberry32(WORLD.SEED ^ 0xc0b7);
+  let prevFire = false;
+
   bus.on('pointerlock', (locked) => {
     hud.setLocked(locked);
+    combatHud.setVisible(locked);
     // Closing pointer lock with Esc should also dismiss the tactical map.
     if (!locked && mapView.open) mapView.setOpen(false);
   });
@@ -129,6 +146,7 @@ async function start() {
     hud.setError('Pointer lock was blocked by the browser. Click again in a moment.');
   });
   hud.setLocked(false);
+  combatHud.setVisible(false);
 
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -146,7 +164,7 @@ async function start() {
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
     `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
     `${assetPropStats.placed} glb-props · doors ${doorCount} · elevators ${elevCount} · ` +
-    `road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
+    `loot ${lootCount} · road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
   );
 
   const loading = document.getElementById('loading');
@@ -166,31 +184,57 @@ async function start() {
 
     if (input.actionPressed('debug')) debug.toggle();
     if (input.actionPressed('map')) mapView.toggle();
+    if (input.actionPressed('testRange') && input.locked) {
+      testRange.toggle(controller.pos);
+    }
 
     clock.advance((dt) => {
       controller.ads = input.locked && input.buttons.has(2) && !mapView.open;
       // Allow movement while map is open, but not while pointer is unlocked.
       if (input.locked && !mapView.open) {
-        // E = elevator first (if near), else door
+        // Weapon hotkeys
+        if (input.actionPressed('weapon1')) weapons.selectSlot(0);
+        if (input.actionPressed('weapon2')) weapons.selectSlot(1);
+        if (input.actionPressed('quickSwap')) weapons.quickSwap();
+        if (input.actionPressed('reload')) weapons.startReload();
+
+        // E = loot → elevator → door
         if (input.actionPressed('interact')) {
-          const usedElev = elevators.tryUse(controller);
-          if (!usedElev) {
-            doors.tryToggle(
-              controller.pos.x,
-              controller.pos.y + controller.height * 0.5,
-              controller.pos.z
-            );
+          const gotLoot = loot.tryPickup(
+            weapons, controller.pos.x, controller.pos.y, controller.pos.z
+          );
+          if (!gotLoot) {
+            const usedElev = elevators.tryUse(controller);
+            if (!usedElev) {
+              doors.tryToggle(
+                controller.pos.x,
+                controller.pos.y + controller.height * 0.5,
+                controller.pos.z
+              );
+            }
           }
         }
+
         controller.tick(dt, input, playerCam.yaw);
-        // Stick player to elevator after movement solve
         elevators.update(dt, controller);
+
+        // Combat tick
+        const moving = controller.speed > 0.6;
+        const targets = testRange.active ? testRange.getLiveTargets() : [];
+        const fireDown = input.buttons.has(0);
+        if (fireDown && !prevFire) {
+          weapons.firePressed(targets, testRange.active ? testRange : null, combatRng, moving);
+        }
+        prevFire = fireDown;
+        weapons.tick(dt, input, targets, testRange.active ? testRange : null, combatRng, moving);
       } else {
         // Keep gravity and collision alive so the player settles while unlocked / on map.
         controller.tick(dt, IDLE_INPUT, playerCam.yaw);
         elevators.update(dt, null);
+        prevFire = false;
       }
       doors.update(dt);
+      loot.update(dt);
       input.endTick();
     });
 
@@ -199,20 +243,40 @@ async function start() {
       : 0;
     playerCam.update(clock.frameDelta, controller, clock.alpha, strafe);
 
+    // ADS FOV
+    if (weapons.ads > 0.01) {
+      const adsFov = THREE.MathUtils.lerp(playerCam.fov, 55, weapons.ads);
+      if (Math.abs(playerCam.camera.fov - adsFov) > 0.05) {
+        playerCam.camera.fov = adsFov;
+        playerCam.camera.updateProjectionMatrix();
+      }
+    }
+
     // Refit the shadow camera to the player each frame.
     sun.target.position.set(controller.pos.x, controller.pos.y, controller.pos.z);
     sun.position.copy(sun.target.position).add(sunOffset);
     sun.target.updateMatrixWorld();
 
-    // Interact prompt (elevator or door)
+    effects.update(clock.frameDelta);
+
+    // Interact prompt
     if (input.locked && !mapView.open) {
       const px = controller.pos.x;
       const py = controller.pos.y + controller.height * 0.5;
       const pz = controller.pos.z;
-      hud.setPrompt(elevators.prompt(px, py, pz) || doors.prompt(px, py, pz));
+      hud.setPrompt(
+        loot.prompt(px, pz)
+        || elevators.prompt(px, py, pz)
+        || doors.prompt(px, py, pz)
+      );
     } else {
       hud.setPrompt(null);
     }
+
+    combatHud.update(
+      weapons.hudState(),
+      testRange.active ? testRange.stats : null
+    );
 
     renderer.render(scene, playerCam.camera);
     mapView.update(controller.pos, playerCam.yaw);
@@ -222,7 +286,10 @@ async function start() {
   requestAnimationFrame(frame);
 
   // Expose for console poking and for the smoke test.
-  window.__game = { scene, renderer, controller, terrain, hash, playerCam, stats, clock, SIM, mapView };
+  window.__game = {
+    scene, renderer, controller, terrain, hash, playerCam, stats, clock, SIM, mapView,
+    weapons, loot, testRange, effects,
+  };
 }
 
 // A no-op input so the controller can still simulate while the pointer is free.

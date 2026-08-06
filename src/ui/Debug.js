@@ -100,7 +100,12 @@ export function createHud() {
       <tr><td>Shift</td><td>sprint</td></tr>
       <tr><td>Space</td><td>jump / mantle</td></tr>
       <tr><td>C or Ctrl</td><td>crouch</td></tr>
-      <tr><td>E</td><td>open door / call or ride elevator</td></tr>
+      <tr><td>E</td><td>loot / door / elevator</td></tr>
+      <tr><td>LMB</td><td>fire</td></tr>
+      <tr><td>RMB</td><td>ADS</td></tr>
+      <tr><td>R</td><td>reload</td></tr>
+      <tr><td>1 / 2 / Q</td><td>weapon slots / quick-swap</td></tr>
+      <tr><td>P</td><td>test range (static targets)</td></tr>
       <tr><td>Sprint + C</td><td>slide (jump to cancel and keep your speed)</td></tr>
       <tr><td>M</td><td>tactical map (your location)</td></tr>
       <tr><td>F3</td><td>performance overlay</td></tr>

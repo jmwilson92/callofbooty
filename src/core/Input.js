@@ -24,7 +24,9 @@ export class Input {
       this.keys.add(e.code);
       this.pressed.add(e.code);
       // Stop space from scrolling, F3 from browser search, M from finding.
-      if (e.code === 'Space' || e.code === 'F3' || e.code === 'KeyM') e.preventDefault();
+      if (e.code === 'Space' || e.code === 'F3' || e.code === 'KeyM' || e.code === 'Tab') {
+        e.preventDefault();
+      }
     });
 
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
