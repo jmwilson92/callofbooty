@@ -1085,7 +1085,8 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain
 
   // Small roof HVAC (not a huge slab that traps you)
   sink.addSpan(x + bodyW * 0.35, roof + 0.16, z + d * 0.35, x + bodyW * 0.65, roof + 1.4, z + d * 0.65, C.metal);
-  if (fCount >= 14) {
+  // Antennas only on a few tall towers — not every roof
+  if (fCount >= 16 && rng() > 0.82) {
     post(sink, x + bodyW / 2 - 0.25, roof + 1.4, z + d / 2 - 0.25, 10 + rng() * 12, 0.5, C.metalLite);
     neonStrip(sink, x + bodyW / 2 - 0.4, roof + 12, z + d / 2 - 0.4, x + bodyW / 2 + 0.4, roof + 14, z + d / 2 + 0.4, C.redHot);
   }
@@ -1138,8 +1139,11 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
 
   const roof = seat + BUILDINGS.GROUND_FLOOR_HEIGHT + (floors - 1) * BUILDINGS.FLOOR_HEIGHT;
   sink.addSpan(x + w * 0.2, roof, z + d * 0.2, x + w * 0.8, roof + 2.5, z + d * 0.8, col);
-  post(sink, x + w / 2 - 0.25, roof + 2.5, z + d / 2 - 0.25, 14 + rng() * 10, 0.5, C.metalLite);
-  neonStrip(sink, x + w / 2 - 0.4, roof + 14, z + d / 2 - 0.4, x + w / 2 + 0.4, roof + 16, z + d / 2 + 0.4, C.redHot);
+  // Occasional antenna only
+  if (rng() > 0.85) {
+    post(sink, x + w / 2 - 0.25, roof + 2.5, z + d / 2 - 0.25, 14 + rng() * 10, 0.5, C.metalLite);
+    neonStrip(sink, x + w / 2 - 0.4, roof + 14, z + d / 2 - 0.4, x + w / 2 + 0.4, roof + 16, z + d / 2 + 0.4, C.redHot);
+  }
 }
 
 /**

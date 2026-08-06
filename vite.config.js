@@ -15,7 +15,14 @@ const hmr = codespace
     }
   : true;
 
+// GitHub Pages project site lives at /callofbooty/ — set base so asset URLs resolve.
+// Local dev and Codespaces keep base '/'.
+const pagesBase = process.env.GITHUB_PAGES === '1' || process.env.GITHUB_PAGES === 'true'
+  ? '/callofbooty/'
+  : '/';
+
 export default defineConfig({
+  base: pagesBase,
   server: {
     host: '0.0.0.0',
     port,

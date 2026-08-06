@@ -5,7 +5,17 @@ A browser-based battle royale FPS, built in phases from the specs in `docs/`.
 **Current state: Phase 1 complete** — movement, camera, collision, and the map.
 No weapons, loot, bots, or match loop yet.
 
-## Run it
+## Play (public URL for friends)
+
+After deploy, the live game is:
+
+**https://jmwilson92.github.io/callofbooty/**
+
+Share that link — not a Codespaces `*.app.github.dev` URL (those are private to your session and 404 for others).
+
+Deploys automatically on every push to `main` via GitHub Pages (Actions).
+
+## Run it locally
 
 ```bash
 npm install
