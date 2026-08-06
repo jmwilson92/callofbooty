@@ -248,12 +248,20 @@ async function start() {
       : 0;
     playerCam.update(clock.frameDelta, controller, clock.alpha, strafe);
 
-    // ADS FOV
-    if (weapons.ads > 0.01) {
-      const adsFov = THREE.MathUtils.lerp(playerCam.fov, 55, weapons.ads);
-      if (Math.abs(playerCam.camera.fov - adsFov) > 0.05) {
-        playerCam.camera.fov = adsFov;
+    // ADS FOV (tighter zoom so sights dominate, not the whole gun)
+    {
+      const hipFov = playerCam.fov;
+      const adsFov = THREE.MathUtils.lerp(hipFov, 48, weapons.ads);
+      const worldFov = THREE.MathUtils.lerp(hipFov, adsFov, 1);
+      if (Math.abs(playerCam.camera.fov - worldFov) > 0.05) {
+        playerCam.camera.fov = worldFov;
         playerCam.camera.updateProjectionMatrix();
+      }
+      // Weapon overlay camera: slightly tighter ADS so optic fills aim cleanly
+      const wFov = THREE.MathUtils.lerp(55, 40, weapons.ads);
+      if (Math.abs(weaponOverlay.camera.fov - wFov) > 0.1) {
+        weaponOverlay.camera.fov = wFov;
+        weaponOverlay.camera.updateProjectionMatrix();
       }
     }
 

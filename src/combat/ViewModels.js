@@ -1,16 +1,15 @@
 import * as THREE from 'three';
 
-// First-person gun meshes — large, bright, class-specific.
-// Built for the overlay weapon camera (looks down -Z).
+// Slim first-person guns. Sight line sits on local origin (0,0) so ADS
+// can zero the weapon transform and only iron sights / optics cover aim.
 
 function mat(hex, opts = {}) {
   return new THREE.MeshStandardMaterial({
     color: hex,
-    roughness: opts.rough ?? 0.45,
-    metalness: opts.metal ?? 0.35,
-    emissive: new THREE.Color(hex).multiplyScalar(opts.em ?? 0.12),
+    roughness: opts.rough ?? 0.42,
+    metalness: opts.metal ?? 0.4,
+    emissive: new THREE.Color(hex).multiplyScalar(opts.em ?? 0.1),
     emissiveIntensity: 1,
-    flatShading: false,
   });
 }
 
@@ -18,8 +17,6 @@ function box(parent, sx, sy, sz, material, x, y, z, rx = 0, ry = 0, rz = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), material);
   m.position.set(x, y, z);
   m.rotation.set(rx, ry, rz);
-  m.castShadow = false;
-  m.receiveShadow = false;
   m.frustumCulled = false;
   m.renderOrder = 999;
   parent.add(m);
@@ -37,8 +34,8 @@ function cyl(parent, rT, rB, h, material, x, y, z, rx = 0, ry = 0, rz = 0) {
 }
 
 /**
- * Build a first-person weapon. Units are metres in weapon-camera space.
- * Camera looks down -Z; gun sits lower-right of the frame.
+ * Guns are modeled so the *sight plane* is near y=0, x≈0.
+ * Body/grip hang below (−Y). Camera looks −Z.
  */
 export function buildViewModel(def) {
   const root = new THREE.Group();
@@ -50,104 +47,113 @@ export function buildViewModel(def) {
   magGroup.frustumCulled = false;
   root.add(magGroup);
 
-  const body = mat(def.color, { rough: 0.55, metal: 0.25, em: 0.15 });
-  const dark = mat(0x222428, { rough: 0.5, metal: 0.45, em: 0.08 });
-  const steel = mat(0xa8acb4, { rough: 0.3, metal: 0.75, em: 0.1 });
-  const wood = mat(0x7a5535, { rough: 0.75, metal: 0.05, em: 0.1 });
-  const glow = mat(0x9ae8ff, { rough: 0.35, metal: 0.2, em: 0.55 });
-  const black = mat(0x111214, { rough: 0.6, metal: 0.3, em: 0.05 });
+  const body = mat(def.color, { rough: 0.5, metal: 0.28, em: 0.12 });
+  const dark = mat(0x1c1e22, { rough: 0.48, metal: 0.5, em: 0.07 });
+  const steel = mat(0xb0b4bc, { rough: 0.28, metal: 0.78, em: 0.09 });
+  const wood = mat(0x6e4c30, { rough: 0.72, metal: 0.05, em: 0.08 });
+  const black = mat(0x0e1014, { rough: 0.55, metal: 0.35, em: 0.05 });
+  const glow = mat(0xff4040, { rough: 0.3, metal: 0.15, em: 0.7 }); // iron sight / reticle
+  const glass = mat(0x4a80a0, { rough: 0.15, metal: 0.2, em: 0.2 });
 
   const cls = def.class;
-  let muzzlePos = new THREE.Vector3(0.15, -0.08, -0.85);
+  let muzzlePos = new THREE.Vector3(0, 0, -0.55);
 
-  // Shared lower-right anchor for all guns
-  const ax = 0.16;
-  const ay = -0.12;
-  const az = -0.35;
-
+  // Slim proportions — receiver sits under the sight line
   if (cls === 'pistol') {
-    box(root, 0.11, 0.26, 0.14, dark, ax, ay - 0.12, az + 0.08); // grip
-    box(root, 0.12, 0.12, 0.32, steel, ax, ay + 0.02, az - 0.02); // slide
-    cyl(root, 0.022, 0.022, 0.16, steel, ax, ay + 0.03, az - 0.22, Math.PI / 2, 0, 0);
-    box(magGroup, 0.08, 0.18, 0.1, body, ax, ay - 0.14, az + 0.06);
-    box(root, 0.025, 0.04, 0.025, glow, ax, ay + 0.1, az - 0.14);
-    muzzlePos.set(ax, ay + 0.03, az - 0.32);
+    // Slide centered under sights
+    box(root, 0.055, 0.055, 0.22, steel, 0, -0.035, -0.12);
+    box(root, 0.05, 0.12, 0.07, dark, 0, -0.1, -0.02); // grip
+    cyl(root, 0.012, 0.012, 0.1, steel, 0, -0.028, -0.26, Math.PI / 2, 0, 0);
+    box(magGroup, 0.04, 0.1, 0.055, body, 0, -0.12, -0.02);
+    // Iron sights on the sight line (y≈0)
+    box(root, 0.008, 0.018, 0.008, glow, 0, 0.008, -0.2); // front
+    box(root, 0.02, 0.012, 0.01, black, 0, 0.006, -0.04); // rear
+    muzzlePos.set(0, -0.028, -0.32);
   } else if (cls === 'shotgun') {
-    box(root, 0.12, 0.14, 0.22, wood, ax, ay - 0.04, az + 0.16); // stock
-    box(root, 0.13, 0.13, 0.5, dark, ax, ay, az - 0.12);
-    cyl(root, 0.032, 0.032, 0.42, steel, ax, ay + 0.02, az - 0.48, Math.PI / 2, 0, 0);
-    cyl(root, 0.026, 0.026, 0.38, steel, ax, ay - 0.04, az - 0.44, Math.PI / 2, 0, 0);
-    box(magGroup, 0.1, 0.1, 0.14, body, ax, ay - 0.1, az - 0.08); // pump
-    box(root, 0.03, 0.045, 0.03, glow, ax, ay + 0.1, az - 0.28);
-    muzzlePos.set(ax, ay + 0.02, az - 0.72);
+    box(root, 0.06, 0.06, 0.14, wood, 0, -0.04, 0.08);
+    box(root, 0.065, 0.06, 0.32, dark, 0, -0.035, -0.12);
+    cyl(root, 0.016, 0.016, 0.28, steel, 0, -0.02, -0.36, Math.PI / 2, 0, 0);
+    cyl(root, 0.014, 0.014, 0.24, steel, 0, -0.045, -0.32, Math.PI / 2, 0, 0);
+    box(magGroup, 0.05, 0.05, 0.09, body, 0, -0.08, -0.1);
+    box(root, 0.01, 0.02, 0.01, glow, 0, 0.01, -0.28); // bead
+    box(root, 0.05, 0.1, 0.06, dark, 0, -0.1, 0.02); // grip
+    muzzlePos.set(0, -0.02, -0.52);
   } else if (cls === 'sniper') {
-    box(root, 0.11, 0.12, 0.28, wood, ax, ay - 0.02, az + 0.18);
-    box(root, 0.12, 0.12, 0.55, dark, ax, ay, az - 0.12);
-    cyl(root, 0.024, 0.024, 0.6, steel, ax, ay + 0.02, az - 0.55, Math.PI / 2, 0, 0);
-    cyl(root, 0.04, 0.04, 0.28, steel, ax, ay + 0.1, az - 0.08, Math.PI / 2, 0, 0); // scope
-    box(root, 0.045, 0.035, 0.045, glow, ax, ay + 0.14, az + 0.02);
-    box(magGroup, 0.08, 0.18, 0.1, body, ax, ay - 0.14, az - 0.05);
-    muzzlePos.set(ax, ay + 0.02, az - 0.88);
+    box(root, 0.055, 0.055, 0.18, wood, 0, -0.04, 0.1);
+    box(root, 0.06, 0.055, 0.36, dark, 0, -0.035, -0.12);
+    cyl(root, 0.012, 0.012, 0.4, steel, 0, -0.022, -0.42, Math.PI / 2, 0, 0);
+    // Scope ON the sight axis (center of screen when ADS)
+    cyl(root, 0.022, 0.022, 0.18, black, 0, 0.02, -0.08, Math.PI / 2, 0, 0);
+    cyl(root, 0.018, 0.024, 0.04, glass, 0, 0.02, 0.02, Math.PI / 2, 0, 0); // ocular
+    cyl(root, 0.024, 0.018, 0.035, glass, 0, 0.02, -0.18, Math.PI / 2, 0, 0); // objective
+    box(root, 0.012, 0.012, 0.012, glow, 0, 0.02, -0.08); // reticle glow inside
+    box(magGroup, 0.04, 0.1, 0.055, body, 0, -0.1, -0.05);
+    box(root, 0.05, 0.1, 0.055, dark, 0, -0.1, 0.02);
+    muzzlePos.set(0, -0.022, -0.64);
   } else if (cls === 'smg') {
-    box(root, 0.1, 0.2, 0.14, dark, ax, ay - 0.1, az + 0.1); // grip
-    box(root, 0.13, 0.13, 0.4, body, ax, ay, az - 0.08);
-    cyl(root, 0.022, 0.022, 0.28, steel, ax, ay + 0.02, az - 0.4, Math.PI / 2, 0, 0);
-    box(root, 0.14, 0.05, 0.22, dark, ax, ay + 0.08, az - 0.05); // rail
-    box(magGroup, 0.08, 0.2, 0.1, body, ax, ay - 0.16, az - 0.02);
-    box(root, 0.03, 0.04, 0.03, glow, ax, ay + 0.12, az - 0.22);
-    box(root, 0.05, 0.07, 0.14, dark, ax, ay, az + 0.2); // stock stub
-    muzzlePos.set(ax, ay + 0.02, az - 0.56);
+    box(root, 0.055, 0.1, 0.07, dark, 0, -0.08, 0.04); // grip
+    box(root, 0.065, 0.06, 0.26, body, 0, -0.03, -0.1);
+    cyl(root, 0.012, 0.012, 0.18, steel, 0, -0.02, -0.3, Math.PI / 2, 0, 0);
+    box(root, 0.07, 0.025, 0.14, dark, 0, 0.01, -0.08); // thin rail
+    box(magGroup, 0.04, 0.12, 0.055, body, 0, -0.1, -0.06);
+    // Compact irons
+    box(root, 0.008, 0.016, 0.008, glow, 0, 0.028, -0.2);
+    box(root, 0.018, 0.01, 0.008, black, 0, 0.022, -0.02);
+    box(root, 0.04, 0.04, 0.08, dark, 0, -0.03, 0.12); // stock stub
+    muzzlePos.set(0, -0.02, -0.4);
   } else if (cls === 'lmg') {
-    box(root, 0.14, 0.15, 0.6, dark, ax, ay, az - 0.1);
-    box(root, 0.11, 0.22, 0.15, dark, ax, ay - 0.12, az + 0.12);
-    cyl(root, 0.028, 0.028, 0.48, steel, ax, ay + 0.03, az - 0.52, Math.PI / 2, 0, 0);
-    box(root, 0.025, 0.14, 0.025, steel, ax - 0.06, ay - 0.12, az - 0.4);
-    box(root, 0.025, 0.14, 0.025, steel, ax + 0.06, ay - 0.12, az - 0.4);
-    box(magGroup, 0.14, 0.22, 0.16, body, ax, ay - 0.16, az - 0.05);
-    box(root, 0.16, 0.06, 0.28, dark, ax, ay + 0.1, az - 0.05);
-    box(root, 0.035, 0.04, 0.035, glow, ax, ay + 0.14, az - 0.22);
-    muzzlePos.set(ax, ay + 0.03, az - 0.78);
+    box(root, 0.07, 0.07, 0.4, dark, 0, -0.035, -0.1);
+    box(root, 0.055, 0.12, 0.08, dark, 0, -0.1, 0.06);
+    cyl(root, 0.014, 0.014, 0.32, steel, 0, -0.02, -0.4, Math.PI / 2, 0, 0);
+    box(root, 0.012, 0.08, 0.012, steel, -0.04, -0.08, -0.32);
+    box(root, 0.012, 0.08, 0.012, steel, 0.04, -0.08, -0.32);
+    box(magGroup, 0.07, 0.14, 0.09, body, 0, -0.12, -0.06);
+    box(root, 0.08, 0.03, 0.16, dark, 0, 0.02, -0.06);
+    box(root, 0.01, 0.018, 0.01, glow, 0, 0.04, -0.18);
+    muzzlePos.set(0, -0.02, -0.58);
   } else {
-    // AR / DMR — most detailed default
-    // Stock
-    box(root, 0.1, 0.12, 0.22, dark, ax, ay - 0.02, az + 0.2);
-    // Receiver
-    box(root, 0.14, 0.14, 0.42, body, ax, ay, az - 0.05);
-    // Handguard
-    box(root, 0.13, 0.12, 0.32, dark, ax, ay + 0.01, az - 0.35);
+    // AR / DMR — slim modern rifle, optic on sight line
+    // Stock (back, lower)
+    box(root, 0.05, 0.055, 0.14, dark, 0, -0.03, 0.14);
+    // Receiver under sights
+    box(root, 0.065, 0.06, 0.28, body, 0, -0.035, -0.04);
+    // Slim handguard
+    box(root, 0.058, 0.05, 0.22, dark, 0, -0.03, -0.26);
     // Barrel
-    cyl(root, 0.02, 0.02, 0.32, steel, ax, ay + 0.03, az - 0.62, Math.PI / 2, 0, 0);
-    // Muzzle device
-    box(root, 0.045, 0.045, 0.07, steel, ax, ay + 0.03, az - 0.8);
-    // Top rail + optic
-    box(root, 0.07, 0.045, 0.28, black, ax, ay + 0.1, az - 0.08);
-    box(root, 0.05, 0.06, 0.12, dark, ax, ay + 0.15, az - 0.02);
-    box(root, 0.035, 0.04, 0.04, glow, ax, ay + 0.19, az + 0.02); // red-dot glow
-    // Pistol grip
-    box(root, 0.09, 0.2, 0.11, dark, ax, ay - 0.14, az + 0.05, 0.25, 0, 0);
-    // Mag well + mag
-    box(root, 0.1, 0.05, 0.12, steel, ax, ay - 0.08, az - 0.05);
-    box(magGroup, 0.09, 0.24, 0.11, body, ax, ay - 0.2, az - 0.05);
-    // Front sight
-    box(root, 0.025, 0.04, 0.025, glow, ax, ay + 0.1, az - 0.48);
-    muzzlePos.set(ax, ay + 0.03, az - 0.85);
+    cyl(root, 0.01, 0.01, 0.22, steel, 0, -0.02, -0.46, Math.PI / 2, 0, 0);
+    // Muzzle brake (small)
+    box(root, 0.022, 0.022, 0.04, steel, 0, -0.02, -0.58);
+    // Top rail (thin)
+    box(root, 0.035, 0.018, 0.2, black, 0, 0.01, -0.06);
+    // Red-dot / holographic optic ON crosshair plane
+    box(root, 0.04, 0.035, 0.055, dark, 0, 0.035, 0.0);
+    box(root, 0.028, 0.028, 0.012, glass, 0, 0.04, 0.02);
+    box(root, 0.008, 0.008, 0.008, glow, 0, 0.04, 0.01); // reticle
+    // Front iron backup
+    box(root, 0.008, 0.016, 0.008, black, 0, 0.02, -0.34);
+    // Pistol grip (below)
+    box(root, 0.045, 0.11, 0.055, dark, 0, -0.1, 0.02, 0.28, 0, 0);
+    // Mag
+    box(root, 0.05, 0.025, 0.06, steel, 0, -0.065, -0.04);
+    box(magGroup, 0.045, 0.14, 0.055, body, 0, -0.14, -0.04);
+    muzzlePos.set(0, -0.02, -0.62);
   }
 
-  // Hands (simple) so the gun feels held
-  const skin = mat(0xc4a07a, { rough: 0.85, metal: 0.05, em: 0.12 });
-  box(root, 0.08, 0.08, 0.16, skin, ax - 0.02, ay - 0.18, az + 0.08); // trigger hand
+  // Hands — smaller, lower, don’t cover sights
+  const skin = mat(0xc4a07a, { rough: 0.85, metal: 0.04, em: 0.1 });
+  box(root, 0.05, 0.05, 0.09, skin, 0.01, -0.12, 0.04); // trigger hand
   if (cls !== 'pistol') {
-    box(root, 0.08, 0.08, 0.14, skin, ax + 0.02, ay - 0.1, az - 0.28); // support hand
+    box(root, 0.05, 0.05, 0.08, skin, -0.01, -0.07, -0.22); // support hand on handguard
   }
 
   const muzzle = new THREE.Object3D();
   muzzle.position.copy(muzzlePos);
   root.add(muzzle);
 
-  // Sit big in the lower-right of the FOV
-  root.scale.setScalar(1.0);
+  // Built on sight axis — hip offset applied in WeaponSystem
+  root.scale.setScalar(0.92);
   root.position.set(0, 0, 0);
-  root.rotation.set(0.06, 0.18, 0.04);
+  root.rotation.set(0, 0, 0);
 
   root.traverse((o) => {
     if (o.isMesh) {
@@ -156,5 +162,5 @@ export function buildViewModel(def) {
     }
   });
 
-  return { root, mag: magGroup, muzzle };
+  return { root, mag: magGroup, muzzle, hasScope: cls === 'sniper' };
 }

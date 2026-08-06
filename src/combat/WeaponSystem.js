@@ -374,8 +374,9 @@ export class WeaponSystem {
     if (this.wantAds && !this.reloading) this.ads = Math.min(1, this.ads + adsSpeed * dt);
     else this.ads = Math.max(0, this.ads - adsSpeed * 1.4 * dt);
 
-    // Viewmodel ADS pose + fire kick + reload mag motion
-    const adsT = this.ads;
+    // Viewmodel pose: hip = tucked lower-right (clear of crosshair);
+    // ADS = sight axis on camera center so only optic/irons sit on aim point.
+    const adsT = this.ads * this.ads * (3 - 2 * this.ads); // smoothstep
     this._kick = Math.max(0, this._kick - dt * 7);
     if (this._muzzleFlash && this._muzzleFlash.material.opacity > 0) {
       this._muzzleFlash.material.opacity = Math.max(0, this._muzzleFlash.material.opacity - dt * 20);
@@ -383,24 +384,25 @@ export class WeaponSystem {
     if (this._muzzleLight) {
       this._muzzleLight.intensity = Math.max(0, this._muzzleLight.intensity - dt * 28);
     }
-    // Hip: lower-right. ADS: centered and closer.
-    const kickZ = this._kick * 0.05;
-    const kickX = this._kick * 0.012;
+    const kickZ = this._kick * 0.035;
+    const kickX = this._kick * 0.008;
+    // Hip far down-right; ADS zeros so sights hit screen center
     this.viewGroup.position.set(
-      THREE.MathUtils.lerp(0.08, 0.0, adsT) + kickX,
-      THREE.MathUtils.lerp(-0.06, -0.02, adsT) - this._kick * 0.02,
-      THREE.MathUtils.lerp(0.0, 0.06, adsT) + kickZ
+      THREE.MathUtils.lerp(0.28, 0.0, adsT) + kickX,
+      THREE.MathUtils.lerp(-0.32, 0.0, adsT) - this._kick * 0.012,
+      THREE.MathUtils.lerp(0.12, 0.02, adsT) + kickZ
     );
     this.viewGroup.rotation.set(
-      THREE.MathUtils.lerp(0.05, 0.0, adsT) - this._kick * 0.1,
-      THREE.MathUtils.lerp(0.14, 0.0, adsT),
-      THREE.MathUtils.lerp(0.04, 0.0, adsT)
+      THREE.MathUtils.lerp(0.18, 0.0, adsT) - this._kick * 0.07,
+      THREE.MathUtils.lerp(0.42, 0.0, adsT),
+      THREE.MathUtils.lerp(0.1, 0.0, adsT)
     );
-    // Slight idle sway so it doesn't look frozen
+    // Tiny idle sway (only when hip; ADS stays rock solid for aiming)
     if (this._vmRoot && !this.reloading) {
       const t = performance.now() * 0.001;
-      this._vmRoot.position.y = Math.sin(t * 1.6) * 0.004;
-      this._vmRoot.rotation.z = Math.sin(t * 1.1) * 0.008;
+      const sway = 1 - adsT;
+      this._vmRoot.position.y = Math.sin(t * 1.5) * 0.003 * sway;
+      this._vmRoot.rotation.z = Math.sin(t * 1.05) * 0.006 * sway;
     }
 
     // Magazine yank during reload
@@ -411,15 +413,15 @@ export class WeaponSystem {
         let mx = 0;
         if (t < 0.35) {
           const u = t / 0.35;
-          my = -u * 0.28;
-          mx = u * 0.06;
+          my = -u * 0.22;
+          mx = u * 0.05;
         } else if (t < 0.7) {
-          my = -0.28;
-          mx = 0.06;
+          my = -0.22;
+          mx = 0.05;
         } else {
           const u = (t - 0.7) / 0.3;
-          my = -0.28 * (1 - u);
-          mx = 0.06 * (1 - u);
+          my = -0.22 * (1 - u);
+          mx = 0.05 * (1 - u);
         }
         this._vmMag.position.set(mx, my, 0);
         this._vmMag.visible = t < 0.4 || t > 0.65;
