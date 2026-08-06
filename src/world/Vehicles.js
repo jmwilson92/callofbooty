@@ -925,7 +925,8 @@ export class VehicleSystem {
       v.root.rotation.z = (Math.random() - 0.5) * 0.35;
     }
     const pt = new THREE.Vector3(v.x, v.y + 0.5, v.z);
-    this.effects?.spawnMuzzleBloom?.(pt, 3.5 + Math.min(2, speed * 0.04));
+    this.effects?.spawnExplosion?.(pt, 2.1 + Math.min(1.2, speed * 0.03));
+    this.effects?.spawnMuzzleBloom?.(pt, 4.5 + Math.min(2, speed * 0.04));
     this.effects?.spawnImpact?.(pt, 'solid');
     // Splash damage near crash
     const splash = 8;
@@ -1426,8 +1427,10 @@ export class VehicleSystem {
       r.mesh.geometry?.dispose?.();
     }
     const pt = new THREE.Vector3(x, y, z);
+    // Big missile boom
+    this.effects?.spawnExplosion?.(pt, 1.65);
     this.effects?.spawnImpact?.(pt, 'solid');
-    this.effects?.spawnMuzzleBloom?.(pt, 2.8);
+    this.effects?.spawnMuzzleBloom?.(pt, 5.5);
     // Splash damage to bots
     const splash = r.splash ?? 5;
     const dmg = r.damage ?? 90;
@@ -1520,10 +1523,12 @@ export class VehicleSystem {
       this._sanitizeVehicle(v);
     }
 
+    // Smooth yaw toward look — lower rate = less nose whip / cam shake
     let dyaw = (Number.isFinite(yaw) ? yaw : v.yaw) - v.yaw;
     while (dyaw > Math.PI) dyaw -= Math.PI * 2;
     while (dyaw < -Math.PI) dyaw += Math.PI * 2;
-    v.yaw += THREE.MathUtils.clamp(dyaw, -2.8 * dt, 2.8 * dt);
+    const yawRate = cfg.yawRate ?? 1.9;
+    v.yaw += THREE.MathUtils.clamp(dyaw, -yawRate * dt, yawRate * dt);
 
     const f = forwardXZ(v.yaw);
     const r = rightXZ(v.yaw);
@@ -1538,11 +1543,12 @@ export class VehicleSystem {
     if (wlen > 1e-4) {
       wishX /= wlen;
       wishZ /= wlen;
+      // Ease into thrust so taps don't lurch
       v.vx += wishX * accel * dt;
       v.vz += wishZ * accel * dt;
     } else {
-      v.vx *= Math.exp(-1.8 * dt);
-      v.vz *= Math.exp(-1.8 * dt);
+      v.vx *= Math.exp(-1.4 * dt);
+      v.vz *= Math.exp(-1.4 * dt);
     }
     const hsp = Math.hypot(v.vx, v.vz);
     if (hsp > maxSp) {
@@ -1550,13 +1556,13 @@ export class VehicleSystem {
       v.vz *= maxSp / hsp;
     }
 
-    // Space = climb, C / Ctrl = descend (crouch binding)
+    // Space = climb, C = descend
     let climbWish = 0;
     if (input?.action?.('jump')) climbWish += 1;
     if (input?.action?.('crouch')) climbWish -= 1;
     v.vy += climbWish * climb * dt;
-    if (climbWish === 0) v.vy *= Math.exp(-2.2 * dt);
-    v.vy = THREE.MathUtils.clamp(v.vy, -climb * 1.1, climb);
+    if (climbWish === 0) v.vy *= Math.exp(-1.8 * dt);
+    v.vy = THREE.MathUtils.clamp(v.vy, -climb * 1.05, climb);
 
     // Integrate with collision — full step, then axis slides, then eject (no thrash)
     const tryPos = (nx, ny, nz) => {
@@ -1610,27 +1616,40 @@ export class VehicleSystem {
     if (v.root) {
       v.root.position.set(v.x, v.y, v.z);
       v.root.rotation.y = v.yaw;
+      // Subtle visual attitude only — big bank/pitch reads as screen shake in 3rd person
+      const pitchMax = cfg.pitchMax ?? 0.1;
+      const bankMax = cfg.bankMax ?? 0.12;
       const pitch = THREE.MathUtils.clamp(
-        -v.vy * 0.02
-          - (input?.action?.('forward') ? 0.12 : 0)
-          + (input?.action?.('back') ? 0.08 : 0),
-        -0.25, 0.2
+        -v.vy * 0.012
+          - (input?.action?.('forward') ? 0.06 : 0)
+          + (input?.action?.('back') ? 0.04 : 0),
+        -pitchMax, pitchMax
       );
       const bank = THREE.MathUtils.clamp(
         (input?.action?.('right') ? 1 : 0) - (input?.action?.('left') ? 1 : 0),
         -1, 1
-      ) * 0.2;
+      ) * bankMax;
       const rx = Number.isFinite(v.root.rotation.x) ? v.root.rotation.x : 0;
       const rz = Number.isFinite(v.root.rotation.z) ? v.root.rotation.z : 0;
-      v.root.rotation.x = THREE.MathUtils.lerp(rx, pitch, 1 - Math.exp(-5 * dt));
-      v.root.rotation.z = THREE.MathUtils.lerp(rz, -bank, 1 - Math.exp(-5 * dt));
+      // Slow attitude blend
+      v.root.rotation.x = THREE.MathUtils.lerp(rx, pitch, 1 - Math.exp(-2.8 * dt));
+      v.root.rotation.z = THREE.MathUtils.lerp(rz, -bank, 1 - Math.exp(-2.8 * dt));
     }
 
     controller.pos.set(v.x, v.y + (cfg.seatY ?? 1.1), v.z);
     controller.vel.set(v.vx, v.vy, v.vz);
     controller.grounded = false;
     controller.speed = Math.hypot(v.vx, v.vz);
-    if (controller.prevPos) controller.prevPos.copy(controller.pos);
+    // Keep prevPos one tick behind so any residual systems interpolate cleanly
+    if (controller.prevPos) {
+      if (!v._hadPrev) {
+        controller.prevPos.copy(controller.pos);
+        v._hadPrev = true;
+      } else {
+        // prev already set last frame by physics consumers; leave as-is if not used
+        controller.prevPos.lerp(controller.pos, 0.35);
+      }
+    }
   }
 
   prompt(px, py, pz) {

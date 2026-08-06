@@ -127,6 +127,152 @@ export class CombatEffects {
     this.impacts.push({ mesh, life: 0.14, max: 0.14 });
   }
 
+  /**
+   * Large missile / crash explosion — fireball, shock ring, debris, light.
+   * @param {THREE.Vector3} point
+   * @param {number} [power=1] scale (1 = rocket, ~1.6–2 for big warheads)
+   */
+  spawnExplosion(point, power = 1) {
+    if (!point) return;
+    const p = Math.max(0.5, power);
+    // Bright flash light
+    this.spawnMuzzleBloom(point, 4.5 * p);
+
+    // Core fireball
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.35 * p, 10, 10),
+      new THREE.MeshBasicMaterial({
+        color: 0xffee88,
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+      })
+    );
+    core.position.copy(point);
+    this.group.add(core);
+    this.impacts.push({
+      mesh: core, life: 0.28, max: 0.28, grow: 4.5 * p, fade: true,
+    });
+
+    // Orange outer fire
+    const outer = new THREE.Mesh(
+      new THREE.SphereGeometry(0.55 * p, 10, 10),
+      new THREE.MeshBasicMaterial({
+        color: 0xff6020,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+      })
+    );
+    outer.position.copy(point);
+    this.group.add(outer);
+    this.impacts.push({
+      mesh: outer, life: 0.45, max: 0.45, grow: 6.5 * p, fade: true,
+    });
+
+    // Smoke puff
+    const smoke = new THREE.Mesh(
+      new THREE.SphereGeometry(0.7 * p, 8, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0x3a342e,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+      })
+    );
+    smoke.position.copy(point);
+    smoke.position.y += 0.2;
+    this.group.add(smoke);
+    this.impacts.push({
+      mesh: smoke,
+      life: 0.9,
+      max: 0.9,
+      grow: 5 * p,
+      fade: true,
+      vel: new THREE.Vector3(0, 1.8 * p, 0),
+    });
+
+    // Shock ring (flat torus-like disc)
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.4 * p, 0.06 * p, 6, 24),
+      new THREE.MeshBasicMaterial({
+        color: 0xffc070,
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: false,
+      })
+    );
+    ring.position.copy(point);
+    ring.rotation.x = Math.PI / 2;
+    this.group.add(ring);
+    this.impacts.push({
+      mesh: ring, life: 0.35, max: 0.35, grow: 8 * p, fade: true,
+    });
+
+    // Debris chunks
+    const n = Math.min(18, 8 + Math.floor(p * 6));
+    for (let i = 0; i < n; i++) {
+      const size = 0.06 + Math.random() * 0.12 * p;
+      const chunk = new THREE.Mesh(
+        new THREE.BoxGeometry(size, size, size * 0.7),
+        new THREE.MeshBasicMaterial({
+          color: Math.random() > 0.4 ? 0xff8030 : 0x4a4038,
+          transparent: true,
+          opacity: 0.95,
+        })
+      );
+      chunk.position.copy(point);
+      this.group.add(chunk);
+      const ang = Math.random() * Math.PI * 2;
+      const up = 4 + Math.random() * 8 * p;
+      const out = 3 + Math.random() * 7 * p;
+      this.impacts.push({
+        mesh: chunk,
+        life: 0.55 + Math.random() * 0.4,
+        max: 0.9,
+        fade: true,
+        vel: new THREE.Vector3(
+          Math.cos(ang) * out,
+          up,
+          Math.sin(ang) * out
+        ),
+        spin: new THREE.Vector3(
+          (Math.random() - 0.5) * 12,
+          (Math.random() - 0.5) * 12,
+          (Math.random() - 0.5) * 12
+        ),
+      });
+    }
+
+    // Secondary sparks
+    for (let i = 0; i < 10; i++) {
+      const spark = new THREE.Mesh(
+        new THREE.SphereGeometry(0.04 + Math.random() * 0.05, 4, 4),
+        new THREE.MeshBasicMaterial({
+          color: 0xffe0a0,
+          transparent: true,
+          opacity: 1,
+        })
+      );
+      spark.position.copy(point);
+      this.group.add(spark);
+      const ang = Math.random() * Math.PI * 2;
+      const elev = Math.random() * 0.9;
+      const sp = 6 + Math.random() * 10 * p;
+      this.impacts.push({
+        mesh: spark,
+        life: 0.25 + Math.random() * 0.25,
+        max: 0.5,
+        fade: true,
+        vel: new THREE.Vector3(
+          Math.cos(ang) * Math.cos(elev) * sp,
+          Math.sin(elev) * sp * 0.8,
+          Math.sin(ang) * Math.cos(elev) * sp
+        ),
+      });
+    }
+  }
+
   /** Glass shatter burst (a few bright shards that fade out). */
   spawnGlassBreak(point) {
     const n = 6;
@@ -222,15 +368,26 @@ export class CombatEffects {
       p.life -= dt;
       if (p.vel) {
         p.mesh.position.addScaledVector(p.vel, dt);
-        p.vel.y -= 12 * dt;
+        p.vel.y -= 14 * dt;
       }
-      const u = 1 - p.life / p.max;
-      p.mesh.scale.setScalar(1 + u * 1.5);
-      p.mesh.material.opacity = Math.max(0, 1 - u);
+      if (p.spin && p.mesh.rotation) {
+        p.mesh.rotation.x += p.spin.x * dt;
+        p.mesh.rotation.y += p.spin.y * dt;
+        p.mesh.rotation.z += p.spin.z * dt;
+      }
+      const u = 1 - p.life / Math.max(1e-4, p.max);
+      if (p.grow != null) {
+        p.mesh.scale.setScalar(1 + u * p.grow);
+      } else {
+        p.mesh.scale.setScalar(1 + u * 1.5);
+      }
+      if (p.mesh.material) {
+        p.mesh.material.opacity = Math.max(0, p.fade ? (1 - u) : (1 - u));
+      }
       if (p.life <= 0) {
         this.group.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        p.mesh.material.dispose();
+        p.mesh.geometry?.dispose?.();
+        p.mesh.material?.dispose?.();
         this.impacts.splice(i, 1);
       }
     }

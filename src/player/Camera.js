@@ -52,6 +52,9 @@ export class PlayerCamera {
       return;
     }
 
+    // Left vehicle — drop smoothed vehicle state so re-entry doesn't snap
+    this._vehSmooth = null;
+
     controller.interpolated(alpha, this._pos);
     const targetEyeY = this._pos.y + controller.eyeHeight;
 
@@ -105,43 +108,66 @@ export class PlayerCamera {
   /** Orbit chase cam behind the vehicle (mouse still steers look / vehicle). */
   _updateThirdPerson(dt, vehicle) {
     const isHeli = vehicle.type === 'helicopter';
-    const dist = isHeli ? (VEHICLES.CAM_HELI_DIST ?? 16) : (VEHICLES.CAM_MOTO_DIST ?? 7.5);
-    const height = isHeli ? (VEHICLES.CAM_HELI_HEIGHT ?? 5.5) : (VEHICLES.CAM_MOTO_HEIGHT ?? 2.4);
+    const dist = isHeli ? (VEHICLES.CAM_HELI_DIST ?? 18) : (VEHICLES.CAM_MOTO_DIST ?? 7.5);
+    const height = isHeli ? (VEHICLES.CAM_HELI_HEIGHT ?? 6.2) : (VEHICLES.CAM_MOTO_HEIGHT ?? 2.4);
     const lookY = VEHICLES.CAM_LOOK_Y ?? 1.15;
 
+    // Smooth vehicle sample so fixed-step sim doesn't shake the chase cam
+    if (!this._vehSmooth) {
+      this._vehSmooth = new THREE.Vector3(vehicle.x, vehicle.y, vehicle.z);
+    }
+    // Heli: softer follow (less jitter). Snap if teleported far.
+    const followRate = isHeli ? (VEHICLES.CAM_HELI_FOLLOW ?? 7.5) : 12;
+    const jump = Math.hypot(
+      vehicle.x - this._vehSmooth.x,
+      vehicle.y - this._vehSmooth.y,
+      vehicle.z - this._vehSmooth.z
+    );
+    if (jump > 25 || !this._initialised) {
+      this._vehSmooth.set(vehicle.x, vehicle.y, vehicle.z);
+    } else {
+      const sk = 1 - Math.exp(-followRate * dt);
+      this._vehSmooth.x = lerp(this._vehSmooth.x, vehicle.x, sk);
+      this._vehSmooth.y = lerp(this._vehSmooth.y, vehicle.y, sk);
+      this._vehSmooth.z = lerp(this._vehSmooth.z, vehicle.z, sk);
+    }
+
     // Slight pitch clamp so chase cam doesn't go under the ground as easily
-    const pitch = clamp(this.pitch, -0.55, 0.75);
+    const pitch = clamp(this.pitch, -0.45, 0.65);
     const cosP = Math.cos(pitch);
-    // Behind look direction: look is (−sin yaw, 0, −cos yaw) → offset = opposite
     const ox = Math.sin(this.yaw) * cosP * dist;
-    const oy = height + Math.sin(-pitch) * dist * 0.85;
+    const oy = height + Math.sin(-pitch) * dist * 0.7;
     const oz = Math.cos(this.yaw) * cosP * dist;
 
-    const tx = vehicle.x;
-    const ty = vehicle.y + lookY;
-    const tz = vehicle.z;
+    const tx = this._vehSmooth.x;
+    const ty = this._vehSmooth.y + lookY;
+    const tz = this._vehSmooth.z;
 
     const wantX = tx + ox;
     const wantY = ty + oy;
     const wantZ = tz + oz;
 
-    // Smooth follow
-    const k = 1 - Math.exp(-10 * dt);
-    if (!this._camTarget.x && !this._initialised) {
+    // Camera spring — heli uses gentler rate so motion feels floaty, not juddery
+    const camRate = isHeli ? (VEHICLES.CAM_HELI_SMOOTH ?? 6.5) : 10;
+    const k = 1 - Math.exp(-camRate * dt);
+    if (!this._initialised) {
       this.camera.position.set(wantX, wantY, wantZ);
+      this._look.set(tx, ty, tz);
     } else {
       this.camera.position.x = lerp(this.camera.position.x, wantX, k);
       this.camera.position.y = lerp(this.camera.position.y, wantY, k);
       this.camera.position.z = lerp(this.camera.position.z, wantZ, k);
+      // Smooth look target too (prevents lookAt micro-jitter)
+      this._look.x = lerp(this._look.x, tx, k);
+      this._look.y = lerp(this._look.y, ty, k);
+      this._look.z = lerp(this._look.z, tz, k);
     }
     this._initialised = true;
 
-    this._look.set(tx, ty, tz);
     this.camera.lookAt(this._look);
 
-    // Wider FOV for vehicle
-    const wantFov = isHeli ? 62 : 58;
-    this.fov = lerp(this.fov, wantFov, 1 - Math.exp(-4 * dt));
+    const wantFov = isHeli ? 60 : 58;
+    this.fov = lerp(this.fov, wantFov, 1 - Math.exp(-3 * dt));
     if (Math.abs(this.camera.fov - this.fov) > 0.05) {
       this.camera.fov = this.fov;
       this.camera.updateProjectionMatrix();

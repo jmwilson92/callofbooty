@@ -166,7 +166,7 @@ async function start() {
   const lootStats = loot.populate(WORLD.SEED ^ 0x1007);
   const lootCount = lootStats.items ?? lootStats;
   const testRange = new TargetRange(scene, terrain);
-  const bots = new BotSystem(scene, terrain, hash, bus);
+  const bots = new BotSystem(scene, terrain, hash, bus, loot);
   const botCount = bots.spawn();
   const combatRng = mulberry32(WORLD.SEED ^ 0xc0b7);
   let prevFire = false;

@@ -301,6 +301,44 @@ export class LootSystem {
     }, x, z);
   }
 
+  /**
+   * Bot death loot — 1–3 pickups scattered around the body.
+   * @param {number} x
+   * @param {number} z
+   * @param {number} [seed]
+   */
+  spawnBotDrop(x, z, seed = (Math.random() * 1e9) | 0) {
+    const rng = mulberry32(seed ^ 0xb07);
+    const n = 1 + Math.floor(rng() * 3); // 1–3 items
+    const drops = [];
+    for (let i = 0; i < n; i++) {
+      const ang = rng() * Math.PI * 2;
+      const r = 0.45 + rng() * 0.9;
+      const ix = x + Math.cos(ang) * r;
+      const iz = z + Math.sin(ang) * r;
+      // Prefer ammo / heal / armor; occasional weapon
+      let item;
+      const roll = rng();
+      if (roll < 0.42) {
+        const type = weightedPick(rng, { light: 28, heavy: 38, long: 12, shell: 14 });
+        item = { kind: 'ammo', ammoType: type, amount: LOOT.AMMO_PICKUPS[type]?.amount ?? 20 };
+      } else if (roll < 0.62) {
+        item = { kind: 'heal', healType: weightedPick(rng, { bandage: 55, medkit: 25, stim: 20 }) };
+      } else if (roll < 0.78) {
+        item = { kind: 'armor', level: rng() > 0.75 ? 2 : 1, plates: 1 };
+      } else {
+        item = {
+          kind: 'weapon',
+          weaponId: weightedPick(rng, LOOT.WEAPON_SPAWN_WEIGHTS),
+          rarity: rollRarity(rng),
+        };
+      }
+      const rec = this.spawnItemAtGround(item, ix, iz);
+      if (rec) drops.push(rec);
+    }
+    return drops;
+  }
+
   _rollItem(rng) {
     const cls = weightedPick(rng, LOOT.CLASS_WEIGHTS);
     if (cls === 'weapon') {

@@ -18,16 +18,24 @@ function hash2(i, salt) {
 }
 
 export class BotSystem {
-  constructor(scene, terrain, hash, bus) {
+  /**
+   * @param {import('../loot/LootSystem.js').LootSystem|null} [loot]
+   */
+  constructor(scene, terrain, hash, bus, loot = null) {
     this.scene = scene;
     this.terrain = terrain;
     this.hash = hash;
     this.bus = bus;
+    this.loot = loot;
     this.group = new THREE.Group();
     this.group.name = 'bots';
     this.scene.add(this.group);
     this.bots = [];
     this._live = [];
+  }
+
+  setLoot(loot) {
+    this.loot = loot;
   }
 
   /**
@@ -399,9 +407,34 @@ export class BotSystem {
     if (bot.health <= 0) {
       bot.health = 0;
       bot.dead = true;
-      bot.respawnT = BOTS.RESPAWN_TIME;
-      bot.mesh.visible = false;
-      this.bus.emit('bot:killed', { id: bot.id, part });
+      // Body stays ~2 minutes, then despawns / respawns elsewhere
+      bot.respawnT = BOTS.CORPSE_TIME ?? BOTS.RESPAWN_TIME ?? 120;
+      bot.corpse = true;
+      bot.droppedLoot = false;
+      // Keep mesh visible — flop onto side
+      bot.mesh.visible = true;
+      bot.mesh.position.set(bot.x, bot.y + 0.15, bot.z);
+      bot.mesh.rotation.x = 0;
+      bot.mesh.rotation.z = Math.PI / 2 * (bot.id % 2 === 0 ? 1 : -1);
+      bot.mesh.rotation.y = bot.yaw;
+      // Dim corpse
+      bot.mesh.traverse((o) => {
+        if (o.isMesh && o.material) {
+          if (o.material.emissive) {
+            o.material.emissive.setHex(0x000000);
+            o.material.emissiveIntensity = 0;
+          }
+          if (o.material.color && o.material.color.multiplyScalar) {
+            o.material.color.multiplyScalar(0.55);
+          }
+        }
+      });
+      // Drop loot around the body once
+      if (this.loot?.spawnBotDrop) {
+        this.loot.spawnBotDrop(bot.x, bot.z, bot.id * 9973 + 17);
+        bot.droppedLoot = true;
+      }
+      this.bus?.emit?.('bot:killed', { id: bot.id, part, x: bot.x, z: bot.z });
       return { killed: true, applied: dmg };
     }
     // Flinch tint
@@ -423,7 +456,20 @@ export class BotSystem {
   update(dt, playerPos = null, playerVitals = null) {
     for (const bot of this.bots) {
       if (bot.dead) {
+        // Corpse linger — fade slightly near the end
         bot.respawnT -= dt;
+        if (bot.mesh?.visible) {
+          bot.mesh.position.set(bot.x, bot.y + 0.15, bot.z);
+          if (bot.respawnT < 8) {
+            const a = Math.max(0.15, bot.respawnT / 8);
+            bot.mesh.traverse((o) => {
+              if (o.isMesh && o.material && o.material.opacity != null) {
+                o.material.transparent = true;
+                o.material.opacity = a;
+              }
+            });
+          }
+        }
         if (bot.respawnT <= 0) this._respawn(bot);
         continue;
       }
@@ -672,6 +718,44 @@ export class BotSystem {
   }
 
   _respawn(bot) {
+    const resetPose = () => {
+      bot.health = bot.maxHealth;
+      bot.armor = BOTS.ARMOR ?? 0;
+      bot.dead = false;
+      bot.corpse = false;
+      bot.droppedLoot = false;
+      bot.respawnT = 0;
+      bot.state = 'wander';
+      bot.aggroT = 0;
+      bot.mesh.visible = true;
+      bot.mesh.rotation.set(0, bot.yaw, 0);
+      bot.mesh.position.set(bot.x, bot.y, bot.z);
+      bot.mesh.traverse((o) => {
+        if (o.isMesh && o.material) {
+          if (o.material.emissive) {
+            o.material.emissive.setHex(0x000000);
+            o.material.emissiveIntensity = 0;
+          }
+          if (o.material.opacity != null) {
+            o.material.opacity = 1;
+            o.material.transparent = false;
+          }
+          // Restore team color if we stored it
+          if (o.material.color && bot.color != null && o.userData?.isBody) {
+            o.material.color.setHex(bot.color);
+          }
+        }
+      });
+      // Rebuild mesh colors by recreating materials is hard; tint back up
+      bot.mesh.traverse((o) => {
+        if (o.isMesh && o.material?.color && !o.userData?.skipColorRestore) {
+          // Slight brighten from corpse dim
+          o.material.color.offsetHSL(0, 0, 0.08);
+        }
+      });
+      this._syncParts(bot);
+    };
+
     // New point near home
     for (let i = 0; i < 16; i++) {
       const ang = hash2(bot.id + i, 71) * Math.PI * 2;
@@ -682,20 +766,9 @@ export class BotSystem {
         bot.x = x;
         bot.z = z;
         bot.y = this.terrain.heightAt(x, z);
-        bot.health = bot.maxHealth;
-        bot.dead = false;
-        bot.respawnT = 0;
-        bot.mesh.visible = true;
-        bot.mesh.position.set(bot.x, bot.y, bot.z);
+        bot.yaw = hash2(bot.id + i, 7) * Math.PI * 2;
+        resetPose();
         this._pickWaypoint(bot, i + 99);
-        this._syncParts(bot);
-        // reset materials
-        bot.mesh.traverse((o) => {
-          if (o.isMesh && o.material && o.material.emissive) {
-            o.material.emissive.setHex(0x000000);
-            o.material.emissiveIntensity = 0;
-          }
-        });
         return;
       }
     }
@@ -703,11 +776,7 @@ export class BotSystem {
     bot.x = bot.homeX;
     bot.z = bot.homeZ;
     bot.y = this.terrain.heightAt(bot.x, bot.z);
-    bot.health = bot.maxHealth;
-    bot.dead = false;
-    bot.mesh.visible = true;
-    bot.mesh.position.set(bot.x, bot.y, bot.z);
-    this._syncParts(bot);
+    resetPose();
   }
 
   /** Targets for hitscan (live only). */

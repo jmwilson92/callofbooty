@@ -511,9 +511,12 @@ export const VEHICLES = {
   // Third-person chase cam while riding
   CAM_MOTO_DIST: 7.5,
   CAM_MOTO_HEIGHT: 2.4,
-  CAM_HELI_DIST: 16,
-  CAM_HELI_HEIGHT: 5.5,
+  CAM_HELI_DIST: 18,
+  CAM_HELI_HEIGHT: 6.2,
   CAM_LOOK_Y: 1.15,
+  // Heli cam spring rates (higher = snappier, lower = smoother)
+  CAM_HELI_FOLLOW: 7.5,
+  CAM_HELI_SMOOTH: 6.5,
   MOTORCYCLE: {
     count: 18,
     speed: 22,
@@ -528,9 +531,12 @@ export const VEHICLES = {
     count: 2,
     rooftopOnly: true,
     minFloors: 10,
-    speed: 38,
-    accel: 18,
-    climb: 14,
+    speed: 36,
+    accel: 14, // softer accel = less camera lurch
+    climb: 11,
+    yawRate: 1.9, // rad/s max nose turn toward look
+    bankMax: 0.12, // visual bank (keep small — reduces shake)
+    pitchMax: 0.1,
     seatY: 1.1,
     eyeY: 1.55,
     minAGL: 2.5, // min altitude above ground/roof
@@ -618,7 +624,9 @@ export const BOTS = {
   WANDER_RADIUS: 70,
   WAYPOINT_REACH: 1.4,
   WAYPOINT_PAUSE: 0.45,
-  RESPAWN_TIME: 12,
+  // Corpse stays on ground this long before despawn/respawn (seconds)
+  CORPSE_TIME: 120,
+  RESPAWN_TIME: 120,
   // Squads
   TEAM_SIZE_MIN: 4,
   TEAM_SIZE_MAX: 5,
