@@ -64,24 +64,47 @@ export function wall(sink, axis, fixed, a0, a1, yBottom, yTop, color, openings =
   }
 }
 
-/** Floor slab spanning a rect, optionally with a rectangular hole punched in it. */
+/**
+ * Floor slab spanning a rect, optionally with one or more rectangular holes.
+ * `hole` may be a single {x0,z0,x1,z1} or an array of them (elevator + stairs).
+ */
 export function slab(sink, x0, z0, x1, z1, top, color, hole = null) {
   const y0 = top - SLAB;
-  if (!hole) {
+  const holes = !hole ? [] : (Array.isArray(hole) ? hole : [hole]);
+  if (!holes.length) {
     sink.addSpan(x0, y0, z0, x1, top, z1, color);
     return;
   }
-  const hx0 = Math.max(x0, hole.x0), hx1 = Math.min(x1, hole.x1);
-  const hz0 = Math.max(z0, hole.z0), hz1 = Math.min(z1, hole.z1);
-  if (hx1 <= hx0 || hz1 <= hz0) {
-    sink.addSpan(x0, y0, z0, x1, top, z1, color);
-    return;
+  // Strip subdivision on X, then Z — supports multiple non-overlapping holes
+  const xs = [x0, x1];
+  for (const h of holes) {
+    xs.push(Math.max(x0, h.x0), Math.min(x1, h.x1));
   }
-  // Four bands around the hole.
-  sink.addSpan(x0, y0, z0, x1, top, hz0, color);   // south of hole
-  sink.addSpan(x0, y0, hz1, x1, top, z1, color);   // north of hole
-  sink.addSpan(x0, y0, hz0, hx0, top, hz1, color); // west of hole
-  sink.addSpan(hx1, y0, hz0, x1, top, hz1, color); // east of hole
+  const xCuts = [...new Set(xs.filter((v) => v >= x0 - 1e-6 && v <= x1 + 1e-6))].sort((a, b) => a - b);
+  for (let i = 0; i < xCuts.length - 1; i++) {
+    const xa = xCuts[i];
+    const xb = xCuts[i + 1];
+    if (xb - xa < 1e-4) continue;
+    const midX = (xa + xb) * 0.5;
+    const covering = holes.filter((h) => h.x0 < midX && h.x1 > midX);
+    if (!covering.length) {
+      sink.addSpan(xa, y0, z0, xb, top, z1, color);
+      continue;
+    }
+    const zs = [z0, z1];
+    for (const h of covering) {
+      zs.push(Math.max(z0, h.z0), Math.min(z1, h.z1));
+    }
+    const zCuts = [...new Set(zs.filter((v) => v >= z0 - 1e-6 && v <= z1 + 1e-6))].sort((a, b) => a - b);
+    for (let j = 0; j < zCuts.length - 1; j++) {
+      const za = zCuts[j];
+      const zb = zCuts[j + 1];
+      if (zb - za < 1e-4) continue;
+      const midZ = (za + zb) * 0.5;
+      if (covering.some((h) => h.z0 < midZ && h.z1 > midZ)) continue;
+      sink.addSpan(xa, y0, za, xb, top, zb, color);
+    }
+  }
 }
 
 /**

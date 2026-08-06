@@ -379,55 +379,52 @@ export function placeBusinessCenter(sink, terrain, x, z, rng) {
 
 /**
  * Fire-escape switchbacks tight against the +X facade.
- * Stays within building depth; tread rise stays under MAX_STEP_HEIGHT so it is walkable.
- * Never spans into neighboring lots.
+ * Short bay only (not full building depth) so stacked flights leave headroom
+ * and nothing from the flight above blocks the flight below.
  */
 function addFireEscapeStairs(sink, x, z, w, d, baseY, floors, floorH) {
-  const sx = x + w + 0.12;           // flush to facade
-  const landW = 1.55;                // narrow — stays on this building only
-  const landD = Math.min(2.2, d * 0.28);
-  const inset = 0.4;
-  // Cap flights; rest is ladder (prevents long stair runs looking like growth)
-  const maxF = Math.min(floors, 8);
-  const steps = Math.max(8, Math.ceil(floorH / 0.38)); // rise ≤ ~0.38m (step-able)
+  const sx = x + w + 0.1;
+  const landW = 1.45;
+  const landD = 2.1; // fixed short bay — do NOT span full building depth
+  const bayZ0 = z + Math.max(0.5, d * 0.5 - landD - 0.2);
+  const maxF = Math.min(floors, 10);
+  // Step rise under MAX_STEP_HEIGHT (0.45)
+  const steps = Math.max(9, Math.ceil(floorH / 0.36));
   const rise = floorH / steps;
+  const treadH = 0.11; // thin treads so underside clears headroom
 
   for (let f = 0; f < maxF; f++) {
     const y = baseY + f * floorH;
-    const southLand = f % 2 === 0;
-    const zLand = southLand ? z + inset : z + d - landD - inset;
-    // Landing
-    sink.addSpan(sx, y, zLand, sx + landW, y + 0.14, zLand + landD, C.metalLite);
-    // Outer rail
-    sink.addSpan(sx + landW - 0.08, y + 0.14, zLand, sx + landW, y + 1.0, zLand + landD, C.metal, 'thin');
-    sink.addSpan(sx, y + 0.14, zLand, sx + 0.08, y + 1.0, zLand + landD, C.metal, 'thin');
+    const goNorth = f % 2 === 0; // even: climb toward +Z within bay
+    // Landing fills the bay end
+    const zLand = goNorth ? bayZ0 : bayZ0 + landD * 0.15;
+    const landLen = landD * 0.35;
+    sink.addSpan(sx, y, zLand, sx + landW, y + 0.12, zLand + landLen, C.metalLite);
+    // Low handrail only (not a full wall that boxes you in)
+    sink.addSpan(sx + landW - 0.06, y + 0.12, zLand, sx + landW, y + 0.95, zLand + landLen, C.metal, 'thin');
 
     if (f >= maxF - 1) continue;
-    // Flight between landings — only along THIS building's +X face
-    const zStart = southLand ? zLand + landD - 0.15 : zLand + 0.15;
-    const zEnd = southLand
-      ? (z + d - landD - inset + 0.15)
-      : (z + inset + landD - 0.15);
-    const runTotal = zEnd - zStart;
-    if (Math.abs(runTotal) < 0.5) continue;
+    // Flight only spans remaining bay length — stacked above with ~floorH clear
+    const zA = goNorth ? zLand + landLen - 0.05 : bayZ0 + landD - 0.1;
+    const zB = goNorth ? bayZ0 + landD - 0.1 : zLand + 0.05;
+    const runTotal = zB - zA;
+    if (Math.abs(runTotal) < 0.4) continue;
     const stepRun = runTotal / steps;
     for (let k = 0; k < steps; k++) {
       const top = y + (k + 1) * rise;
-      const zz0 = zStart + k * stepRun;
-      const zz1 = zStart + (k + 1) * stepRun;
+      const zz0 = zA + k * stepRun;
+      const zz1 = zA + (k + 1) * stepRun;
       const za = Math.min(zz0, zz1);
       const zb = Math.max(zz0, zz1);
-      // Thick treads the controller can step onto
-      sink.addSpan(sx + 0.1, top - 0.12, za, sx + landW - 0.15, top, zb, C.metal);
+      sink.addSpan(sx + 0.08, top - treadH, za, sx + landW - 0.12, top, zb, C.metal);
     }
   }
-  // Ground pad under first landing only
-  sink.addSpan(sx - 0.2, baseY - 0.04, z + inset, sx + landW + 0.1, baseY + 0.08, z + inset + landD, C.concrete);
+  // Ground pad
+  sink.addSpan(sx - 0.15, baseY - 0.04, bayZ0, sx + landW + 0.05, baseY + 0.08, bayZ0 + landD * 0.4, C.concrete);
 
-  // Above maxF: fire ladder continuation onto roof
   if (floors > maxF) {
-    const lx = sx + 0.4;
-    const lz = z + d * 0.5 - 0.25;
+    const lx = sx + 0.35;
+    const lz = bayZ0 + landD * 0.4;
     const y0 = baseY + maxF * floorH;
     const roofY = baseY + floors * floorH;
     addLadderGeometry(sink, lx, lz, y0, roofY, { roofY, roofX0: x + w * 0.15 });
@@ -510,9 +507,9 @@ function addOpenStaircase(sink, x, z, w, d, baseY, floors, floorH) {
   }
   // Landing at facade for 2nd floor entry
   sink.addSpan(sx - 0.1, y + floorH, z - 0.15, sx + stairW + 0.1, y + floorH + 0.12, z + 0.8, C.concrete);
-  // Rails
-  sink.addSpan(sx - 0.08, y + 0.1, z - maxOut, sx + 0.05, y + floorH + 0.9, z, C.metal, 'thin');
-  sink.addSpan(sx + stairW - 0.05, y + 0.1, z - maxOut, sx + stairW + 0.08, y + floorH + 0.9, z, C.metal, 'thin');
+  // Low side rails only (not full walls that block the flight)
+  sink.addSpan(sx - 0.06, y + 0.15, z - maxOut, sx + 0.02, y + 0.95, z - 0.1, C.metal, 'thin');
+  sink.addSpan(sx + stairW - 0.02, y + 0.15, z - maxOut, sx + stairW + 0.06, y + 0.95, z - 0.1, C.metal, 'thin');
 }
 
 /**
@@ -575,7 +572,7 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
   if (face !== 'W') full(ex, ez, ex + T, ez + ed);
   if (face !== 'E') full(ex + ew - T, ez, ex + ew, ez + ed);
 
-  // Door face: open doorway each floor (opening faces interior room)
+  // Door face: open doorway each floor (walk out of cabin onto landing)
   for (let f = 0; f < floors; f++) {
     const fy0 = baseY + f * floorH;
     const fy1 = fy0 + floorH;
@@ -583,51 +580,52 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
       sink.addSpan(ex, fy0, ez, d0x, fy0 + doorH, ez + T, C.metalLite);
       sink.addSpan(d1x, fy0, ez, ex + ew, fy0 + doorH, ez + T, C.metalLite);
       sink.addSpan(ex, fy0 + doorH, ez, ex + ew, fy1, ez + T, C.metalLite);
-      sink.addSpan(ex, fy0, ez, ex + ew, fy0 + 0.06, ez + T, C.metalLite);
     } else if (face === 'N') {
       sink.addSpan(ex, fy0, ez + ed - T, d0x, fy0 + doorH, ez + ed, C.metalLite);
       sink.addSpan(d1x, fy0, ez + ed - T, ex + ew, fy0 + doorH, ez + ed, C.metalLite);
       sink.addSpan(ex, fy0 + doorH, ez + ed - T, ex + ew, fy1, ez + ed, C.metalLite);
-      sink.addSpan(ex, fy0, ez + ed - T, ex + ew, fy0 + 0.06, ez + ed, C.metalLite);
     } else if (face === 'W') {
       sink.addSpan(ex, fy0, ez, ex + T, fy0 + doorH, d0z, C.metalLite);
       sink.addSpan(ex, fy0, d1z, ex + T, fy0 + doorH, ez + ed, C.metalLite);
       sink.addSpan(ex, fy0 + doorH, ez, ex + T, fy1, ez + ed, C.metalLite);
-      sink.addSpan(ex, fy0, ez, ex + T, fy0 + 0.06, ez + ed, C.metalLite);
     } else {
       sink.addSpan(ex + ew - T, fy0, ez, ex + ew, fy0 + doorH, d0z, C.metalLite);
       sink.addSpan(ex + ew - T, fy0, d1z, ex + ew, fy0 + doorH, ez + ed, C.metalLite);
       sink.addSpan(ex + ew - T, fy0 + doorH, ez, ex + ew, fy1, ez + ed, C.metalLite);
-      sink.addSpan(ex + ew - T, fy0, ez, ex + ew, fy0 + 0.06, ez + ed, C.metalLite);
     }
-    // Call panel on interior side of door (never outside the building shell)
-    const panelInset = 0.12;
+    // Hallway landing threshold OUTSIDE the door so you can step onto the floor
+    const landPad = 1.35;
+    const landY0 = fy0;
+    const landY1 = fy0 + 0.14;
     if (face === 'S') {
-      sink.addSpan(d1x + 0.05, fy0 + 1.0, ez + T + panelInset, d1x + 0.18, fy0 + 1.4, ez + T + panelInset + 0.12, C.metal);
-      neonStrip(sink, d1x + 0.07, fy0 + 1.12, ez + T + panelInset + 0.02, d1x + 0.16, fy0 + 1.25, ez + T + panelInset + 0.1, C.neonLime);
+      sink.addSpan(ex - 0.1, landY0, ez - landPad, ex + ew + 0.1, landY1, ez + 0.05, C.concrete);
     } else if (face === 'N') {
-      sink.addSpan(d1x + 0.05, fy0 + 1.0, ez + ed - T - panelInset - 0.12, d1x + 0.18, fy0 + 1.4, ez + ed - T - panelInset, C.metal);
-      neonStrip(sink, d1x + 0.07, fy0 + 1.12, ez + ed - T - panelInset - 0.1, d1x + 0.16, fy0 + 1.25, ez + ed - T - panelInset - 0.02, C.neonLime);
+      sink.addSpan(ex - 0.1, landY0, ez + ed - 0.05, ex + ew + 0.1, landY1, ez + ed + landPad, C.concrete);
     } else if (face === 'W') {
-      sink.addSpan(ex + T + panelInset, fy0 + 1.0, d1z + 0.05, ex + T + panelInset + 0.12, fy0 + 1.4, d1z + 0.18, C.metal);
+      sink.addSpan(ex - landPad, landY0, ez - 0.1, ex + 0.05, landY1, ez + ed + 0.1, C.concrete);
     } else {
-      sink.addSpan(ex + ew - T - panelInset - 0.12, fy0 + 1.0, d1z + 0.05, ex + ew - T - panelInset, fy0 + 1.4, d1z + 0.18, C.metal);
+      sink.addSpan(ex + ew - 0.05, landY0, ez - 0.1, ex + ew + landPad, landY1, ez + ed + 0.1, C.concrete);
+    }
+    // Call panel beside door (hallway)
+    const panelInset = 0.15;
+    if (face === 'S') {
+      sink.addSpan(d1x + 0.05, fy0 + 1.0, ez - panelInset - 0.12, d1x + 0.18, fy0 + 1.4, ez - panelInset, C.metal);
+      neonStrip(sink, d1x + 0.07, fy0 + 1.12, ez - panelInset - 0.1, d1x + 0.16, fy0 + 1.25, ez - panelInset - 0.02, C.neonLime);
+    } else if (face === 'N') {
+      sink.addSpan(d1x + 0.05, fy0 + 1.0, ez + ed + panelInset, d1x + 0.18, fy0 + 1.4, ez + ed + panelInset + 0.12, C.metal);
+    } else if (face === 'W') {
+      sink.addSpan(ex - panelInset - 0.12, fy0 + 1.0, d1z + 0.05, ex - panelInset, fy0 + 1.4, d1z + 0.18, C.metal);
+    } else {
+      sink.addSpan(ex + ew + panelInset, fy0 + 1.0, d1z + 0.05, ex + ew + panelInset + 0.12, fy0 + 1.4, d1z + 0.18, C.metal);
     }
   }
 
-  // Interior glass on shaft (inside the building only)
-  sink.addSpan(ex + 0.15, baseY + 0.4, ez + 0.15, ex + ew - 0.15, baseY + totalH - 0.3, ez + 0.22, C.glass);
-  sink.addSpan(ex + 0.15, baseY + 0.4, ez + ed - 0.22, ex + ew - 0.15, baseY + totalH - 0.3, ez + ed - 0.15, C.glass);
+  // Interior glass accents on non-door faces only
+  if (face !== 'S') sink.addSpan(ex + 0.15, baseY + 0.4, ez + 0.15, ex + ew - 0.15, baseY + totalH - 0.3, ez + 0.22, C.glass);
+  if (face !== 'N') sink.addSpan(ex + 0.15, baseY + 0.4, ez + ed - 0.22, ex + ew - 0.15, baseY + totalH - 0.3, ez + ed - 0.15, C.glass);
 
-  // Interior lobby mat only (inside footprint)
-  sink.addSpan(
-    Math.max(x + 0.5, ex - 0.5), baseY + 0.02, Math.max(z + 0.5, ez - 0.5),
-    Math.min(x + w - 0.5, ex + ew + 0.5), baseY + 0.1, Math.min(z + d - 0.5, ez + ed + 0.5),
-    C.dark
-  );
-
-  // Rideable car is a live mesh (ElevatorSystem) — not a static sealed box
-  const cabinPad = 0.22;
+  // Rideable car is a live mesh (ElevatorSystem)
+  const cabinPad = 0.18;
   worldElevators.register({
     x0: ex + cabinPad,
     z0: ez + cabinPad,
@@ -637,9 +635,81 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
     floors,
     floorH,
     startFloor: 0,
+    doorFace: face,
   });
 
-  return { x0: ex - 0.05, z0: ez - 0.05, x1: ex + ew + 0.05, z1: ez + ed + 0.05, ex, ez, ew, ed };
+  return {
+    x0: ex - 0.05, z0: ez - 0.05, x1: ex + ew + 0.05, z1: ez + ed + 0.05,
+    ex, ez, ew, ed, face,
+  };
+}
+
+/**
+ * Interior switchback stair core for hollow skyline towers.
+ * Returns a hole rect to punch through floor slabs.
+ */
+function addInteriorStairs(sink, x, z, w, d, baseY, floors, floorH, elevHole) {
+  // Stair well in NW corner unless elevator is there — prefer SE if elev is NW
+  let sx0 = x + 0.6;
+  let sz0 = z + 0.6;
+  const coreW = Math.min(3.4, w * 0.32);
+  const coreD = Math.min(4.2, d * 0.38);
+  if (elevHole) {
+    const elevCX = (elevHole.x0 + elevHole.x1) * 0.5;
+    const elevCZ = (elevHole.z0 + elevHole.z1) * 0.5;
+    // Place stairs away from elevator
+    if (elevCX < x + w * 0.5) sx0 = x + w - coreW - 0.6;
+    else sx0 = x + 0.6;
+    if (elevCZ < z + d * 0.5) sz0 = z + d - coreD - 0.6;
+    else sz0 = z + 0.6;
+  }
+  const sx1 = sx0 + coreW;
+  const sz1 = sz0 + coreD;
+  const stairW = Math.min(1.35, coreW * 0.42);
+  const runLen = coreD - 1.4;
+  const steps = Math.max(10, Math.ceil(floorH / 0.34));
+
+  for (let f = 0; f < floors; f++) {
+    const y = baseY + f * floorH;
+    const goNorth = f % 2 === 0;
+    // Landing
+    if (goNorth) {
+      sink.addSpan(sx0, y, sz0, sx1, y + 0.14, sz0 + 1.15, C.concrete);
+      // Flight along +Z, thin treads
+      const zA = sz0 + 1.1;
+      const zB = sz0 + 1.1 + runLen;
+      const stepRun = (zB - zA) / steps;
+      const rise = floorH / steps;
+      for (let k = 0; k < steps; k++) {
+        const top = y + (k + 1) * rise;
+        const zz0 = zA + k * stepRun;
+        const zz1 = zz0 + stepRun;
+        sink.addSpan(sx0 + 0.15, top - 0.12, zz0, sx0 + 0.15 + stairW, top, zz1, C.concrete);
+      }
+      // Upper landing
+      sink.addSpan(sx0, y + floorH, sz1 - 1.15, sx1, y + floorH + 0.14, sz1, C.concrete);
+    } else {
+      sink.addSpan(sx0, y, sz1 - 1.15, sx1, y + 0.14, sz1, C.concrete);
+      const zA = sz1 - 1.1;
+      const zB = sz0 + 1.1;
+      const stepRun = (zB - zA) / steps;
+      const rise = floorH / steps;
+      for (let k = 0; k < steps; k++) {
+        const top = y + (k + 1) * rise;
+        const zz0 = zA + k * stepRun;
+        const zz1 = zz0 + stepRun;
+        const za = Math.min(zz0, zz1);
+        const zb = Math.max(zz0, zz1);
+        sink.addSpan(sx1 - 0.15 - stairW, top - 0.12, za, sx1 - 0.15, top, zb, C.concrete);
+      }
+      sink.addSpan(sx0, y + floorH, sz0, sx1, y + floorH + 0.14, sz0 + 1.15, C.concrete);
+    }
+    // Low rail (not a blocking wall)
+    sink.addSpan(sx0, y + 0.14, sz0, sx0 + 0.06, y + 0.95, sz1, C.metal, 'thin');
+    sink.addSpan(sx1 - 0.06, y + 0.14, sz0, sx1, y + 0.95, sz1, C.metal, 'thin');
+  }
+
+  return { x0: sx0 - 0.05, z0: sz0 - 0.05, x1: sx1 + 0.05, z1: sz1 + 0.05 };
 }
 
 /**
@@ -776,15 +846,23 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null) {
     sink.addSpan(x + bodyW * 0.1, topY, z + d * 0.1, x + bodyW * 0.9, seat + h, z + d * 0.9, band);
   }
 
-  // Floor slabs with elevator shaft hole
-  const hole = elevHole
-    ? { x0: elevHole.x0, z0: elevHole.z0, x1: elevHole.x1, z1: elevHole.z1 }
-    : null;
-  slab(sink, x + T, z + T, x + bodyW - T, z + d - T, seat + 0.18, C.concrete, hole);
+  // Interior stairs (always) + holes for elevator + stair well
+  const stairHole = addInteriorStairs(sink, x, z, bodyW, d, seat, fCount, floorH, elevHole);
+  const holes = [];
+  if (elevHole) {
+    holes.push({ x0: elevHole.x0, z0: elevHole.z0, x1: elevHole.x1, z1: elevHole.z1 });
+  }
+  if (stairHole) holes.push(stairHole);
+
+  slab(sink, x + T, z + T, x + bodyW - T, z + d - T, seat + 0.18, C.concrete, holes);
   for (let f = 1; f < fCount; f++) {
     const y = seat + f * floorH;
-    slab(sink, x + T * 0.5, z + T * 0.5, x + bodyW - T * 0.5, z + d - T * 0.5, y + 0.16, C.concrete, hole);
+    slab(sink, x + T * 0.5, z + T * 0.5, x + bodyW - T * 0.5, z + d - T * 0.5, y + 0.16, C.concrete, holes);
   }
+  // Roof slab — solid (no elevator hole) so you don't fall through, with hatch gap near east for ladder
+  const roof = seat + h;
+  slab(sink, x + T, z + T, x + bodyW - T, z + d - T, roof + 0.16, C.concrete, stairHole);
+
   for (let f = 2; f < fCount; f += 2) {
     const y = seat + f * floorH;
     sink.addSpan(x - 0.04, y, z - 0.04, x + bodyW + 0.04, y + 0.1, z + 0.08, band);
@@ -799,22 +877,19 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null) {
   if (mode === 0) addFireEscapeStairs(sink, x, z, bodyW, d, seat, fCount, floorH);
   else addLadder(sink, x, z, bodyW, d, seat, fCount, floorH);
 
-  const roof = seat + h;
-  // Roof deck extends closer to the +X edge so ladder walkway can reach it
-  sink.addSpan(x + bodyW * 0.08, roof, z + d * 0.08, x + bodyW * 0.96, roof + 0.16, z + d * 0.92, C.concrete);
-  // Low parapet (not a full wall at ladder)
+  // Low parapet (gap on +X for ladder hop-on)
   sink.addSpan(x + bodyW * 0.08, roof + 0.16, z + d * 0.08, x + bodyW * 0.96, roof + 0.55, z + d * 0.08 + 0.2, C.concrete);
   sink.addSpan(x + bodyW * 0.08, roof + 0.16, z + d * 0.92 - 0.2, x + bodyW * 0.96, roof + 0.55, z + d * 0.92, C.concrete);
   sink.addSpan(x + bodyW * 0.08, roof + 0.16, z + d * 0.08, x + bodyW * 0.08 + 0.2, roof + 0.55, z + d * 0.92, C.concrete);
-  // East parapet has a gap for ladder hop-on
   const gapZ0 = z + d * 0.4;
   const gapZ1 = z + d * 0.6;
   sink.addSpan(x + bodyW * 0.96 - 0.2, roof + 0.16, z + d * 0.08, x + bodyW * 0.96, roof + 0.55, gapZ0, C.concrete);
   sink.addSpan(x + bodyW * 0.96 - 0.2, roof + 0.16, gapZ1, x + bodyW * 0.96, roof + 0.55, z + d * 0.92, C.concrete);
 
-  sink.addSpan(x + bodyW * 0.25, roof + 0.16, z + d * 0.25, x + bodyW * 0.75, roof + 1.6, z + d * 0.75, C.metal);
+  // Small roof HVAC (not a huge slab that traps you)
+  sink.addSpan(x + bodyW * 0.35, roof + 0.16, z + d * 0.35, x + bodyW * 0.65, roof + 1.4, z + d * 0.65, C.metal);
   if (fCount >= 14) {
-    post(sink, x + bodyW / 2 - 0.25, roof + 1.6, z + d / 2 - 0.25, 10 + rng() * 12, 0.5, C.metalLite);
+    post(sink, x + bodyW / 2 - 0.25, roof + 1.4, z + d / 2 - 0.25, 10 + rng() * 12, 0.5, C.metalLite);
     neonStrip(sink, x + bodyW / 2 - 0.4, roof + 12, z + d / 2 - 0.4, x + bodyW / 2 + 0.4, roof + 14, z + d / 2 + 0.4, C.redHot);
   }
   return { w: bodyW + 2.2, d: d + 1, h, floors: fCount, x, z };
