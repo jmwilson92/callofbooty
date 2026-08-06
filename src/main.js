@@ -194,7 +194,7 @@ async function start() {
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
     `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
     `${assetPropStats.placed} glb-props · doors ${doorCount} · elevators ${elevCount} · ` +
-    `vehicles ${vehicleCount} · rappels ${rappelCount} · loot ${lootStats.items ?? 0} items + ${lootStats.cases ?? 0} cases · bots ${botCount} · ` +
+    `vehicles ${vehicleCount} · rappels ${typeof rappelCount === 'object' ? `V${rappelCount.vertical}/H${rappelCount.horizontal}` : rappelCount} · loot ${lootStats.items ?? 0} items + ${lootStats.cases ?? 0} cases · bots ${botCount} · ` +
     `road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
   );
 
@@ -229,37 +229,45 @@ async function start() {
         if (input.actionPressed('quickSwap')) weapons.quickSwap();
         if (input.actionPressed('reload')) weapons.startReload();
 
-        // E = vehicle → loot → elevator → door
+        // E = vehicle → rappel/zipline → loot → elevator → door
         if (input.actionPressed('interact')) {
           const usedVeh = vehicles.tryUse(controller);
           if (!usedVeh) {
-            const gotLoot = loot.tryPickup(
-              weapons,
-              controller.pos.x,
-              controller.pos.y + controller.height * 0.35,
-              controller.pos.z
-            );
-            if (!gotLoot) {
-              // Shift+E = elevator express to top (or ground if already top)
-              const usedElev = elevators.tryUse(controller, {
-                express: input.action('sprint'),
-              });
-              if (!usedElev) {
-                doors.tryToggle(
-                  controller.pos.x,
-                  controller.pos.y + controller.height * 0.5,
-                  controller.pos.z
-                );
+            const usedRappel = rappels.tryUse(controller, {
+              express: true,
+              up: true,
+            });
+            if (!usedRappel) {
+              const gotLoot = loot.tryPickup(
+                weapons,
+                controller.pos.x,
+                controller.pos.y + controller.height * 0.35,
+                controller.pos.z
+              );
+              if (!gotLoot) {
+                // Shift+E = elevator express to top (or ground if already top)
+                const usedElev = elevators.tryUse(controller, {
+                  express: input.action('sprint'),
+                });
+                if (!usedElev) {
+                  doors.tryToggle(
+                    controller.pos.x,
+                    controller.pos.y + controller.height * 0.5,
+                    controller.pos.z
+                  );
+                }
               }
             }
           }
         }
 
-        // Riding: vehicle drives the capsule; else normal on-foot control
+        // Riding: vehicle → rappel express → on foot
         if (!vehicles.update(dt, controller, input, playerCam.yaw)) {
-          controller.tick(dt, input, playerCam.yaw);
+          if (!rappels.update(dt, controller, input)) {
+            controller.tick(dt, input, playerCam.yaw);
+          }
         }
-        elevators.update(dt, vehicles.riding ? null : controller);
+        elevators.update(dt, vehicles.riding || rappels.riding ? null : controller);
 
         // Combat: bots move/engage first so bullets test current hitboxes
         const moving = controller.speed > 0.6;

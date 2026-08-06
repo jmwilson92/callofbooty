@@ -74,17 +74,19 @@ export const LADDER = {
   CENTER_PULL: 6.0,
 };
 
-/** Roof rappel lines — zip up building facades to the roof. */
+/** Roof rappel / zipline — express rides (no mid-floor stops). */
 export const RAPPEL = {
-  // Max buildings to equip (tall ones preferred)
+  // Vertical ropes on tall facades
   MAX_COUNT: 28,
   MIN_FLOORS: 5,
-  // Climb speed (m/s) — much faster than ladders
-  SPEED: 16,
-  // Horizontal size of climb volume around the rope
-  RADIUS: 0.55,
-  // Offset from south facade (out into street)
   FACADE_OUT: 0.55,
+  // Express zip speed (m/s) along the cable
+  ZIP_SPEED: 34,
+  // Horizontal building-to-building lines
+  HORIZONTAL_COUNT: 8,
+  HORIZONTAL_MIN_DIST: 14,
+  HORIZONTAL_MAX_DIST: 48,
+  HORIZONTAL_MIN_FLOORS: 6,
 };
 
 export const CAMERA = {
