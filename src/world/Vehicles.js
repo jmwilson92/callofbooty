@@ -1157,8 +1157,36 @@ export class VehicleSystem {
       x: lock.x, y: lock.y, z: lock.z,
       kind: lock.kind, id: lock.id, target: lock.target,
     };
-    // Leave tubes straight along body, then seek pin
-    const fireDir = new THREE.Vector3(bodyF.x, -0.02, bodyF.z).normalize();
+
+    // Path profile: loft if target is above heli, else fly straight to pin
+    const launchY = v.y + 0.7;
+    const horiz = Math.hypot(lock.x - v.x, lock.z - v.z);
+    const altDelta = lock.y - launchY;
+    const needLoft = altDelta > 4; // target clearly above launch
+    // Climb high enough to clear, then dive onto the pin
+    const loftExtra = Math.min(45, Math.max(12, altDelta + 10 + horiz * 0.08));
+    const loftY = (needLoft ? lock.y : launchY) + (needLoft ? loftExtra : 0);
+    // Loft waypoint ~halfway to target horizontally, at loft altitude
+    const loftT = 0.42;
+    const loftX = v.x + (lock.x - v.x) * loftT;
+    const loftZ = v.z + (lock.z - v.z) * loftT;
+
+    // Leave tubes: climb-out if lofting, else nose-forward toward target
+    let fireDir;
+    if (needLoft) {
+      fireDir = new THREE.Vector3(bodyF.x * 0.75, 0.65, bodyF.z * 0.75).normalize();
+    } else {
+      // Point roughly at target (higher → lower strike)
+      const tx = lock.x - v.x;
+      const ty = lock.y - launchY;
+      const tz = lock.z - v.z;
+      const tl = Math.hypot(tx, ty, tz) || 1;
+      fireDir = new THREE.Vector3(
+        tx / tl * 0.85 + bodyF.x * 0.15,
+        ty / tl * 0.85,
+        tz / tl * 0.85 + bodyF.z * 0.15
+      ).normalize();
+    }
 
     const fireSide = (side, remaining, tubes) => {
       if (remaining <= 0) return;
@@ -1194,21 +1222,25 @@ export class VehicleSystem {
         vy: fireDir.y * speed,
         vz: fireDir.z * speed,
         speed,
-        life: 6,
+        life: needLoft ? 8 : 6,
         age: 0,
         phase: 'boost',
-        boostT: cfg.rocketBoostTime ?? 0.42,
+        boostT: needLoft ? 0.28 : (cfg.rocketBoostTime ?? 0.35),
         damage: cfg.rocketDamage ?? 95,
         splash: cfg.rocketSplash ?? 5.5,
         targets,
         guided: true,
-        turnRate: (cfg.rocketTurnRate ?? 3.8) * 1.35,
+        turnRate: (cfg.rocketTurnRate ?? 3.8) * (needLoft ? 1.5 : 1.35),
         lock: { ...lockPoint },
         lockTarget: lockPoint.target ?? null,
         lockHeli: lock.kind === 'heli' ? lock.target : null,
         accuracy: 0.98,
         owner: v,
         aimMode: 'map',
+        // Loft profile when striking a higher target (e.g. roof from street level)
+        mapPath: needLoft ? 'loft' : 'direct',
+        loftX, loftY, loftZ,
+        guidePhase: needLoft ? 'climb' : 'terminal', // climb → terminal dive
       });
       this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(ox, oy, oz), 1.6);
     };
@@ -1370,13 +1402,12 @@ export class VehicleSystem {
 
       // FREE dumbfire: never guide, never gravity-curve — laser-straight
       if (r.aimMode === 'direct' || r.guided === false || r.noGravity) {
-        // Keep constant velocity from pods (no drop, no seek)
         r.phase = 'boost';
       } else if (r.phase === 'boost') {
         r.boostT = (r.boostT ?? 0.42) - dt;
         if (r.boostT <= 0) r.phase = 'guide';
-        // slight gravity during boost (map missiles only)
-        r.vy -= 2 * dt;
+        // Keep loft climb energy; light drop only on direct path
+        if (r.mapPath !== 'loft') r.vy -= 1.5 * dt;
       } else if (r.guided && r.phase === 'guide') {
         // ECM spoof: if flare cloud near missile, retarget toward flare
         let spoofed = false;
@@ -1385,11 +1416,13 @@ export class VehicleSystem {
             r.lock = { x: c.x, y: c.y + 2, z: c.z, kind: 'flare' };
             r.lockTarget = null;
             r.lockHeli = null;
+            r.guidePhase = 'terminal';
             spoofed = true;
             break;
           }
         }
 
+        // Final strike point (live bots/helis update)
         let tx = r.lock?.x;
         let ty = r.lock?.y;
         let tz = r.lock?.z;
@@ -1406,10 +1439,27 @@ export class VehicleSystem {
           if (r.lock) { r.lock.x = tx; r.lock.y = ty; r.lock.z = tz; }
         }
 
-        if (Number.isFinite(tx + ty + tz)) {
-          const dx = tx - r.x;
-          const dy = ty - r.y;
-          const dz = tz - r.z;
+        // LOFT: climb to altitude above target first, then dive
+        // DIRECT (higher than target): fly straight at pin
+        let seekX = tx;
+        let seekY = ty;
+        let seekZ = tz;
+        if (!spoofed && r.mapPath === 'loft' && r.guidePhase !== 'terminal') {
+          seekX = r.loftX ?? tx;
+          seekY = r.loftY ?? (ty + 20);
+          seekZ = r.loftZ ?? tz;
+          const nearLoft = Math.hypot(r.x - seekX, r.z - seekZ) < 12;
+          const highEnough = r.y >= (r.loftY ?? seekY) - 3;
+          if (highEnough || nearLoft) {
+            r.guidePhase = 'terminal';
+            seekX = tx; seekY = ty; seekZ = tz;
+          }
+        }
+
+        if (Number.isFinite(seekX + seekY + seekZ)) {
+          const dx = seekX - r.x;
+          const dy = seekY - r.y;
+          const dz = seekZ - r.z;
           const dist = Math.hypot(dx, dy, dz) || 1;
           const wantX = dx / dist;
           const wantY = dy / dist;
@@ -1418,7 +1468,9 @@ export class VehicleSystem {
           const curX = r.vx / sp;
           const curY = r.vy / sp;
           const curZ = r.vz / sp;
-          const maxTurn = (r.turnRate ?? 3.8) * dt;
+          // Climb phase turns a bit harder upward
+          const turnMul = (r.mapPath === 'loft' && r.guidePhase !== 'terminal') ? 1.25 : 1;
+          const maxTurn = (r.turnRate ?? 3.8) * turnMul * dt;
           const dot = THREE.MathUtils.clamp(curX * wantX + curY * wantY + curZ * wantZ, -1, 1);
           const ang = Math.acos(dot);
           if (ang > 1e-4) {
@@ -1428,7 +1480,7 @@ export class VehicleSystem {
             let nz = curZ + (wantZ - curZ) * t;
             const nl = Math.hypot(nx, ny, nz) || 1;
             nx /= nl; ny /= nl; nz /= nl;
-            const hold = Math.min((r.speed ?? 92) * 1.06, sp + 10 * dt);
+            const hold = Math.min((r.speed ?? 92) * 1.08, sp + 12 * dt);
             r.vx = nx * hold;
             r.vy = ny * hold;
             r.vz = nz * hold;
@@ -1448,11 +1500,12 @@ export class VehicleSystem {
         const ny = r.y + dy;
         const nz = r.z + dz;
 
-        // Proximity fuse near lock — MAP guided only (not free dumbfire)
-        if (r.guided && r.lock && r.age > 0.15) {
+        // Proximity fuse on final target — MAP guided only, and only after climb (if lofting)
+        const canFuse = r.guided && r.lock && r.age > 0.15
+          && (r.mapPath !== 'loft' || r.guidePhase === 'terminal');
+        if (canFuse) {
           const pd = Math.hypot(r.lock.x - nx, r.lock.y - ny, r.lock.z - nz);
-          if (pd < 2.2) {
-            // Snap boom to lock surface if it's a roof/building aim
+          if (pd < 2.4) {
             let ex = nx;
             let ey = ny;
             let ez = nz;
@@ -1464,6 +1517,19 @@ export class VehicleSystem {
             this._explodeRocket(r, ex, ey, ez);
             hit = true;
             break;
+          }
+        }
+        // During loft climb, ignore mid-building clips if still well below loft height
+        if (r.mapPath === 'loft' && r.guidePhase !== 'terminal' && this._pointInBuilding(nx, ny, nz)) {
+          const b = this._buildingAt(nx, nz);
+          const roof = b
+            ? (b.roofY ?? ((b.baseY ?? 0) + (b.floors || 1) * 3.5)) + 0.25
+            : ny;
+          // Only pass through if we're climbing above this roof toward loft
+          if (r.loftY != null && r.loftY > roof + 4 && ny < r.loftY - 2) {
+            // skip solid hit this step — keep climbing
+            r.x = nx; r.y = ny; r.z = nz;
+            continue;
           }
         }
 

@@ -223,7 +223,7 @@ export function createHud() {
           : ' · click map (M) to lock target';
         gunnerBadge.innerHTML =
           `<div style="font-size:15px">MAP MODE</div>` +
-          `<div style="font-size:11px;font-weight:600;opacity:0.9;margin-top:4px;letter-spacing:0.04em">Missiles hit map pin / rooftops${tgt}</div>` +
+          `<div style="font-size:11px;font-weight:600;opacity:0.9;margin-top:4px;letter-spacing:0.04em">Pin strike · loft if target is higher${tgt}</div>` +
           `<div style="font-size:10px;opacity:0.65;margin-top:5px">T · free aim · Rockets ${state.volleys ?? '—'}/8 · Flares ${state.flares ?? '—'}</div>`;
       } else {
         gunnerBadge.style.background = 'rgba(8, 28, 40, 0.88)';
