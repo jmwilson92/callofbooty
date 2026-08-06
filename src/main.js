@@ -123,8 +123,12 @@ async function start() {
   scene.add(elevators.group);
 
   const controller = new Controller(terrain, hash, bus);
-  // Seat the player on the surface at spawn rather than trusting the config Y.
-  controller.pos.y = terrain.heightAt(PLAYER.SPAWN.x, PLAYER.SPAWN.z) + 0.5;
+  // Temp seat on ground; moved to roof pad after helis spawn
+  controller.pos.set(
+    PLAYER.SPAWN.x,
+    terrain.heightAt(PLAYER.SPAWN.x, PLAYER.SPAWN.z) + 0.5,
+    PLAYER.SPAWN.z
+  );
   controller.prevPos.copy(controller.pos);
 
   const playerCam = new PlayerCamera(window.innerWidth / window.innerHeight);
@@ -145,6 +149,16 @@ async function start() {
   // Vehicles need hash + effects for collision / rockets
   const vehicles = new VehicleSystem(scene, terrain, bus, hash, effects);
   const vehicleCount = vehicles.spawn();
+  // Drop in on the roof next to a heli
+  const heliSpawn = vehicles.getHeliRoofSpawn();
+  if (heliSpawn) {
+    controller.pos.set(heliSpawn.x, heliSpawn.y, heliSpawn.z);
+    controller.prevPos.copy(controller.pos);
+    controller.vel.set(0, 0, 0);
+    controller.grounded = true;
+    playerCam.yaw = heliSpawn.yaw;
+    playerCam._initialised = false; // snap cam on first frame
+  }
   // Roof rappel lines (after buildings exist)
   const rappels = new RappelSystem(scene, terrain);
   const rappelCount = rappels.spawn();

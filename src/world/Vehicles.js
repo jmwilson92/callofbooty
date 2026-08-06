@@ -96,6 +96,37 @@ export class VehicleSystem {
     return this.vehicles.length;
   }
 
+  /**
+   * Player spawn next to the first roof helicopter (feet on deck).
+   * @returns {{ x:number, y:number, z:number, yaw:number }|null}
+   */
+  getHeliRoofSpawn() {
+    for (const v of this.vehicles) {
+      if (v.type !== 'helicopter') continue;
+      // Prefer roof birds (well above terrain)
+      const ground = this.terrain.heightAt(v.x, v.z);
+      if (v.y < ground + 6) continue;
+      const r = rightXZ(v.yaw);
+      // Stand on the pad beside the skids
+      const x = v.x + r.x * 4.2;
+      const z = v.z + r.z * 4.2;
+      const y = v.y; // same deck as heli base
+      return { x, y: y + 0.05, z, yaw: v.yaw + Math.PI }; // face the heli
+    }
+    // Fallback: any heli
+    for (const v of this.vehicles) {
+      if (v.type !== 'helicopter') continue;
+      const r = rightXZ(v.yaw);
+      return {
+        x: v.x + r.x * 4.2,
+        y: v.y + 0.05,
+        z: v.z + r.z * 4.2,
+        yaw: v.yaw + Math.PI,
+      };
+    }
+    return null;
+  }
+
   _spawnRoofHelis(count, rng) {
     const minF = VEHICLES.HELICOPTER?.minFloors ?? 10;
     const roofs = (worldBuildings || [])
@@ -109,14 +140,20 @@ export class VehicleSystem {
 
     let hi = 0;
     const used = [];
+    // Guarantee first heli on the best roof near spawn (player drop point)
     for (const { b } of roofs) {
       if (hi >= count) break;
       const cx = b.x + b.w * 0.5;
       const cz = b.z + b.d * 0.5;
       if (used.some((u) => Math.hypot(u.x - cx, u.z - cz) < 18)) continue;
+      // Slightly offset heli so there's room to stand on the deck
+      const yaw = rng() * Math.PI * 2;
+      const side = rightXZ(yaw);
+      const hx = cx - side.x * 1.5;
+      const hz = cz - side.z * 1.5;
       const roofY = (b.roofY ?? (b.baseY + b.floors * 3.5)) + 0.35;
-      this._addHelicopter(cx, roofY, cz, rng() * Math.PI * 2, rng, true);
-      used.push({ x: cx, z: cz });
+      this._addHelicopter(hx, roofY, hz, yaw, rng, true);
+      used.push({ x: hx, z: hz });
       hi++;
     }
     while (hi < count) {
