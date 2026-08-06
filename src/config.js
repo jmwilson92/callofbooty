@@ -170,9 +170,9 @@ export const WORLD = {
   },
 
   // Clearer air: push fog out so the playspace stays readable.
-  FOG_NEAR: 900,
-  FOG_FAR: 2200,
-  SKY_COLOR: 0x9ec6de,
+  FOG_NEAR: 1100,
+  FOG_FAR: 2600,
+  SKY_COLOR: 0xa8c8dc,
 
   // Brighter, cleaner late-afternoon light
   SUN_ELEVATION_DEG: 42,

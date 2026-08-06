@@ -483,7 +483,6 @@ export class LootSystem {
     c.open = true;
     c.openT = 0;
     if (c.mesh.userData.stripe) c.mesh.userData.stripe.visible = false;
-    if (c.mesh.userData.light) c.mesh.userData.light.intensity = 0.15;
     // Spit items in a tight arc in front of the case
     const cos = Math.cos(c.yaw);
     const sin = Math.sin(c.yaw);
