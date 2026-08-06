@@ -945,31 +945,62 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain
     ? addElevatorBank(sink, x, z, bodyW, d, seat, fCount, floorH, rng)
     : null;
 
-  // Exterior shell — south facade has a full ground-floor door opening
+  // Exterior shell — window bands on all faces (see-through breakable glass)
   const doorW = Math.min(3.4, Math.max(2.4, bodyW * 0.28));
   const doorCx = x + bodyW * 0.5;
   const doorH = 2.9;
+  const winBot = 0.95;
+  const winTop = 2.35;
+  const mullion = 0.35;
+  // Pane helper: solid mullions + glass fill
+  const glassFaceX = (x0, x1, yB, yT, zFixed, zIn) => {
+    // Mullion edges
+    sink.addSpan(x0, yB, zFixed, x0 + mullion, yT, zIn, col);
+    sink.addSpan(x1 - mullion, yB, zFixed, x1, yT, zIn, col);
+    sink.addSpan(x0 + mullion, yB, Math.min(zFixed, zIn), x1 - mullion, yB + 0.08, Math.max(zFixed, zIn), col);
+    sink.addSpan(x0 + mullion, yT - 0.08, Math.min(zFixed, zIn), x1 - mullion, yT, Math.max(zFixed, zIn), col);
+    sink.addSpan(x0 + mullion, yB + 0.08, Math.min(zFixed, zIn), x1 - mullion, yT - 0.08, Math.max(zFixed, zIn), C.glass, 'glass');
+  };
+  const glassFaceZ = (z0, z1, yB, yT, xFixed, xIn) => {
+    sink.addSpan(xFixed, yB, z0, xIn, yT, z0 + mullion, col);
+    sink.addSpan(xFixed, yB, z1 - mullion, xIn, yT, z1, col);
+    sink.addSpan(Math.min(xFixed, xIn), yB, z0 + mullion, Math.max(xFixed, xIn), yB + 0.08, z1 - mullion, col);
+    sink.addSpan(Math.min(xFixed, xIn), yT - 0.08, z0 + mullion, Math.max(xFixed, xIn), yT, z1 - mullion, col);
+    sink.addSpan(Math.min(xFixed, xIn), yB + 0.08, z0 + mullion, Math.max(xFixed, xIn), yT - 0.08, z1 - mullion, C.glass, 'glass');
+  };
+
   for (let f = 0; f < fCount; f++) {
     const y0 = seat + f * floorH;
     const y1 = y0 + floorH;
     const isGround = f === 0;
+    const yB = y0 + winBot;
+    const yT = y0 + winTop;
     // South wall
     if (isGround) {
       // Open portal for exterior entrance (doors added by addMainEntrance outside)
       sink.addSpan(x, y0, z, doorCx - doorW / 2, y1, z + T, col);
       sink.addSpan(doorCx + doorW / 2, y0, z, x + bodyW, y1, z + T, col);
       sink.addSpan(doorCx - doorW / 2, y0 + doorH, z, doorCx + doorW / 2, y1, z + T, col);
+      // Side window panes flanking the entrance
+      glassFaceX(x + 0.3, doorCx - doorW / 2 - 0.15, yB, yT, z, z + T * 0.55);
+      glassFaceX(doorCx + doorW / 2 + 0.15, x + bodyW - 0.3, yB, yT, z, z + T * 0.55);
     } else {
-      sink.addSpan(x, y0, z, x + bodyW, y0 + 0.9, z + T, col);
-      sink.addSpan(x, y0 + 2.4, z, x + bodyW, y1, z + T, col);
-      sink.addSpan(x, y0 + 0.9, z, x + 0.4, y0 + 2.4, z + T, col);
-      sink.addSpan(x + bodyW - 0.4, y0 + 0.9, z, x + bodyW, y0 + 2.4, z + T, col);
-      sink.addSpan(x + 0.4, y0 + 0.95, z + 0.05, x + bodyW - 0.4, y0 + 2.35, z + T * 0.5, C.glass);
+      sink.addSpan(x, y0, z, x + bodyW, yB, z + T, col);
+      sink.addSpan(x, yT, z, x + bodyW, y1, z + T, col);
+      glassFaceX(x, x + bodyW, yB, yT, z, z + T * 0.55);
     }
-    // North / West / East
-    sink.addSpan(x, y0, z + d - T, x + bodyW, y1, z + d, col);
-    sink.addSpan(x, y0, z, x + T, y1, z + d, col);
-    sink.addSpan(x + bodyW - T, y0, z, x + bodyW, y1, z + d, col);
+    // North
+    sink.addSpan(x, y0, z + d - T, x + bodyW, yB, z + d, col);
+    sink.addSpan(x, yT, z + d - T, x + bodyW, y1, z + d, col);
+    glassFaceX(x, x + bodyW, yB, yT, z + d - T, z + d - T * 0.45);
+    // West
+    sink.addSpan(x, y0, z, x + T, yB, z + d, col);
+    sink.addSpan(x, yT, z, x + T, y1, z + d, col);
+    glassFaceZ(z + 0.4, z + d - 0.4, yB, yT, x, x + T * 0.55);
+    // East
+    sink.addSpan(x + bodyW - T, y0, z, x + bodyW, yB, z + d, col);
+    sink.addSpan(x + bodyW - T, yT, z, x + bodyW, y1, z + d, col);
+    glassFaceZ(z + 0.4, z + d - 0.4, yB, yT, x + bodyW - T, x + bodyW - T * 0.45);
   }
 
   // Podium / setback — NEVER cover the south entrance or fill the interior

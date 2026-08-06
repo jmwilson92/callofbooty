@@ -38,9 +38,11 @@ function buildWorld() {
   buildAllStructures(sink, terrain, rng);
   const structureStats = scatterStructures(sink, terrain, rng);
   const propStats = scatterProps(sink, terrain, rng);
+  // Meshes first so glass instances link into collision boxes for breakables
+  const structureMeshes = sink.buildMeshes();
   sink.registerCollision(hash);
 
-  return { terrain, hash, sink, propStats, structureStats, roadPieces: terrain.roads?.length ?? 0 };
+  return { terrain, hash, sink, propStats, structureStats, roadPieces: terrain.roads?.length ?? 0, structureMeshes };
 }
 
 function setupLighting(scene) {
@@ -95,7 +97,7 @@ async function start() {
   const sun = setupLighting(scene);
 
   const t0 = performance.now();
-  const { terrain, hash, sink, propStats, structureStats, roadPieces } = buildWorld();
+  const { terrain, hash, sink, propStats, structureStats, roadPieces, structureMeshes } = buildWorld();
   // GLB props (Imagine refs → models) — async load, then scatter + collision
   const propLib = await loadPropLibrary();
   const assetPropStats = scatterAssetProps(
@@ -105,7 +107,7 @@ async function start() {
 
   scene.add(terrain.buildMesh());
   scene.add(terrain.buildWater());
-  for (const mesh of sink.buildMeshes()) scene.add(mesh);
+  for (const mesh of structureMeshes) scene.add(mesh);
 
   // Interactive doors + elevators — after hash exists, before play
   const doors = new DoorSystem(hash);

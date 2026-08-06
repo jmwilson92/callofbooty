@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { COMBAT } from '../config.js';
+import { breakGlassBox } from '../world/Glass.js';
 
 // Ray–AABB hitscan against world geometry + target hitboxes.
 
@@ -39,7 +40,7 @@ export function rayAABB(origin, dir, boxMin, boxMax, tMax = 1e6) {
  *   surfaces: number, damageMult: number
  * }}
  */
-export function castHitscan(origin, dir, hash, targets, maxDist = 400) {
+export function castHitscan(origin, dir, hash, targets, maxDist = 400, effects = null) {
   const result = {
     hit: false,
     point: new THREE.Vector3(),
@@ -60,12 +61,11 @@ export function castHitscan(origin, dir, hash, targets, maxDist = 400) {
   const candidates = [];
   hash.query(minX, minZ, maxX, maxZ, candidates);
 
-  // Sort hits by distance; handle thin penetration
+  // Sort hits by distance; handle thin / glass penetration
   const worldHits = [];
   for (const box of candidates) {
     if (box.disabled) continue;
     if (box.tag === 'trigger' || box.tag === 'door') continue;
-    // Skip thin vertical span for Y filter loosely
     const t = rayAABB(origin, dir, box.min, box.max, maxDist);
     if (t == null) continue;
     worldHits.push({ t, box, kind: 'world' });
@@ -119,6 +119,14 @@ export function castHitscan(origin, dir, hash, targets, maxDist = 400) {
     const tag = h.box.tag || 'solid';
     // Don't let floor slabs steal horizontal shots at nearby targets
     if (tag === 'ladder' || tag === 'trigger') continue;
+    if (tag === 'glass') {
+      // Shatter and keep going (inside ↔ outside firefights)
+      const pt = origin.clone().addScaledVector(dir, h.t);
+      breakGlassBox(h.box, effects, pt);
+      thinCount++;
+      dmgMult *= (1 - (COMBAT.PENETRATION_LOSS ?? 0.15) * 0.5);
+      continue;
+    }
     if (tag === 'thin') {
       thinCount++;
       dmgMult *= (1 - COMBAT.PENETRATION_LOSS);

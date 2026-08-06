@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { COMBAT } from '../config.js';
 import { rayAABB, falloffMult, partMult } from './Hitscan.js';
+import { breakGlassBox } from '../world/Glass.js';
 
 /**
  * Ballistic projectiles: velocity, gravity drop, travel time (lead),
@@ -166,6 +167,14 @@ export class Ballistics {
       for (const wh of worldHits) {
         if (wh.t >= th.t - 0.02) break;
         if (wh.tag === 'thin') continue;
+        // Glass shatters on the way through — bullet continues into the target
+        if (wh.tag === 'glass') {
+          if (!wh.box.disabled) {
+            const pt = from.clone().addScaledVector(dir, wh.t);
+            breakGlassBox(wh.box, this.effects, pt);
+          }
+          continue;
+        }
         if (this._isFloorish(wh.box) && Math.abs(dir.y) < 0.4) continue;
         // Wall the bot is standing against / inside — never blocks that bot
         if (this._wallOverlapsTarget(wh.box, th.target)) continue;
@@ -178,9 +187,14 @@ export class Ballistics {
       if (!blocked) return th;
     }
 
-    // No target: first real solid
+    // No target: first real solid; glass shatters and the bullet continues
     for (const wh of worldHits) {
       if (wh.tag === 'thin') continue;
+      if (wh.tag === 'glass') {
+        const pt = from.clone().addScaledVector(dir, wh.t);
+        breakGlassBox(wh.box, this.effects, pt);
+        continue; // penetrate after break
+      }
       if (this._isFloorish(wh.box) && Math.abs(dir.y) < 0.35) continue;
       return wh;
     }

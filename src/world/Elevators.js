@@ -105,6 +105,9 @@ export class ElevatorSystem {
     ceil.position.y = lamp.position.y + 0.06;
     root.add(ceil);
 
+    // Floor readout panel (canvas texture) — always visible in cabin
+    const floorPanel = this._makeFloorPanel(w, d, face);
+    root.add(floorPanel.mesh);
     this.group.add(root);
 
     // Walkable floor collision (moves with car) — thin so it never forms a wall pocket
@@ -123,7 +126,7 @@ export class ElevatorSystem {
     else if (face === 'W') exitX = -1;
     else exitX = 1;
 
-    this.cars.push({
+    const car = {
       spec,
       root,
       floorBox,
@@ -143,7 +146,70 @@ export class ElevatorSystem {
       doorFace: face,
       exitX,
       exitZ,
+      floorPanel,
+    };
+    this._paintFloorPanel(car);
+    this.cars.push(car);
+  }
+
+  /** Canvas panel on the wall opposite the door showing floor / TOP. */
+  _makeFloorPanel(w, d, face) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 128;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      side: THREE.DoubleSide,
     });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.35), mat);
+    // Mount on the wall opposite the open door, facing into the cabin
+    const inset = 0.02;
+    if (face === 'S') {
+      mesh.position.set(0, 1.55, d * 0.42 - inset);
+    } else if (face === 'N') {
+      mesh.position.set(0, 1.55, -d * 0.42 + inset);
+      mesh.rotation.y = Math.PI;
+    } else if (face === 'W') {
+      mesh.position.set(w * 0.42 - inset, 1.55, 0);
+      mesh.rotation.y = -Math.PI / 2;
+    } else {
+      mesh.position.set(-w * 0.42 + inset, 1.55, 0);
+      mesh.rotation.y = Math.PI / 2;
+    }
+    return { mesh, canvas, tex, mat };
+  }
+
+  _paintFloorPanel(car) {
+    const fp = car.floorPanel;
+    if (!fp) return;
+    const ctx = fp.canvas.getContext('2d');
+    const n = car.floor + 1;
+    const max = car.spec.floors;
+    const isTop = car.floor >= car.spec.floors - 1;
+    const isG = car.floor <= 0;
+    // Background
+    ctx.fillStyle = isTop ? '#1a4020' : isG ? '#1a3040' : '#121820';
+    ctx.fillRect(0, 0, 256, 128);
+    ctx.strokeStyle = isTop ? '#60ff90' : '#40c0ff';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(4, 4, 248, 120);
+    ctx.fillStyle = isTop ? '#80ffb0' : '#e8f4ff';
+    ctx.font = 'bold 52px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${n} / ${max}`, 128, isTop || isG ? 48 : 64);
+    ctx.font = 'bold 28px ui-monospace, Menlo, monospace';
+    if (isTop) {
+      ctx.fillStyle = '#a0ffc0';
+      ctx.fillText('TOP FLOOR', 128, 96);
+    } else if (isG) {
+      ctx.fillStyle = '#80d0ff';
+      ctx.fillText('GROUND', 128, 96);
+    }
+    fp.tex.needsUpdate = true;
   }
 
   _setCarY(car, y) {
@@ -243,6 +309,7 @@ export class ElevatorSystem {
           car.moving = false;
           car.justArrived = false;
           car.ridePlayer = false;
+          this._paintFloorPanel(car);
           // Only settle feet Y — never push XZ (that felt like a drag each floor)
           if (controller && this.playerInCabin(car, controller.pos.x, controller.pos.y, controller.pos.z)) {
             controller.pos.y = car.y + 0.04;
@@ -276,12 +343,30 @@ export class ElevatorSystem {
   prompt(px, py, pz) {
     const car = this.findNear(px, py, pz);
     if (!car) return null;
-    if (car.moving) return 'Elevator…';
-    if (this.playerInCabin(car, px, py, pz)) {
-      if (car.floor >= car.spec.floors - 1) return 'E · Elevator down';
-      if (car.floor <= 0) return 'E · Elevator up';
-      return car.dir >= 0 ? 'E · Elevator up' : 'E · Elevator down';
+    const n = car.floor + 1;
+    const max = car.spec.floors;
+    const isTop = car.floor >= car.spec.floors - 1;
+    const isG = car.floor <= 0;
+    if (car.moving) {
+      const dest = car.targetFloor + 1;
+      return `Elevator · → ${dest}/${max}${car.targetFloor >= car.spec.floors - 1 ? ' TOP' : ''}…`;
     }
-    return 'E · Call elevator';
+    if (this.playerInCabin(car, px, py, pz)) {
+      if (isTop) return `E · TOP FLOOR ${n}/${max} · Down only`;
+      if (isG) return `E · Floor ${n}/${max} GROUND · Up`;
+      const next = car.dir >= 0 ? 'Up' : 'Down';
+      return `E · Floor ${n}/${max} · ${next}`;
+    }
+    // Hallway call — show which floor you're on
+    const s = car.spec;
+    let callF = Math.round((py - s.baseY) / s.floorH);
+    callF = Math.max(0, Math.min(s.floors - 1, callF));
+    const here = callF + 1;
+    const carAt = car.floor + 1;
+    if (callF === car.floor) {
+      if (isTop) return `E · Elevator here · TOP ${n}/${max}`;
+      return `E · Elevator here · Floor ${n}/${max}`;
+    }
+    return `E · Call elevator · you ${here} · car ${carAt}${car.floor >= s.floors - 1 ? ' TOP' : ''}`;
   }
 }

@@ -14,11 +14,26 @@ const SLAB = BUILDINGS.SLAB_THICKNESS;
  * `axis` is 'x' (wall runs along X at fixed Z) or 'z' (runs along Z at fixed X).
  * `openings` entries are { a0, a1, y0, y1 } in along-axis world coords.
  */
+const GLASS_PANE = 0x6ab0d0; // Catalog C.glass — transparent + breakable
+const GLASS_T = 0.05;
+
 export function wall(sink, axis, fixed, a0, a1, yBottom, yTop, color, openings = [], tag = 'solid') {
   const emit = (s, e, y0, y1) => {
     if (e - s <= 1e-4 || y1 - y0 <= 1e-4) return;
     if (axis === 'x') sink.addSpan(s, y0, fixed - T / 2, e, y1, fixed + T / 2, color, tag);
     else sink.addSpan(fixed - T / 2, y0, s, fixed + T / 2, y1, e, color, tag);
+  };
+
+  // Thin glass pane in a window opening (not doors that start at floor)
+  const emitGlass = (s, e, y0, y1) => {
+    if (e - s <= 1e-4 || y1 - y0 <= 1e-4) return;
+    // Door-like openings start at/near floor — leave empty for walk-through
+    if (y0 <= yBottom + 0.25) return;
+    if (axis === 'x') {
+      sink.addSpan(s + 0.02, y0 + 0.02, fixed - GLASS_T / 2, e - 0.02, y1 - 0.02, fixed + GLASS_T / 2, GLASS_PANE, 'glass');
+    } else {
+      sink.addSpan(fixed - GLASS_T / 2, y0 + 0.02, s + 0.02, fixed + GLASS_T / 2, y1 - 0.02, e - 0.02, GLASS_PANE, 'glass');
+    }
   };
 
   // Clip to the wall span, discard anything empty.
@@ -59,7 +74,10 @@ export function wall(sink, axis, fixed, a0, a1, yBottom, yTop, color, openings =
     let y = yBottom;
     for (const [b0, b1] of bands) {
       if (b0 > y) emit(s, e, y, b0);
-      if (b1 > y) y = b1;
+      if (b1 > y) {
+        emitGlass(s, e, b0, b1);
+        y = b1;
+      }
     }
     emit(s, e, y, yTop);
   }

@@ -116,7 +116,8 @@ export class CombatEffects {
 
   /** Tiny impact spark. */
   spawnImpact(point, tag = 'solid') {
-    const col = tag === 'thin' ? 0xc0c0c0 : tag === 'target' ? 0xff5050 : 0xc8b890;
+    const col = tag === 'thin' || tag === 'glass' ? 0xa8d8f0
+      : tag === 'target' ? 0xff5050 : 0xc8b890;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.02, 5, 5),
       new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.9 })
@@ -124,6 +125,32 @@ export class CombatEffects {
     mesh.position.copy(point);
     this.group.add(mesh);
     this.impacts.push({ mesh, life: 0.14, max: 0.14 });
+  }
+
+  /** Glass shatter burst (a few bright shards that fade out). */
+  spawnGlassBreak(point) {
+    const n = 6;
+    for (let i = 0; i < n; i++) {
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.04, 0.01),
+        new THREE.MeshBasicMaterial({
+          color: 0x9ad0f0,
+          transparent: true,
+          opacity: 0.85,
+        })
+      );
+      mesh.position.copy(point);
+      mesh.position.x += (Math.random() - 0.5) * 0.15;
+      mesh.position.y += (Math.random() - 0.5) * 0.15;
+      mesh.position.z += (Math.random() - 0.5) * 0.15;
+      this.group.add(mesh);
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 3.5,
+        1.2 + Math.random() * 2.2,
+        (Math.random() - 0.5) * 3.5
+      );
+      this.impacts.push({ mesh, life: 0.35, max: 0.35, vel });
+    }
   }
 
   spawnCasing(origin, right, up, forward) {
@@ -193,6 +220,10 @@ export class CombatEffects {
     for (let i = this.impacts.length - 1; i >= 0; i--) {
       const p = this.impacts[i];
       p.life -= dt;
+      if (p.vel) {
+        p.mesh.position.addScaledVector(p.vel, dt);
+        p.vel.y -= 12 * dt;
+      }
       const u = 1 - p.life / p.max;
       p.mesh.scale.setScalar(1 + u * 1.5);
       p.mesh.material.opacity = Math.max(0, 1 - u);
