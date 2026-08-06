@@ -419,10 +419,9 @@ export class LootSystem {
    * (toward footprint center) — never into the wall.
    */
   _pickWallCaseSpot(b, floorIdx, rng, placedXZ, minSep) {
-    const wallInset = 0.85;
+    // Case depth 0.78 → half 0.39; sit flush to interior face (~0.3 wall) + gap
+    const wallInset = 0.72;
     const y = b.floorYs?.[floorIdx] ?? (b.baseY + 0.15 + floorIdx * 3.4);
-    const roomCx = b.x + b.w * 0.5;
-    const roomCz = b.z + b.d * 0.5;
 
     const along = (len) => {
       const n = Math.max(2, Math.floor(len / 2.8));
@@ -431,26 +430,27 @@ export class LootSystem {
       return out;
     };
 
-    // Wall slots only (no hardcoded yaw — derived from room center)
+    // Wall slots: long axis (local X, 1.28m) runs parallel to the wall;
+    // front (+local Z) opens into the room. Fixed cardinal yaws only.
     const candidates = [];
-    // South (min Z) — skip doorway mid-facade
+    // South wall (runs ±X): front +Z into room → yaw 0
     for (const t of along(b.w)) {
       if (Math.abs(t - 0.5) < 0.22) continue;
-      candidates.push({ lx: b.w * t, lz: wallInset });
+      candidates.push({ lx: b.w * t, lz: wallInset, yaw: 0 });
     }
-    // North (max Z)
+    // North wall: front −Z into room → yaw π
     for (const t of along(b.w)) {
-      candidates.push({ lx: b.w * t, lz: b.d - wallInset });
+      candidates.push({ lx: b.w * t, lz: b.d - wallInset, yaw: Math.PI });
     }
-    // West (min X)
+    // West wall (runs ±Z): front +X into room → yaw +π/2
     for (const t of along(b.d)) {
       if (t < 0.15) continue;
-      candidates.push({ lx: wallInset, lz: b.d * t });
+      candidates.push({ lx: wallInset, lz: b.d * t, yaw: Math.PI / 2 });
     }
-    // East (max X) — skip stair/elev corner
+    // East wall: front −X into room → yaw −π/2
     for (const t of along(b.d)) {
       if (t > 0.55) continue;
-      candidates.push({ lx: b.w - wallInset, lz: b.d * t });
+      candidates.push({ lx: b.w - wallInset, lz: b.d * t, yaw: -Math.PI / 2 });
     }
 
     for (let i = candidates.length - 1; i > 0; i--) {
@@ -465,13 +465,6 @@ export class LootSystem {
       const x = b.x + c.lx;
       const z = b.z + c.lz;
 
-      // Front (+local Z) must point toward room center = open into the room
-      const dx = roomCx - x;
-      const dz = roomCz - z;
-      const len = Math.hypot(dx, dz) || 1;
-      // Three.js: local +Z after rotation.y maps to (sin(yaw), cos(yaw))
-      const yaw = Math.atan2(dx / len, dz / len);
-
       let ok = true;
       for (const p of placedXZ) {
         if (Math.hypot(p.x - x, p.z - z) < minSep) {
@@ -480,7 +473,7 @@ export class LootSystem {
         }
       }
       if (!ok) continue;
-      return { x, y, z, yaw };
+      return { x, y, z, yaw: c.yaw };
     }
     return null;
   }

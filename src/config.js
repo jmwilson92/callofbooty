@@ -367,7 +367,7 @@ export const FREEWAYS = [
 export const ROADS = {
   WIDTH: 12,
   BLEND: 12,
-  RAISE: 0.14,
+  RAISE: 0.12, // crown height at road centerline (metres)
   FREEWAY_BLEND: 14,
   MIN_HEIGHT: 2.5, // never flatten road below this (stay out of water)
 };
@@ -728,6 +728,11 @@ export const MAP = {
   MINIMAP_SIZE: 168, // CSS px, square
   MINIMAP_RANGE: 280, // metres of world visible on the minimap (edge to edge)
   FULL_MAP_MAX: 720, // max CSS px for the full-map square on large screens
+  // Full map zoom (1 = whole world, higher = closer)
+  ZOOM_MIN: 1,
+  ZOOM_MAX: 12,
+  ZOOM_DEFAULT: 1,
+  ZOOM_WHEEL: 0.12,
   // Baked height-color raster resolution (power of two-ish is fine)
   RASTER: 512,
   WATER: '#1a4a5c',

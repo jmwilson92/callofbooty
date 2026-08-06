@@ -2,7 +2,7 @@ import { BUILDINGS, POIS } from '../config.js';
 import { makeBuilding, makeShed, slab } from './BuildingKit.js';
 import { placeDowntownDistrict, placeVehicle } from './structures/Catalog.js';
 import { Occupancy } from './Occupancy.js';
-import { claimRoadCorridors, placeParkingLotDetails } from './Roads.js';
+import { claimRoadCorridors, placeParkingLotDetails, placeRoadMarkings } from './Roads.js';
 import { worldLadders } from './Ladders.js';
 import { worldDoors } from './Doors.js';
 import { worldElevators } from './Elevators.js';
@@ -467,6 +467,8 @@ export function buildAllStructures(sink, terrain, rng) {
   buildCoronado(sink, terrain, rng);
   buildRadioTower(sink, terrain, rng);
   buildLaJolla(sink, terrain, rng);
+  // Lane lines, curbs, downtown sidewalks
+  if (terrain.roadLines) placeRoadMarkings(sink, terrain, terrain.roadLines);
   // Parking lot curbs + white stalls + cars (skip stalls that hit buildings)
   if (terrain.parkingLots?.length) {
     placeParkingLotDetails(sink, terrain, terrain.parkingLots, rng, placeVehicle, worldOcc);

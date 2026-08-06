@@ -43,11 +43,15 @@ function pick(rng, arr) {
   return arr[Math.floor(rng() * arr.length) % arr.length];
 }
 
-const FOOTPRINT_UVS = [
-  [0, 0], [1, 0], [0, 1], [1, 1],
-  [0.5, 0], [0.5, 1], [0, 0.5], [1, 0.5], [0.5, 0.5],
-  [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75],
-];
+/** Dense UV samples under a footprint (corners, edges, interior grid). */
+function footprintSampleUVs(w, d) {
+  if (!w && !d) return [[0, 0]];
+  const us = [0, 0.2, 0.4, 0.5, 0.6, 0.8, 1];
+  const vs = [0, 0.2, 0.4, 0.5, 0.6, 0.8, 1];
+  const pts = [];
+  for (const u of us) for (const v of vs) pts.push([u, v]);
+  return pts;
+}
 
 /** Sample min/max/avg height under a footprint. */
 export function footprintHeights(terrain, x, z, w = 0, d = 0) {
@@ -55,8 +59,7 @@ export function footprintHeights(terrain, x, z, w = 0, d = 0) {
   let max = -Infinity;
   let sum = 0;
   let n = 0;
-  const pts = w || d ? FOOTPRINT_UVS : [[0, 0]];
-  for (const [u, v] of pts) {
+  for (const [u, v] of footprintSampleUVs(w, d)) {
     const h = terrain.heightAt(x + w * u, z + d * v);
     if (h < min) min = h;
     if (h > max) max = h;
@@ -854,8 +857,16 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null) {
     C.glass, C.glassDark, 0x4a5868, 0x2a3848, C.white, 0x6a8090, 0x3a4850, 0xc8d0d8,
   ]);
   const band = pick(rng, [C.glassDark, C.metal, 0x1a2830, C.white]);
-  const seat = baseY - 0.08;
+  // Embed into grade so towers never hover (gap under walls)
+  const seat = baseY - 0.06;
   const T = 0.35; // facade thickness
+
+  // Foundation skirt under tower (covers residual grade variance)
+  sink.addSpan(
+    x - 0.35, baseY - 0.55, z - 0.35,
+    x + bodyW + 0.35, seat + 0.1, z + d + 0.35,
+    C.concrete
+  );
 
   // Place elevator first so floor slabs can punch the shaft hole
   const elevHole = fCount >= 3
@@ -1019,8 +1030,6 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
   const originZ = cz - (rows * stepZ - streetW) / 2;
   const gy = (x, z, w = 0, d = 0) => footprintOk(terrain, x, z, w, d);
   const MIN_DRY = 2.8;
-  // Prefer plate height for street furniture when local sample is null
-  const plateY = terrain.downtownPlateY;
 
   // A couple of mid-grid surface lots (open asphalt + cars from parking props)
   const parkingBlocks = new Set(['0,0', '5,4']);
@@ -1081,13 +1090,11 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
       const tz = bz + oz;
       // Claim full block footprint so nothing else stacks here
       if (!grid.tryClaim(tx - 1, tz - 1, tw + 4, td + 3, 1.5)) continue;
-      // Skip dips / uneven lots — leave the block empty rather than float a tower
-      const baseY = gy(tx, tz, tw, td);
-      if (baseY == null || baseY < MIN_DRY) continue;
-      // Seat on plate when available (keeps skyline flush)
-      const seatY = plateY != null
-        ? Math.max(baseY, plateY - 0.15)
-        : baseY;
+      // Seat on densest max under footprint — never lift above ground (no hover gap)
+      const fh = footprintHeights(terrain, tx, tz, tw, td);
+      if (!Number.isFinite(fh.max) || fh.max < MIN_DRY) continue;
+      if (fh.delta > 2.2) continue; // too uneven
+      const seatY = fh.max; // sit on high point; foundation fills dips
 
       let floors;
       if (financial && rng() > 0.2) floors = 16 + Math.floor(rng() * 10);
@@ -1095,8 +1102,16 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
       else if (rng() > 0.45) floors = 9 + Math.floor(rng() * 8);
       else floors = 5 + Math.floor(rng() * 5);
 
+      // Always pour a concrete plinth under the footprint (kills float gaps)
+      const plinthBot = Math.min(fh.min, seatY) - 0.2;
+      sink.addSpan(
+        tx - 0.25, plinthBot, tz - 0.25,
+        tx + tw + 0.25, seatY + 0.06, tz + td + 0.25,
+        C.concrete
+      );
+
       if (floors <= 7) {
-        const seat = seatY - 0.06;
+        const seat = seatY - 0.05; // embed into plinth / grade
         makeBuilding(sink, {
           x: tx, z: tz, w: tw, d: td, floors,
           baseY: seat,
@@ -1111,16 +1126,22 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
     }
   }
 
-  // Waterfront hotels (south) — spaced, occupancy checked; skip dips
+  // Waterfront hotels (south) — spaced, occupancy checked; seat on terrain max
   for (let i = 0; i < 4; i++) {
     const hx = originX + 18 + i * 42;
     const hz = originZ + rows * stepZ + 12;
     const tw = 16;
     const td = 14;
     if (!grid.tryClaim(hx, hz, tw + 3, td + 1, 3)) continue;
-    const by = gy(hx, hz, tw, td);
-    if (by == null || by < MIN_DRY) continue;
-    const seatY = plateY != null ? Math.max(by, plateY - 0.2) : by;
+    const fh = footprintHeights(terrain, hx, hz, tw, td);
+    if (!Number.isFinite(fh.max) || fh.max < MIN_DRY) continue;
+    if (fh.delta > 2.5) continue;
+    const seatY = fh.max;
+    sink.addSpan(
+      hx - 0.3, fh.min - 0.25, hz - 0.3,
+      hx + tw + 0.3, seatY + 0.06, hz + td + 0.3,
+      C.concrete
+    );
     placeSkylineTower(sink, hx, hz, seatY, rng, 12 + Math.floor(rng() * 6));
     towers++;
   }

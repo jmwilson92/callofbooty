@@ -474,7 +474,10 @@ export class Terrain {
           if (d > reach) continue;
 
           let roadH = prof[Math.round(t * samples)];
-          roadH = Math.max(minH, roadH);
+          // Slight crown so pavement reads above soft shoulders
+          const raise = ROADS.RAISE ?? 0.14;
+          const crown = d <= halfW ? raise * (1 - (d / Math.max(1e-3, halfW)) ** 2) : 0;
+          roadH = Math.max(minH, roadH + crown);
           const w = 1 - smoothstep(halfW, reach, d);
           const i = this.idx(ix, iz);
           // Never drag land under water with a road
@@ -482,16 +485,16 @@ export class Terrain {
 
           const onPlate = plateY != null && this.onDowntownPlate(x, z);
           if (onPlate && maskOnlyOnPlate) {
-            // Keep the city plate level — asphalt mask only
+            // Keep the city plate level — asphalt mask only (sharper curb edge)
             if (d <= halfW) this.roadMask[i] = 1;
-            else this.roadMask[i] = Math.max(this.roadMask[i], 1 - smoothstep(halfW, halfW + 2, d));
+            else this.roadMask[i] = Math.max(this.roadMask[i], 1 - smoothstep(halfW, halfW + 1.4, d));
             continue;
           }
 
           this.heights[i] = lerp(this.heights[i], roadH, w);
           if (this.heights[i] < minH && d <= halfW) this.heights[i] = minH;
           if (d <= halfW) this.roadMask[i] = 1;
-          else this.roadMask[i] = Math.max(this.roadMask[i], 1 - smoothstep(halfW, halfW + 2, d));
+          else this.roadMask[i] = Math.max(this.roadMask[i], 1 - smoothstep(halfW, halfW + 1.6, d));
         }
       }
     }
