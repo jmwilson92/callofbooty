@@ -65,6 +65,15 @@ export const MANTLE = {
   CLEARANCE: 1.9,
 };
 
+// Exterior ladder / fire-escape climb (W = up, S = down while in volume).
+export const LADDER = {
+  SPEED: 3.6,
+  // Snap horizontal velocity while climbing so you stick to the rails
+  STICK: 0.88,
+  // How far off-ladder center the player may drift before auto-centering
+  CENTER_PULL: 6.0,
+};
+
 export const CAMERA = {
   FOV_BASE: 80,
   FOV_SPRINT: 88,

@@ -10,6 +10,7 @@ import { BoxSink } from './world/BoxSink.js';
 import { buildAllStructures } from './world/Buildings.js';
 import { scatterProps } from './world/Props.js';
 import { scatterStructures } from './world/structures/Scatter.js';
+import { loadPropLibrary, scatterAssetProps } from './world/Assets.js';
 import { Controller } from './player/Controller.js';
 import { PlayerCamera } from './player/Camera.js';
 import { DebugOverlay, createHud } from './ui/Debug.js';
@@ -66,7 +67,7 @@ function setupLighting(scene) {
   return sun;
 }
 
-function start() {
+async function start() {
   const bus = new EventBus();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -85,6 +86,11 @@ function start() {
 
   const t0 = performance.now();
   const { terrain, hash, sink, propStats, structureStats, roadPieces } = buildWorld();
+  // GLB props (Imagine refs → models) — async load, then scatter + collision
+  const propLib = await loadPropLibrary();
+  const assetPropStats = scatterAssetProps(
+    scene, hash, terrain, mulberry32(WORLD.SEED ^ 0xa55e7), propLib, { count: 160 }
+  );
   const genMs = performance.now() - t0;
 
   scene.add(terrain.buildMesh());
@@ -128,8 +134,9 @@ function start() {
 
   console.info(
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
-    `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} props · ` +
-    `road decks ${roadPieces} · structures ${JSON.stringify(structureStats)}`
+    `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
+    `${assetPropStats.placed} glb-props · road segs ${roadPieces} · ` +
+    `structures ${JSON.stringify(structureStats)}`
   );
 
   const loading = document.getElementById('loading');

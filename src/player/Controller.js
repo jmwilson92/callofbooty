@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { PLAYER, SLIDE, MANTLE, COLLISION } from '../config.js';
+import { PLAYER, SLIDE, MANTLE, LADDER, COLLISION } from '../config.js';
 import { resolveCapsule, makeCollisionResult } from '../world/Collision.js';
 import { supportTop, spanClear, groundProbe, findMantleTarget } from './Probes.js';
 import { clamp, lerp } from '../core/Noise.js';
+import { worldLadders } from '../world/Ladders.js';
 
 // Kinematic character controller. Deliberately not a rigid body -- physics
 // driven FPS movement feels floaty, and slide-cancel-jump needs exact control
@@ -42,6 +43,9 @@ export class Controller {
     this.mantleTimer = 0;
     this.mantleFrom = new THREE.Vector3();
     this.mantleTo = new THREE.Vector3();
+
+    this.onLadder = false;
+    this.ladders = worldLadders;
 
     this.speed = 0; // horizontal speed, for camera bob and FOV
     this.distanceTravelled = 0;
@@ -302,15 +306,41 @@ export class Controller {
       this.vel.z += n.z * SLIDE.SLOPE_ACCEL * dt;
     }
 
-    // --- gravity ---
-    if (!this.grounded) this.vel.y += PLAYER.GRAVITY * dt;
+    // --- ladder climb (W up / S down while inside a registered volume) ---
+    const ladder = this.ladders.findAt(
+      this.pos.x, this.pos.y + this.height * 0.4, this.pos.z, this.radius
+    );
+    this.onLadder = !!ladder;
+    if (ladder) {
+      // Climb intent: forward climbs up, back climbs down; jump also climbs up
+      let climb = fwd;
+      if (input.actionPressed('jump') || input.action('jump')) climb = Math.max(climb, 1);
+      if (wantCrouch) climb = Math.min(climb, -1);
+      this.vel.y = climb * LADDER.SPEED;
+      // Stick to the rails: damp horizontal drift and pull toward ladder center
+      this.vel.x *= (1 - LADDER.STICK);
+      this.vel.z *= (1 - LADDER.STICK);
+      this.vel.x += (ladder.cx - this.pos.x) * LADDER.CENTER_PULL * dt;
+      this.vel.z += (ladder.cz - this.pos.z) * LADDER.CENTER_PULL * dt;
+      this.sliding = false;
+      this.grounded = false;
+      this.coyote = 0;
+      // Clamp inside vertical ladder range
+      const feetMin = ladder.y0 - 0.05;
+      const feetMax = ladder.y1 - 0.2;
+      if (this.pos.y < feetMin && this.vel.y < 0) this.vel.y = 0;
+      if (this.pos.y > feetMax && this.vel.y > 0) this.vel.y = 0;
+    }
+
+    // --- gravity (off while climbing) ---
+    if (!this.grounded && !this.onLadder) this.vel.y += PLAYER.GRAVITY * dt;
 
     // --- integrate ---
     const horiz = _tmpV.set(this.vel.x * dt, 0, this.vel.z * dt);
     const before = _beforeP.copy(this.pos);
     this._moveAndCollide(horiz);
 
-    if (this.grounded || this.coyote > 0) {
+    if ((this.grounded || this.coyote > 0) && !this.onLadder) {
       const moved = Math.hypot(this.pos.x - before.x, this.pos.z - before.z);
       const wanted = Math.hypot(horiz.x, horiz.z);
       if (wanted > 1e-4 && moved < wanted * 0.95) this._tryStepUp(before, horiz);
@@ -319,7 +349,7 @@ export class Controller {
     this._moveAndCollide(_tmpV.set(0, this.vel.y * dt, 0));
 
     // Kill horizontal velocity into a wall so we do not stick to it.
-    if (this._result.hitWall) {
+    if (this._result.hitWall && !this.onLadder) {
       const n = this._result.wallNormal;
       const into = this.vel.x * n.x + this.vel.z * n.z;
       if (into < 0) {
@@ -329,16 +359,19 @@ export class Controller {
     }
 
     const wasGrounded = this.grounded;
+    // Ground probe even on ladders so you can step off at the base/roof cleanly
     this._groundProbe();
 
     if (this.grounded) {
       this.coyote = PLAYER.COYOTE_TIME;
-      if (!wasGrounded) this.bus.emit('player:land', { speed: this.vel.y });
+      if (!wasGrounded && !this.onLadder) this.bus.emit('player:land', { speed: this.vel.y });
     } else if (this.coyote > 0) {
       this.coyote -= dt;
     }
 
-    this.speed = Math.hypot(this.vel.x, this.vel.z);
+    this.speed = this.onLadder
+      ? Math.abs(this.vel.y)
+      : Math.hypot(this.vel.x, this.vel.z);
     this.distanceTravelled += this.speed * dt;
   }
 
