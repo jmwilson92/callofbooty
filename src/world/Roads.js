@@ -430,15 +430,14 @@ export function defaultParkingLots() {
 
 /**
  * Visual parking detail: white stall lines, low curbs, a few cars.
- * Call after terrain is built so heightAt is final.
+ * `occ` optional Occupancy — cars never spawn inside claimed building footprints.
  */
-export function placeParkingLotDetails(sink, terrain, lots, rng, placeVehicleFn) {
+export function placeParkingLotDetails(sink, terrain, lots, rng, placeVehicleFn, occ = null) {
   let n = 0;
   for (const lot of lots) {
     const h = terrain.heightAt(lot.x + lot.w / 2, lot.z + lot.d / 2);
     if (h < MIN_DRY) continue;
     const y = h + 0.02;
-    // Perimeter curb (concrete, not yellow)
     const curb = 0.35;
     const ch = 0.22;
     sink.addSpan(lot.x, y, lot.z, lot.x + lot.w, y + ch, lot.z + curb, 0xb0aea8, 'thin');
@@ -446,7 +445,6 @@ export function placeParkingLotDetails(sink, terrain, lots, rng, placeVehicleFn)
     sink.addSpan(lot.x, y, lot.z, lot.x + curb, y + ch, lot.z + lot.d, 0xb0aea8, 'thin');
     sink.addSpan(lot.x + lot.w - curb, y, lot.z, lot.x + lot.w, y + ch, lot.z + lot.d, 0xb0aea8, 'thin');
 
-    // Stall lines (white) — sparse enough to read, not spam thousands of boxes
     const stallW = 3.0;
     const stallD = 5.5;
     const cols = Math.min(12, Math.floor((lot.w - 2) / stallW));
@@ -456,12 +454,15 @@ export function placeParkingLotDetails(sink, terrain, lots, rng, placeVehicleFn)
       for (let c = 0; c < cols; c++) {
         const sx = lot.x + 1.2 + c * stallW;
         const sz = lot.z + 1.2 + r * (stallD + 1.5);
-        // Thin white divider
         sink.addSpan(sx, y + 0.01, sz, sx + 0.08, y + 0.04, sz + stallD, 0xe8e6e0, 'thin');
-        if (placeVehicleFn && cars < 8 && rng() > 0.62) {
-          placeVehicleFn(sink, sx + 0.25, sz + 0.4, y, rng);
-          cars++;
-        }
+        if (!placeVehicleFn || cars >= 8 || rng() <= 0.62) continue;
+        // Vehicle footprint ~4.5 x 2 — skip if a building already claimed this stall
+        const vw = 4.8;
+        const vd = 2.2;
+        if (occ && occ.blocked(sx, sz, sx + vw, sz + vd)) continue;
+        placeVehicleFn(sink, sx + 0.25, sz + 0.4, y, rng);
+        if (occ) occ.claim(sx, sz, vw, vd, 0.5);
+        cars++;
       }
     }
     n++;

@@ -176,7 +176,8 @@ export function makeBuilding(sink, opts) {
     let southOpenings = winsAlong(x, x + w);
     let eastOpenings = winsAlong(z, z + d);
     if (isGround) {
-      southOpenings = addDoor(southOpenings, x + w * 0.35);
+      // Centered south door so exterior entrance portals line up
+      southOpenings = addDoor(southOpenings, x + w * 0.5);
       eastOpenings = addDoor(eastOpenings, z + d * 0.32);
     }
 

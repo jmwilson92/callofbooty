@@ -227,15 +227,18 @@ export function scatterStructures(sink, terrain, rng) {
       });
   }
 
-  // --- Parked vehicles near roads ---
+  // --- Parked vehicles near roads (never inside building footprints) ---
   for (let n = 0; n < S.VEHICLE; n++) {
-    tryPlace(terrain, rng, 40, (x, z, t) => {
+    tryPlace(terrain, rng, 50, (x, z, t) => {
       if (!dryLand(t, x, z, 18)) return false;
-      return t.roadAt(x, z) < 0.15 && (
-        t.roadAt(x + 8, z) > 0.2 || t.roadAt(x - 8, z) > 0.2
-        || t.roadAt(x, z + 8) > 0.2 || t.roadAt(x, z - 8) > 0.2
-      );
+      // Stay off pavement center, hug the shoulder
+      if (t.roadAt(x, z) > 0.12) return false;
+      const nearRoad = t.roadAt(x + 10, z) > 0.25 || t.roadAt(x - 10, z) > 0.25
+        || t.roadAt(x, z + 10) > 0.25 || t.roadAt(x, z - 10) > 0.25;
+      return nearRoad;
     }, (x, z) => {
+      // Claim a car-sized pad so we never stack into towers / props
+      if (!claimFoot(x, z, 5.2, 2.4)) return;
       placeVehicle(sink, x, z, terrain.heightAt(x, z), rng);
       stats.vehicle++;
     });

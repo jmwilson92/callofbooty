@@ -461,8 +461,8 @@ export function buildAllStructures(sink, terrain, rng) {
   buildCoronado(sink, terrain, rng);
   buildRadioTower(sink, terrain, rng);
   buildLaJolla(sink, terrain, rng);
-  // Parking lot curbs + white stalls + cars (asphalt already in heightfield)
+  // Parking lot curbs + white stalls + cars (skip stalls that hit buildings)
   if (terrain.parkingLots?.length) {
-    placeParkingLotDetails(sink, terrain, terrain.parkingLots, rng, placeVehicle);
+    placeParkingLotDetails(sink, terrain, terrain.parkingLots, rng, placeVehicle, worldOcc);
   }
 }
