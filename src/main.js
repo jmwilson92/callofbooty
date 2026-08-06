@@ -12,6 +12,7 @@ import { scatterProps } from './world/Props.js';
 import { scatterStructures } from './world/structures/Scatter.js';
 import { loadPropLibrary, scatterAssetProps } from './world/Assets.js';
 import { DoorSystem } from './world/Doors.js';
+import { ElevatorSystem } from './world/Elevators.js';
 import { Controller } from './player/Controller.js';
 import { PlayerCamera } from './player/Camera.js';
 import { DebugOverlay, createHud } from './ui/Debug.js';
@@ -98,10 +99,13 @@ async function start() {
   scene.add(terrain.buildWater());
   for (const mesh of sink.buildMeshes()) scene.add(mesh);
 
-  // Interactive doors (E to open/close) — after hash exists, before play
+  // Interactive doors + elevators — after hash exists, before play
   const doors = new DoorSystem(hash);
   const doorCount = doors.buildFromRegistry();
   scene.add(doors.group);
+  const elevators = new ElevatorSystem(hash);
+  const elevCount = elevators.buildFromRegistry();
+  scene.add(elevators.group);
 
   const controller = new Controller(terrain, hash, bus);
   // Seat the player on the surface at spawn rather than trusting the config Y.
@@ -141,8 +145,8 @@ async function start() {
   console.info(
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
     `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
-    `${assetPropStats.placed} glb-props · doors ${doorCount} · road segs ${roadPieces} · ` +
-    `structures ${JSON.stringify(structureStats)}`
+    `${assetPropStats.placed} glb-props · doors ${doorCount} · elevators ${elevCount} · ` +
+    `road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
   );
 
   const loading = document.getElementById('loading');
@@ -167,18 +171,24 @@ async function start() {
       controller.ads = input.locked && input.buttons.has(2) && !mapView.open;
       // Allow movement while map is open, but not while pointer is unlocked.
       if (input.locked && !mapView.open) {
-        // E = open / close nearest door
+        // E = elevator first (if near), else door
         if (input.actionPressed('interact')) {
-          doors.tryToggle(
-            controller.pos.x,
-            controller.pos.y + controller.height * 0.5,
-            controller.pos.z
-          );
+          const usedElev = elevators.tryUse(controller);
+          if (!usedElev) {
+            doors.tryToggle(
+              controller.pos.x,
+              controller.pos.y + controller.height * 0.5,
+              controller.pos.z
+            );
+          }
         }
         controller.tick(dt, input, playerCam.yaw);
+        // Stick player to elevator after movement solve
+        elevators.update(dt, controller);
       } else {
         // Keep gravity and collision alive so the player settles while unlocked / on map.
         controller.tick(dt, IDLE_INPUT, playerCam.yaw);
+        elevators.update(dt, null);
       }
       doors.update(dt);
       input.endTick();
@@ -194,13 +204,12 @@ async function start() {
     sun.position.copy(sun.target.position).add(sunOffset);
     sun.target.updateMatrixWorld();
 
-    // Door prompt when near a usable entrance
+    // Interact prompt (elevator or door)
     if (input.locked && !mapView.open) {
-      hud.setPrompt(doors.prompt(
-        controller.pos.x,
-        controller.pos.y + controller.height * 0.5,
-        controller.pos.z
-      ));
+      const px = controller.pos.x;
+      const py = controller.pos.y + controller.height * 0.5;
+      const pz = controller.pos.z;
+      hud.setPrompt(elevators.prompt(px, py, pz) || doors.prompt(px, py, pz));
     } else {
       hud.setPrompt(null);
     }

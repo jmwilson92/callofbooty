@@ -3,6 +3,7 @@ import { makeBuilding, makeShed, slab } from '../BuildingKit.js';
 import { Occupancy } from '../Occupancy.js';
 import { worldLadders } from '../Ladders.js';
 import { worldDoors } from '../Doors.js';
+import { worldElevators } from '../Elevators.js';
 
 // High-detail procedural kits (box primitives only). Original colors — no brands.
 
@@ -383,11 +384,11 @@ export function placeBusinessCenter(sink, terrain, x, z, rng) {
  */
 function addFireEscapeStairs(sink, x, z, w, d, baseY, floors, floorH) {
   const sx = x + w + 0.12;           // flush to facade
-  const landW = 1.9;                 // narrow — stays on this building only
-  const landD = Math.min(2.6, d * 0.35);
-  const inset = 0.35;
-  // Cap flights so tall towers don't become spaghetti; rest is ladder continuation
-  const maxF = Math.min(floors, 12);
+  const landW = 1.55;                // narrow — stays on this building only
+  const landD = Math.min(2.2, d * 0.28);
+  const inset = 0.4;
+  // Cap flights; rest is ladder (prevents long stair runs looking like growth)
+  const maxF = Math.min(floors, 8);
   const steps = Math.max(8, Math.ceil(floorH / 0.38)); // rise ≤ ~0.38m (step-able)
   const rise = floorH / steps;
 
@@ -485,45 +486,33 @@ function addLadder(sink, x, z, w, d, baseY, floors, floorH) {
 }
 
 /**
- * Switchback public stairs on -Z face — max ~3.2 m out from facade.
- * Never projects across the street into other buildings.
+ * Short exterior entry stairs only (ground → 2nd floor max).
+ * Tight against the facade — never a multi-story ramp into the street.
  */
 function addOpenStaircase(sink, x, z, w, d, baseY, floors, floorH) {
-  const maxF = Math.min(floors, 6);
-  const stairW = Math.min(w * 0.42, 4.5);
+  // Only a single short stoop flight — multi-story open stairs looked like
+  // geometry "growing" out of the tower into other lots.
+  const maxF = 1;
+  const stairW = Math.min(w * 0.4, 3.6);
   const sx = x + (w - stairW) / 2;
-  const maxOut = 3.2; // hard cap beyond facade
-  const steps = Math.max(8, Math.ceil(floorH / 0.38));
+  const maxOut = 1.7;
+  const steps = Math.max(6, Math.ceil(floorH / 0.38));
   const rise = floorH / steps;
   const run = maxOut / steps;
-
-  for (let f = 0; f < maxF; f++) {
-    const y = baseY + f * floorH;
-    const outward = f % 2 === 0; // even: climb south (out), odd: climb north (in)
-    for (let k = 0; k < steps; k++) {
-      const top = y + (k + 1) * rise;
-      let zz;
-      if (outward) {
-        zz = z - 0.05 - (k + 1) * run;
-      } else {
-        zz = z - maxOut + k * run;
-      }
-      // Clamp so we never leave the maxOut envelope
-      const za = Math.max(z - maxOut - 0.05, Math.min(z + 0.05, zz));
-      const zb = Math.max(z - maxOut - 0.05, Math.min(z + 0.05, zz + run));
-      if (zb - za < 0.08) continue;
-      sink.addSpan(sx, top - 0.12, Math.min(za, zb), sx + stairW, top, Math.max(za, zb), C.concrete);
-    }
-    // Landing at outer edge (even floors) or against facade (odd)
-    if (outward) {
-      const landZ = z - maxOut - 0.05;
-      sink.addSpan(sx - 0.15, y + floorH, landZ - 0.15, sx + stairW + 0.15, y + floorH + 0.14, landZ + 1.0, C.concrete);
-      // Rail
-      sink.addSpan(sx - 0.1, y + floorH + 0.14, landZ - 0.1, sx + stairW + 0.1, y + floorH + 1.0, landZ, C.metal, 'thin');
-    } else {
-      sink.addSpan(sx - 0.15, y + floorH, z - 0.2, sx + stairW + 0.15, y + floorH + 0.14, z + 0.9, C.concrete);
-    }
+  const y = baseY;
+  for (let k = 0; k < steps; k++) {
+    const top = y + (k + 1) * rise;
+    const zz = z - 0.05 - (k + 1) * run;
+    const za = Math.max(z - maxOut - 0.05, zz);
+    const zb = Math.min(z + 0.02, zz + run);
+    if (zb - za < 0.06) continue;
+    sink.addSpan(sx, top - 0.12, za, sx + stairW, top, zb, C.concrete);
   }
+  // Landing at facade for 2nd floor entry
+  sink.addSpan(sx - 0.1, y + floorH, z - 0.15, sx + stairW + 0.1, y + floorH + 0.12, z + 0.8, C.concrete);
+  // Rails
+  sink.addSpan(sx - 0.08, y + 0.1, z - maxOut, sx + 0.05, y + floorH + 0.9, z, C.metal, 'thin');
+  sink.addSpan(sx + stairW - 0.05, y + 0.1, z - maxOut, sx + stairW + 0.08, y + floorH + 0.9, z, C.metal, 'thin');
 }
 
 /**
@@ -630,17 +619,25 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
   sink.addSpan(ex + 0.15, baseY + 0.4, ez + 0.15, ex + ew - 0.15, baseY + totalH - 0.3, ez + 0.22, C.glass);
   sink.addSpan(ex + 0.15, baseY + 0.4, ez + ed - 0.22, ex + ew - 0.15, baseY + totalH - 0.3, ez + ed - 0.15, C.glass);
 
-  // Elevator car inside shaft
-  const carF = Math.min(Math.max(1, Math.floor(floors * 0.35)), floors - 1);
-  const cy = baseY + carF * floorH + 0.15;
-  sink.addSpan(ex + 0.28, cy, ez + 0.28, ex + ew - 0.28, cy + floorH - 0.5, ez + ed - 0.28, 0x3a6a9a);
-
   // Interior lobby mat only (inside footprint)
   sink.addSpan(
     Math.max(x + 0.5, ex - 0.5), baseY + 0.02, Math.max(z + 0.5, ez - 0.5),
     Math.min(x + w - 0.5, ex + ew + 0.5), baseY + 0.1, Math.min(z + d - 0.5, ez + ed + 0.5),
     C.dark
   );
+
+  // Rideable car is a live mesh (ElevatorSystem) — not a static sealed box
+  const cabinPad = 0.22;
+  worldElevators.register({
+    x0: ex + cabinPad,
+    z0: ez + cabinPad,
+    x1: ex + ew - cabinPad,
+    z1: ez + ed - cabinPad,
+    baseY,
+    floors,
+    floorH,
+    startFloor: 0,
+  });
 
   return { x0: ex - 0.05, z0: ez - 0.05, x1: ex + ew + 0.05, z1: ez + ed + 0.05, ex, ez, ew, ed };
 }
@@ -704,7 +701,13 @@ export function addBuildingAccess(sink, x, z, w, d, baseY, floors, floorH, rng, 
   if (includeElevator && floors >= 3) {
     elevHole = addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng);
   }
-  const mode = accessMode >= 0 ? accessMode : Math.floor(rng() * 3);
+  // Exterior access: fire escape or ladder only (open multi-story stairs removed —
+  // they grew into neighboring lots). Rare short entry stoop on low-rises.
+  let mode = accessMode;
+  if (mode < 0) {
+    if (floors <= 4 && rng() > 0.7) mode = 2; // short stoop
+    else mode = Math.floor(rng() * 2); // 0 fire escape, 1 ladder
+  }
   if (mode === 0) addFireEscapeStairs(sink, x, z, w, d, baseY, floors, floorH);
   else if (mode === 1) addLadder(sink, x, z, w, d, baseY, floors, floorH);
   else addOpenStaircase(sink, x, z, w, d, baseY, floors, floorH);
@@ -791,11 +794,10 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null) {
   // Exterior street entrance (outside the facade)
   addMainEntrance(sink, x, z, bodyW, d, seat);
 
-  // Exterior vertical access (ladder / fire escape / stairs)
-  const mode = Math.floor(rng() * 3);
+  // Exterior vertical access — fire escape or ladder only on towers
+  const mode = Math.floor(rng() * 2);
   if (mode === 0) addFireEscapeStairs(sink, x, z, bodyW, d, seat, fCount, floorH);
-  else if (mode === 1) addLadder(sink, x, z, bodyW, d, seat, fCount, floorH);
-  else addOpenStaircase(sink, x, z, bodyW, d, seat, fCount, floorH);
+  else addLadder(sink, x, z, bodyW, d, seat, fCount, floorH);
 
   const roof = seat + h;
   // Roof deck extends closer to the +X edge so ladder walkway can reach it
@@ -891,9 +893,18 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
       if (blockSeat == null || blockSeat < MIN_DRY) continue;
       const blockBase = blockSeat;
 
-      // Streetlight at NE corner (cool white — not yellow ground paint)
-      post(sink, bx - 1.2, blockBase, bz - 1.2, 5.4, 0.16, C.metal);
-      sink.addSpan(bx - 1.45, blockBase + 5.15, bz - 1.45, bx - 0.85, blockBase + 5.4, bz - 0.85, 0xf0f4f8);
+      // Streetlight seated on actual terrain at pole base (not block max height)
+      const lpx = bx - 1.2;
+      const lpz = bz - 1.2;
+      const lightY = terrain.heightAt(lpx, lpz);
+      if (lightY >= MIN_DRY) {
+        // Sink slightly so the base never floats on slopes
+        const ly = lightY - 0.08;
+        post(sink, lpx, ly, lpz, 5.5, 0.16, C.metal);
+        sink.addSpan(lpx - 0.25, ly + 5.25, lpz - 0.25, lpx + 0.35, ly + 5.55, lpz + 0.35, 0xf0f4f8);
+        // Small base plate
+        sink.addSpan(lpx - 0.2, ly, lpz - 0.2, lpx + 0.3, ly + 0.12, lpz + 0.3, C.concrete);
+      }
 
       if (parkingBlocks.has(`${c},${r}`)) {
         // Open surface lot inside the block

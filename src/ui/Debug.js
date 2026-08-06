@@ -100,7 +100,7 @@ export function createHud() {
       <tr><td>Shift</td><td>sprint</td></tr>
       <tr><td>Space</td><td>jump / mantle</td></tr>
       <tr><td>C or Ctrl</td><td>crouch</td></tr>
-      <tr><td>E</td><td>open / close door</td></tr>
+      <tr><td>E</td><td>open door / call or ride elevator</td></tr>
       <tr><td>Sprint + C</td><td>slide (jump to cancel and keep your speed)</td></tr>
       <tr><td>M</td><td>tactical map (your location)</td></tr>
       <tr><td>F3</td><td>performance overlay</td></tr>
