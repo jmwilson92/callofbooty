@@ -13,6 +13,16 @@ URL="https://download.blender.org/release/Blender${VERSION%.*}/${NAME}.tar.xz"
 INSTALL_DIR="${HOME}/.local/blender"
 TMP="${TMPDIR:-/tmp}/blender-install-$$"
 
+# Runtime libs Blender needs even for --background on minimal Codespaces
+if command -v sudo >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+  echo "==> Installing system libraries (may ask for sudo)..."
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq \
+    libxxf86vm1 libxfixes3 libxi6 libxkbcommon0 libsm6 libice6 \
+    libgl1 libxrender1 libxcb1 libx11-6 libxext6 libxrandr2 \
+    libxcursor1 libxinerama1 >/dev/null
+fi
+
 mkdir -p "$HOME/.local" "$TMP"
 cd "$TMP"
 
