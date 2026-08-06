@@ -196,7 +196,7 @@ export function scatterStructures(sink, terrain, rng) {
       if (terrain.downtownPlateY != null) {
         by = Math.max(by, terrain.downtownPlateY - 0.15);
       }
-      placeSkylineTower(sink, x - 8, z - 8, by, rng, 12 + Math.floor(rng() * 12));
+      placeSkylineTower(sink, x - 8, z - 8, by, rng, 12 + Math.floor(rng() * 12), terrain);
       stats.sky++;
     }
   }

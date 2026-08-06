@@ -471,141 +471,95 @@ export function placeParkingLotDetails(sink, terrain, lots, rng, placeVehicleFn,
 }
 
 /**
- * Visual road refinement: sidewalks on downtown grid, white edge lines,
- * yellow center dashes on freeways/arterials. Thin spans only (no decks).
+ * Downtown-only sidewalks + curbs. Axis-aligned continuous slabs along each
+ * block face — never through intersections, no freeways, no scattered paint.
  */
-export function placeRoadMarkings(sink, terrain, lines) {
-  if (!lines?.length || !sink) return 0;
-  let n = 0;
-  const WHITE = 0xe8e6e0;
-  const YELLOW = 0xd4b84a;
+export function placeRoadMarkings(sink, terrain, _lines) {
+  if (!sink || !terrain) return 0;
+  const g = downtownGridParams();
+  const stepX = g.blockW + g.streetW;
+  const stepZ = g.blockD + g.streetW;
+  const originX = g.cx - (g.cols * stepX - g.streetW) / 2;
+  const originZ = g.cz - (g.rows * stepZ - g.streetW) / 2;
+  const halfW = g.streetW * 0.5;
+  const sw = 1.65; // sidewalk width
+  const curbT = 0.22;
+  const curbH = 0.12;
   const CURB = 0xb0aea8;
   const SIDEWALK = 0xc4c2bc;
+  let n = 0;
 
-  for (const line of lines) {
-    const pts = line.pts;
-    if (!pts || pts.length < 2) continue;
-    const kind = line.kind || 'arterial';
-    const halfW = (line.width ?? ROADS.WIDTH) * 0.5;
-    // Skip tiny alleys for markings density
-    if (kind === 'alley') continue;
+  const slabY = (x0, z0, x1, z1) => {
+    const h = terrain.heightAt((x0 + x1) * 0.5, (z0 + z1) * 0.5);
+    return Number.isFinite(h) && h >= MIN_DRY ? h + 0.02 : null;
+  };
 
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i];
-      const b = pts[i + 1];
-      const dx = b.x - a.x;
-      const dz = b.z - a.z;
-      const len = Math.hypot(dx, dz);
-      if (len < 4) continue;
-      const ux = dx / len;
-      const uz = dz / len;
-      const px = -uz; // left perpendicular
-      const pz = ux;
+  // N–S avenues: sidewalks only along block faces (gap at E–W streets)
+  for (let c = 0; c <= g.cols; c++) {
+    const roadX = originX + c * stepX - halfW; // centerline of street strip
+    for (let r = 0; r < g.rows; r++) {
+      const z0 = originZ + r * stepZ + 0.4; // inset from south intersection
+      const z1 = originZ + r * stepZ + g.blockD - 0.4; // inset from north intersection
+      if (z1 <= z0 + 1) continue;
 
-      const step = kind === 'street' ? 6 : 8;
-      const steps = Math.max(1, Math.ceil(len / step));
-
-      for (let s = 0; s < steps; s++) {
-        const t0 = s / steps;
-        const t1 = (s + 1) / steps;
-        const x0 = a.x + dx * t0;
-        const z0 = a.z + dz * t0;
-        const x1 = a.x + dx * t1;
-        const z1 = a.z + dz * t1;
-        const mx = (x0 + x1) * 0.5;
-        const mz = (z0 + z1) * 0.5;
-        const h = terrain.heightAt(mx, mz);
-        if (h < MIN_DRY) continue;
-        const y = h + 0.03;
-        const segLen = Math.hypot(x1 - x0, z1 - z0);
-
-        // White edge lines (both shoulders)
-        const edgeInset = halfW - 0.35;
-        if (edgeInset > 1.5) {
-          for (const side of [-1, 1]) {
-            const ex0 = x0 + px * edgeInset * side;
-            const ez0 = z0 + pz * edgeInset * side;
-            const ex1 = x1 + px * edgeInset * side;
-            const ez1 = z1 + pz * edgeInset * side;
-            const minX = Math.min(ex0, ex1) - 0.06;
-            const maxX = Math.max(ex0, ex1) + 0.06;
-            const minZ = Math.min(ez0, ez1) - 0.06;
-            const maxZ = Math.max(ez0, ez1) + 0.06;
-            // Prefer long-axis strips
-            if (Math.abs(ux) > Math.abs(uz)) {
-              sink.addSpan(minX, y, (ez0 + ez1) * 0.5 - 0.06, maxX, y + 0.025, (ez0 + ez1) * 0.5 + 0.06, WHITE, 'thin');
-            } else {
-              sink.addSpan((ex0 + ex1) * 0.5 - 0.06, y, minZ, (ex0 + ex1) * 0.5 + 0.06, y + 0.025, maxZ, WHITE, 'thin');
-            }
-            n++;
-          }
+      // West sidewalk (skip exterior outer ring slightly optional — keep all)
+      {
+        const x1 = roadX - halfW;
+        const x0 = x1 - sw;
+        const y = slabY(x0, z0, x1, z1);
+        if (y != null) {
+          sink.addSpan(x0, y, z0, x1, y + 0.07, z1, SIDEWALK, 'thin');
+          sink.addSpan(x1 - curbT, y, z0, x1 + 0.02, y + curbH, z1, CURB, 'thin');
+          n += 2;
         }
-
-        // Yellow center dashes (freeway / arterial)
-        if ((kind === 'freeway' || kind === 'arterial') && s % 2 === 0) {
-          const dash = Math.min(3.2, segLen * 0.55);
-          const cx = mx - ux * dash * 0.5;
-          const cz = mz - uz * dash * 0.5;
-          const cx2 = mx + ux * dash * 0.5;
-          const cz2 = mz + uz * dash * 0.5;
-          if (Math.abs(ux) > Math.abs(uz)) {
-            sink.addSpan(
-              Math.min(cx, cx2), y + 0.005, mz - 0.07,
-              Math.max(cx, cx2), y + 0.03, mz + 0.07,
-              YELLOW, 'thin'
-            );
-          } else {
-            sink.addSpan(
-              mx - 0.07, y + 0.005, Math.min(cz, cz2),
-              mx + 0.07, y + 0.03, Math.max(cz, cz2),
-              YELLOW, 'thin'
-            );
-          }
-          n++;
-        }
-
-        // Downtown sidewalks + low curb
-        if (kind === 'street') {
-          const sw = 1.8;
-          const curbOut = halfW + 0.15;
-          for (const side of [-1, 1]) {
-            const sx0 = mx + px * (curbOut + sw * 0.5) * side;
-            const sz0 = mz + pz * (curbOut + sw * 0.5) * side;
-            const sh = terrain.heightAt(sx0, sz0);
-            if (sh < MIN_DRY) continue;
-            const sy = sh + 0.04;
-            // Sidewalk plate
-            if (Math.abs(ux) > Math.abs(uz)) {
-              // Street runs X — sidewalk along X, offset in Z
-              sink.addSpan(
-                x0, sy, sz0 - sw * 0.5,
-                x1, sy + 0.08, sz0 + sw * 0.5,
-                SIDEWALK, 'thin'
-              );
-              // Curb strip at road edge
-              sink.addSpan(
-                x0, y, mz + pz * halfW * side - 0.12,
-                x1, y + 0.14, mz + pz * halfW * side + 0.12,
-                CURB, 'thin'
-              );
-            } else {
-              sink.addSpan(
-                sx0 - sw * 0.5, sy, z0,
-                sx0 + sw * 0.5, sy + 0.08, z1,
-                SIDEWALK, 'thin'
-              );
-              sink.addSpan(
-                mx + px * halfW * side - 0.12, y, z0,
-                mx + px * halfW * side + 0.12, y + 0.14, z1,
-                CURB, 'thin'
-              );
-            }
-            n++;
-          }
+      }
+      // East sidewalk
+      {
+        const x0 = roadX + halfW;
+        const x1 = x0 + sw;
+        const y = slabY(x0, z0, x1, z1);
+        if (y != null) {
+          sink.addSpan(x0, y, z0, x1, y + 0.07, z1, SIDEWALK, 'thin');
+          sink.addSpan(x0 - 0.02, y, z0, x0 + curbT, y + curbH, z1, CURB, 'thin');
+          n += 2;
         }
       }
     }
   }
+
+  // E–W streets: sidewalks only along block faces (gap at N–S avenues)
+  for (let r = 0; r <= g.rows; r++) {
+    const roadZ = originZ + r * stepZ - halfW;
+    for (let c = 0; c < g.cols; c++) {
+      const x0 = originX + c * stepX + 0.4;
+      const x1 = originX + c * stepX + g.blockW - 0.4;
+      if (x1 <= x0 + 1) continue;
+
+      // South sidewalk
+      {
+        const z1 = roadZ - halfW;
+        const z0 = z1 - sw;
+        const y = slabY(x0, z0, x1, z1);
+        if (y != null) {
+          sink.addSpan(x0, y, z0, x1, y + 0.07, z1, SIDEWALK, 'thin');
+          sink.addSpan(x0, y, z1 - curbT, x1, y + curbH, z1 + 0.02, CURB, 'thin');
+          n += 2;
+        }
+      }
+      // North sidewalk
+      {
+        const z0 = roadZ + halfW;
+        const z1 = z0 + sw;
+        const y = slabY(x0, z0, x1, z1);
+        if (y != null) {
+          sink.addSpan(x0, y, z0, x1, y + 0.07, z1, SIDEWALK, 'thin');
+          sink.addSpan(x0, y, z0 - 0.02, x1, y + curbH, z0 + curbT, CURB, 'thin');
+          n += 2;
+        }
+      }
+    }
+  }
+
   return n;
 }
 

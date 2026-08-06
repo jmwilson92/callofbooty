@@ -730,9 +730,9 @@ export const MAP = {
   FULL_MAP_MAX: 720, // max CSS px for the full-map square on large screens
   // Full map zoom (1 = whole world, higher = closer)
   ZOOM_MIN: 1,
-  ZOOM_MAX: 12,
+  ZOOM_MAX: 14,
   ZOOM_DEFAULT: 1,
-  ZOOM_WHEEL: 0.12,
+  ZOOM_WHEEL: 0.15,
   // Baked height-color raster resolution (power of two-ish is fine)
   RASTER: 512,
   WATER: '#1a4a5c',

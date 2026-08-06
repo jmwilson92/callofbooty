@@ -153,8 +153,11 @@ async function start() {
   bus.on('pointerlock', (locked) => {
     hud.setLocked(locked);
     combatHud.setVisible(locked);
-    // Closing pointer lock with Esc should also dismiss the tactical map.
-    if (!locked && mapView.open) mapView.setOpen(false);
+    // Esc releases lock — close map only if it wasn't the map that exited lock.
+    // Opening the map intentionally calls exitPointerLock so wheel/drag work.
+    if (!locked && mapView.open && !mapView._suppressLockClose) {
+      mapView.setOpen(false);
+    }
   });
   bus.on('pointerlock:error', () => {
     // Chrome blocks re-locking for about a second after Esc.

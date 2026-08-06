@@ -39,8 +39,11 @@ export class Input {
 
     // Listen on `window`, not on the canvas. The menu overlay covers the whole
     // viewport, so a canvas-only listener never sees the click that is supposed
-    // to start the game.
-    window.addEventListener('click', () => this.requestLock());
+    // to start the game. Skip when the tactical map is open (needs drag/zoom).
+    window.addEventListener('click', (e) => {
+      if (e.target?.closest?.('#fullmap')) return;
+      this.requestLock();
+    });
 
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.dom;

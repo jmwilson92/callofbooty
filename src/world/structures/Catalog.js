@@ -360,7 +360,7 @@ export function placeBusinessCenter(sink, terrain, x, z, rng) {
     rng,
   });
   // Kit buildings already have interior stairs — exterior access only (no 2nd elevator)
-  addBuildingAccess(sink, x, z, w, d, baseY, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false);
+  addBuildingAccess(sink, x, z, w, d, baseY, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
   // Glass ribbon accents per floor
   for (let f = 1; f < floors; f++) {
     const y = baseY + BUILDINGS.GROUND_FLOOR_HEIGHT + (f - 1) * BUILDINGS.FLOOR_HEIGHT + 1.2;
@@ -773,42 +773,86 @@ function addInteriorStairs(sink, x, z, w, d, baseY, floors, floorH, elevHole) {
 
 /**
  * Exterior street entrance on the south facade.
- * Frame / steps / canopy are static. Door leaves are interactive (E to open)
- * via worldDoors — not solid BoxSink blocks that seal the doorway shut.
+ * Stoop rises from sampled street grade up to the door sill so you never need
+ * a jump. Frame / canopy are static; door leaves are interactive (E).
+ * @param {import('../Terrain.js').Terrain|null} terrain
  */
-function addMainEntrance(sink, x, z, w, d, baseY) {
+function addMainEntrance(sink, x, z, w, d, baseY, terrain = null) {
   const doorW = Math.min(3.4, Math.max(2.4, w * 0.28));
   const doorH = 2.85;
-  const dx = x + w * 0.5 - doorW / 2;
+  const doorCx = x + w * 0.5;
+  const dx = doorCx - doorW / 2;
   const facadeZ = z; // south wall outer face
+  const sill = baseY + 0.02;
 
-  // Stoop / steps fully outside
-  sink.addSpan(dx - 0.6, baseY - 0.04, facadeZ - 2.6, dx + doorW + 0.6, baseY + 0.1, facadeZ - 0.05, C.concrete);
-  sink.addSpan(dx - 0.4, baseY + 0.1, facadeZ - 1.8, dx + doorW + 0.4, baseY + 0.22, facadeZ - 0.05, C.concrete);
-  sink.addSpan(dx - 0.25, baseY + 0.22, facadeZ - 1.1, dx + doorW + 0.25, baseY + 0.34, facadeZ - 0.05, C.concrete);
+  // Street grade in front of the door (not building-footprint max)
+  let groundY = baseY - 0.08;
+  if (terrain?.heightAt) {
+    const samples = [
+      terrain.heightAt(doorCx, facadeZ - 2.8),
+      terrain.heightAt(doorCx, facadeZ - 1.5),
+      terrain.heightAt(doorCx - 1.2, facadeZ - 2.4),
+      terrain.heightAt(doorCx + 1.2, facadeZ - 2.4),
+      terrain.heightAt(doorCx, facadeZ - 0.4),
+    ];
+    groundY = Math.min(...samples.filter((h) => Number.isFinite(h)));
+    if (!Number.isFinite(groundY)) groundY = baseY - 0.08;
+  }
+  // Never start above the sill; clamp wild samples
+  groundY = Math.min(groundY, sill - 0.04);
+  groundY = Math.max(groundY, sill - 2.4);
+
+  const rise = Math.max(0, sill - groundY);
+  const maxStep = 0.2; // well under PLAYER.MAX_STEP_HEIGHT (0.45)
+  const nSteps = Math.max(1, Math.ceil(rise / maxStep));
+  const stepRise = rise / nSteps;
+  const stepRun = Math.min(0.42, Math.max(0.28, 0.55 / Math.sqrt(nSteps)));
+  const totalRun = stepRun * nSteps + 0.15;
+  const outerZ = facadeZ - totalRun;
+
+  // Foundation pad under whole stoop (sits on street, kills float under first tread)
+  sink.addSpan(
+    dx - 0.55, groundY - 0.12, outerZ - 0.1,
+    dx + doorW + 0.55, groundY + 0.04, facadeZ - 0.02,
+    C.concrete
+  );
+
+  // Steps: each tread top = groundY + (k+1)*stepRise, ends at sill on last step
+  for (let k = 0; k < nSteps; k++) {
+    const yTop = groundY + (k + 1) * stepRise;
+    const yBot = groundY + k * stepRise - 0.03;
+    const z0 = outerZ + k * stepRun;
+    const z1 = facadeZ - 0.04; // solid under higher treads
+    const inset = k * 0.04;
+    sink.addSpan(
+      dx - 0.45 + inset, yBot, z0,
+      dx + doorW + 0.45 - inset, yTop, z1,
+      C.concrete
+    );
+  }
 
   // Door FRAME only — left, right, header (never a solid slab across the opening)
   const frameT = 0.18;
   const frameDepth = 0.28;
   // Left jamb
-  sink.addSpan(dx - 0.18, baseY, facadeZ - 0.15, dx + 0.05, baseY + doorH + 0.2, facadeZ + frameDepth, C.dark);
+  sink.addSpan(dx - 0.18, sill, facadeZ - 0.15, dx + 0.05, sill + doorH + 0.2, facadeZ + frameDepth, C.dark);
   // Right jamb
-  sink.addSpan(dx + doorW - 0.05, baseY, facadeZ - 0.15, dx + doorW + 0.18, baseY + doorH + 0.2, facadeZ + frameDepth, C.dark);
+  sink.addSpan(dx + doorW - 0.05, sill, facadeZ - 0.15, dx + doorW + 0.18, sill + doorH + 0.2, facadeZ + frameDepth, C.dark);
   // Header
-  sink.addSpan(dx - 0.18, baseY + doorH, facadeZ - 0.15, dx + doorW + 0.18, baseY + doorH + 0.28, facadeZ + frameDepth, C.dark);
+  sink.addSpan(dx - 0.18, sill + doorH, facadeZ - 0.15, dx + doorW + 0.18, sill + doorH + 0.28, facadeZ + frameDepth, C.dark);
 
   // Canopy over entrance (outside)
-  sink.addSpan(dx - 0.9, baseY + doorH + 0.05, facadeZ - 2.2, dx + doorW + 0.9, baseY + doorH + 0.35, facadeZ + 0.35, C.metalLite);
-  post(sink, dx - 0.7, baseY, facadeZ - 2.0, doorH + 0.1, 0.12, C.metal);
-  post(sink, dx + doorW + 0.55, baseY, facadeZ - 2.0, doorH + 0.1, 0.12, C.metal);
+  sink.addSpan(dx - 0.9, sill + doorH + 0.05, facadeZ - 2.2, dx + doorW + 0.9, sill + doorH + 0.35, facadeZ + 0.35, C.metalLite);
+  post(sink, dx - 0.7, sill, facadeZ - 2.0, doorH + 0.1, 0.12, C.metal);
+  post(sink, dx + doorW + 0.55, sill, facadeZ - 2.0, doorH + 0.1, 0.12, C.metal);
 
   // Side light boxes (exterior)
-  sink.addSpan(dx - 0.55, baseY + 1.2, facadeZ - 0.15, dx - 0.25, baseY + 2.1, facadeZ + 0.1, C.glass);
-  sink.addSpan(dx + doorW + 0.25, baseY + 1.2, facadeZ - 0.15, dx + doorW + 0.55, baseY + 2.1, facadeZ + 0.1, C.glass);
+  sink.addSpan(dx - 0.55, sill + 1.2, facadeZ - 0.15, dx - 0.25, sill + 2.1, facadeZ + 0.1, C.glass);
+  sink.addSpan(dx + doorW + 0.25, sill + 1.2, facadeZ - 0.15, dx + doorW + 0.55, sill + 2.1, facadeZ + 0.1, C.glass);
 
   // Interactive double doors (meshes + collision live in DoorSystem)
   worldDoors.register({
-    x: x + w * 0.5,
+    x: doorCx,
     y: baseY,
     z: facadeZ - 0.06,
     width: doorW - 0.08,
@@ -824,8 +868,8 @@ function addMainEntrance(sink, x, z, w, d, baseY) {
  * includeElevator: set false for solid makeBuilding shells (they use kit stairs).
  * Returns elevator hole for floor slabs (or null).
  */
-export function addBuildingAccess(sink, x, z, w, d, baseY, floors, floorH, rng, accessMode = -1, includeElevator = true) {
-  addMainEntrance(sink, x, z, w, d, baseY);
+export function addBuildingAccess(sink, x, z, w, d, baseY, floors, floorH, rng, accessMode = -1, includeElevator = true, terrain = null) {
+  addMainEntrance(sink, x, z, w, d, baseY, terrain);
   let elevHole = null;
   if (includeElevator && floors >= 3) {
     elevHole = addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng);
@@ -847,7 +891,7 @@ export function addBuildingAccess(sink, x, z, w, d, baseY, floors, floorH, rng, 
  * Hollow skyline tower: exterior shell walls + floor slabs with elevator hole,
  * interior elevator, exterior fire escape / ladder / stairs.
  */
-export function placeSkylineTower(sink, x, z, baseY, rng, floors = null) {
+export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain = null) {
   const fCount = Math.min(24, floors ?? (8 + Math.floor(rng() * 16)));
   const floorH = 3.5;
   const h = fCount * floorH;
@@ -936,8 +980,8 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null) {
     sink.addSpan(x - 0.04, y, z + d - 0.08, x + bodyW + 0.04, y + 0.1, z + d + 0.04, band);
   }
 
-  // Exterior street entrance (outside the facade)
-  addMainEntrance(sink, x, z, bodyW, d, seat);
+  // Exterior street entrance (outside the facade) — steps follow street grade
+  addMainEntrance(sink, x, z, bodyW, d, seat, terrain);
 
   // Exterior vertical access — fire escape or ladder only on towers
   const mode = Math.floor(rng() * 2);
@@ -976,7 +1020,7 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
   const baseY = groundY(terrain, x, z, 28, 26);
   // Mix: some enterable mid/high towers, many silhouette skyline towers
   if (rng() > 0.45) {
-    placeSkylineTower(sink, x, z, baseY, rng, 12 + Math.floor(rng() * 16));
+    placeSkylineTower(sink, x, z, baseY, rng, 12 + Math.floor(rng() * 16), terrain);
     return;
   }
   const variant = Math.floor(rng() * 3);
@@ -988,7 +1032,7 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
 
   if (variant === 0) {
     makeBuilding(sink, { x, z, w, d, floors, baseY: seat, color: col, rng });
-    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false);
+    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
   } else if (variant === 1) {
     makeBuilding(sink, { x, z, w: w + 6, d: d + 6, floors: 3, baseY: seat, color: C.concrete, rng });
     makeBuilding(sink, {
@@ -996,14 +1040,14 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
       baseY: seat + BUILDINGS.GROUND_FLOOR_HEIGHT + 2 * BUILDINGS.FLOOR_HEIGHT,
       color: col, rng,
     });
-    addBuildingAccess(sink, x, z, w + 6, d + 6, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false);
+    addBuildingAccess(sink, x, z, w + 6, d + 6, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
   } else {
     makeBuilding(sink, { x, z, w: w * 0.55, d, floors, baseY: seat, color: col, rng });
     makeBuilding(sink, {
       x: x + w * 0.6, z, w: w * 0.45, d: d * 0.85,
       floors: floors - 2, baseY: seat, color: pick(rng, [C.glassDark, C.white, col]), rng,
     });
-    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false);
+    addBuildingAccess(sink, x, z, w, d, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
   }
 
   const roof = seat + BUILDINGS.GROUND_FLOOR_HEIGHT + (floors - 1) * BUILDINGS.FLOOR_HEIGHT;
@@ -1118,9 +1162,9 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
           color: pick(rng, [C.glass, C.white, C.cream, C.brick, C.gray]),
           rng,
         });
-        addBuildingAccess(sink, tx, tz, tw, td, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false);
+        addBuildingAccess(sink, tx, tz, tw, td, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
       } else {
-        placeSkylineTower(sink, tx, tz, seatY, rng, floors);
+        placeSkylineTower(sink, tx, tz, seatY, rng, floors, terrain);
       }
       towers++;
     }
@@ -1142,7 +1186,7 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
       hx + tw + 0.3, seatY + 0.06, hz + td + 0.3,
       C.concrete
     );
-    placeSkylineTower(sink, hx, hz, seatY, rng, 12 + Math.floor(rng() * 6));
+    placeSkylineTower(sink, hx, hz, seatY, rng, 12 + Math.floor(rng() * 6), terrain);
     towers++;
   }
 
