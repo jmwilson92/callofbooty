@@ -239,16 +239,11 @@ export class ElevatorSystem {
           car.floor = car.targetFloor;
           car.moving = false;
           car.justArrived = true;
-          // Release player so they can walk out the open door face
           car.ridePlayer = false;
+          // Stay put in cabin — no eject nudge, no XZ pull
           if (controller && this.playerInCabin(car, controller.pos.x, controller.pos.y, controller.pos.z)) {
-            // Nudge slightly toward hallway so you're not sealed against shaft wall
-            controller.pos.x += car.exitX * 0.35;
-            controller.pos.z += car.exitZ * 0.35;
             controller.pos.y = car.y + 0.05;
             controller.vel.y = 0;
-            controller.vel.x *= 0.3;
-            controller.vel.z *= 0.3;
             controller.grounded = true;
           }
         } else {
@@ -264,17 +259,14 @@ export class ElevatorSystem {
       const pz = controller.pos.z;
       const inCabin = this.playerInCabin(car, px, py, pz);
 
-      // Only stick while actively moving — never trap player when stopped
+      // Stick Y only while moving — keep XZ exactly where the player stood
       if (inCabin && car.moving) {
         car.ridePlayer = true;
         controller.pos.y = car.y + 0.04;
         controller.vel.y = 0;
         controller.grounded = true;
         controller.coyote = 0.12;
-        // Light center only while moving (prevents falling out of shaft mid-ride)
-        const pull = 1.8 * dt;
-        controller.pos.x += (car.cx - controller.pos.x) * pull * 0.12;
-        controller.pos.z += (car.cz - controller.pos.z) * pull * 0.12;
+        // Do NOT pull toward door or cabin center — that caused the twitch
       }
     }
   }
@@ -284,11 +276,9 @@ export class ElevatorSystem {
     if (!car) return null;
     if (car.moving) return 'Elevator…';
     if (this.playerInCabin(car, px, py, pz)) {
-      if (car.floor >= car.spec.floors - 1) return 'E · Elevator down · walk out door';
-      if (car.floor <= 0) return 'E · Elevator up · walk out door';
-      return car.dir >= 0
-        ? 'E · Elevator up · walk out door'
-        : 'E · Elevator down · walk out door';
+      if (car.floor >= car.spec.floors - 1) return 'E · Elevator down';
+      if (car.floor <= 0) return 'E · Elevator up';
+      return car.dir >= 0 ? 'E · Elevator up' : 'E · Elevator down';
     }
     return 'E · Call elevator';
   }
