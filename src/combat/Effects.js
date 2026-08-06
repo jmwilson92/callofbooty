@@ -150,7 +150,7 @@ export class CombatEffects {
   }
 
   update(dt) {
-    if (this._flashLightT > 0) {
+    if (this._flashLight && this._flashLightT > 0) {
       this._flashLightT -= dt;
       this._flashLight.intensity = Math.max(0, this._flashLight.intensity - dt * 70);
       if (this._flashLightT <= 0) this._flashLight.intensity = 0;
