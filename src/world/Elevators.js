@@ -257,7 +257,11 @@ export class ElevatorSystem {
     return best;
   }
 
-  tryUse(controller) {
+  /**
+   * @param {object} controller
+   * @param {{ express?: boolean }} [opts]  express = Shift+E → top or ground
+   */
+  tryUse(controller, opts = {}) {
     const px = controller.pos.x;
     const py = controller.pos.y;
     const pz = controller.pos.z;
@@ -267,8 +271,17 @@ export class ElevatorSystem {
 
     const s = car.spec;
     const inCabin = this.playerInCabin(car, px, py, pz);
+    const express = !!opts.express;
+    const topF = s.floors - 1;
 
     if (inCabin) {
+      if (express) {
+        // Shift+E: jump straight to top, or ground if already at top
+        const dest = car.floor >= topF ? 0 : topF;
+        if (dest === car.floor) return true;
+        this._startRide(car, dest, true);
+        return true;
+      }
       let dest = car.floor + car.dir;
       if (dest >= s.floors) {
         car.dir = -1;
@@ -286,6 +299,16 @@ export class ElevatorSystem {
     const localY = py - s.baseY;
     let callF = Math.round(localY / s.floorH);
     callF = Math.max(0, Math.min(s.floors - 1, callF));
+    if (express) {
+      // From hallway with Shift: call car to your floor, or if already here ride to top
+      if (callF === car.floor) {
+        const dest = callF >= topF ? 0 : topF;
+        if (dest !== car.floor) this._startRide(car, dest, true);
+      } else {
+        this._startRide(car, callF, false);
+      }
+      return true;
+    }
     if (callF !== car.floor) {
       this._startRide(car, callF, false);
     }
@@ -356,24 +379,24 @@ export class ElevatorSystem {
     const isG = car.floor <= 0;
     if (car.moving) {
       const dest = car.targetFloor + 1;
-      return `Elevator · → ${dest}/${max}${car.targetFloor >= car.spec.floors - 1 ? ' TOP' : ''}…`;
+      const tag = car.targetFloor >= car.spec.floors - 1 ? ' TOP'
+        : car.targetFloor <= 0 ? ' GROUND' : '';
+      return `Elevator · → ${dest}/${max}${tag}…`;
     }
     if (this.playerInCabin(car, px, py, pz)) {
-      if (isTop) return `E · TOP FLOOR ${n}/${max} · Down only`;
-      if (isG) return `E · Floor ${n}/${max} GROUND · Up`;
+      if (isTop) return `E · Down · Shift+E GROUND · Floor ${n}/${max}`;
+      if (isG) return `E · Up · Shift+E TOP · Floor ${n}/${max}`;
       const next = car.dir >= 0 ? 'Up' : 'Down';
-      return `E · Floor ${n}/${max} · ${next}`;
+      return `E · ${next} · Shift+E TOP · Floor ${n}/${max}`;
     }
-    // Hallway call — show which floor you're on
     const s = car.spec;
     let callF = Math.round((py - s.baseY) / s.floorH);
     callF = Math.max(0, Math.min(s.floors - 1, callF));
     const here = callF + 1;
     const carAt = car.floor + 1;
     if (callF === car.floor) {
-      if (isTop) return `E · Elevator here · TOP ${n}/${max}`;
-      return `E · Elevator here · Floor ${n}/${max}`;
+      return `E · Elevator · Shift+E TOP · Floor ${n}/${max}`;
     }
-    return `E · Call elevator · you ${here} · car ${carAt}${car.floor >= s.floors - 1 ? ' TOP' : ''}`;
+    return `E · Call · you ${here} · car ${carAt} · Shift+E express`;
   }
 }

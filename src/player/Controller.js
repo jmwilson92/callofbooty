@@ -45,6 +45,7 @@ export class Controller {
     this.mantleTo = new THREE.Vector3();
 
     this.onLadder = false;
+    this.onRappel = false;
     this.ladders = worldLadders;
 
     this.speed = 0; // horizontal speed, for camera bob and FOV
@@ -327,17 +328,20 @@ export class Controller {
       this.vel.z += n.z * SLIDE.SLOPE_ACCEL * dt;
     }
 
-    // --- ladder climb (W up / S down while inside a registered volume) ---
+    // --- ladder / rappel climb (W up / S down; rappel is much faster) ---
     const ladder = this.ladders.findAt(
       this.pos.x, this.pos.y + this.height * 0.4, this.pos.z, this.radius
     );
     this.onLadder = !!ladder;
+    this.onRappel = !!(ladder && ladder.kind === 'rappel');
     if (ladder) {
       // Climb intent: forward climbs up, back climbs down; jump also climbs up
       let climb = fwd;
       if (input.actionPressed('jump') || input.action('jump')) climb = Math.max(climb, 1);
       if (wantCrouch) climb = Math.min(climb, -1);
-      this.vel.y = climb * LADDER.SPEED;
+      // Rappel lines zip fast; normal ladders use LADDER.SPEED
+      const climbSpeed = ladder.speed ?? LADDER.SPEED;
+      this.vel.y = climb * climbSpeed;
       // Stick to the rails: damp horizontal drift and pull toward ladder center
       this.vel.x *= (1 - LADDER.STICK);
       this.vel.z *= (1 - LADDER.STICK);
@@ -350,7 +354,13 @@ export class Controller {
       const feetMin = ladder.y0 - 0.05;
       const feetMax = ladder.y1 - 0.2;
       if (this.pos.y < feetMin && this.vel.y < 0) this.vel.y = 0;
-      if (this.pos.y > feetMax && this.vel.y > 0) this.vel.y = 0;
+      if (this.pos.y > feetMax && this.vel.y > 0) {
+        this.vel.y = 0;
+        // Pop onto roof when zipping past the top of a rappel
+        if (ladder.kind === 'rappel' && this.pos.y > feetMax - 0.15) {
+          this.pos.y = feetMax + 0.05;
+        }
+      }
     }
 
     // --- gravity (off while climbing) ---

@@ -1,4 +1,4 @@
-// Climb volumes for exterior ladders / fire-escape cages.
+// Climb volumes for exterior ladders / fire-escape cages / roof rappels.
 // Registered at world-gen time; the controller queries them each tick.
 
 export class LadderRegistry {
@@ -13,8 +13,11 @@ export class LadderRegistry {
   /**
    * Axis-aligned climb volume. Player feet can sit anywhere in y0..y1
    * while x/z stay within the rect (with small padding applied at query).
+   * @param {object} [opts]
+   * @param {number} [opts.speed]  climb speed override (rappel zip)
+   * @param {string} [opts.kind]   'ladder' | 'rappel'
    */
-  add(x0, y0, z0, x1, y1, z1) {
+  add(x0, y0, z0, x1, y1, z1, opts = {}) {
     if (y1 <= y0) return;
     this.volumes.push({
       x0: Math.min(x0, x1),
@@ -25,6 +28,11 @@ export class LadderRegistry {
       z1: Math.max(z0, z1),
       cx: (x0 + x1) * 0.5,
       cz: (z0 + z1) * 0.5,
+      speed: opts.speed ?? null,
+      kind: opts.kind ?? 'ladder',
+      // Roof landing for rappel express
+      topY: opts.topY ?? Math.max(y0, y1),
+      botY: opts.botY ?? Math.min(y0, y1),
     });
   }
 

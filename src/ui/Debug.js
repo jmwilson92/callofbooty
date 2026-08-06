@@ -101,7 +101,9 @@ export function createHud() {
       <tr><td>Space</td><td>jump / mantle</td></tr>
       <tr><td>C or Ctrl</td><td>crouch</td></tr>
       <tr><td>E</td><td>vehicle / loot / door / elevator</td></tr>
-      <tr><td>Moto / Heli</td><td>WASD drive · Space/C heli up/down · E exit</td></tr>
+      <tr><td>Shift+E</td><td>elevator express to TOP (or GROUND)</td></tr>
+      <tr><td>Rappel rope</td><td>W zip up · S down (gold ropes on facades)</td></tr>
+      <tr><td>Moto / Heli</td><td>WASD · Space/C heli · LMB rockets · E exit</td></tr>
       <tr><td>RMB (sniper)</td><td>scope zoom + reticle</td></tr>
       <tr><td>LMB</td><td>fire</td></tr>
       <tr><td>RMB</td><td>ADS</td></tr>

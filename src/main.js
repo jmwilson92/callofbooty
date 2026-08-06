@@ -14,6 +14,7 @@ import { loadPropLibrary, scatterAssetProps } from './world/Assets.js';
 import { DoorSystem } from './world/Doors.js';
 import { ElevatorSystem } from './world/Elevators.js';
 import { VehicleSystem } from './world/Vehicles.js';
+import { RappelSystem } from './world/Rappels.js';
 import { Controller } from './player/Controller.js';
 import { PlayerCamera } from './player/Camera.js';
 import { DebugOverlay, createHud } from './ui/Debug.js';
@@ -141,6 +142,9 @@ async function start() {
   // Vehicles need hash + effects for collision / rockets
   const vehicles = new VehicleSystem(scene, terrain, bus, hash, effects);
   const vehicleCount = vehicles.spawn();
+  // Roof rappel lines (after buildings exist)
+  const rappels = new RappelSystem(scene, terrain);
+  const rappelCount = rappels.spawn();
   // Imagine → Blender viewmodels (async; falls back to procedural until loaded)
   const weaponLib = await loadWeaponLibrary();
   weapons.setWeaponModels(weaponLib.byClass);
@@ -190,7 +194,7 @@ async function start() {
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
     `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
     `${assetPropStats.placed} glb-props · doors ${doorCount} · elevators ${elevCount} · ` +
-    `vehicles ${vehicleCount} · loot ${lootStats.items ?? 0} items + ${lootStats.cases ?? 0} cases · bots ${botCount} · ` +
+    `vehicles ${vehicleCount} · rappels ${rappelCount} · loot ${lootStats.items ?? 0} items + ${lootStats.cases ?? 0} cases · bots ${botCount} · ` +
     `road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
   );
 
@@ -236,7 +240,10 @@ async function start() {
               controller.pos.z
             );
             if (!gotLoot) {
-              const usedElev = elevators.tryUse(controller);
+              // Shift+E = elevator express to top (or ground if already top)
+              const usedElev = elevators.tryUse(controller, {
+                express: input.action('sprint'),
+              });
               if (!usedElev) {
                 doors.tryToggle(
                   controller.pos.x,
@@ -345,6 +352,7 @@ async function start() {
         vehicles.prompt(px, py, pz)
         || loot.prompt(px, py, pz)
         || elevators.prompt(px, py, pz)
+        || rappels.prompt(px, py, pz)
         || doors.prompt(px, py, pz)
       );
     } else {

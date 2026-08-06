@@ -74,6 +74,19 @@ export const LADDER = {
   CENTER_PULL: 6.0,
 };
 
+/** Roof rappel lines — zip up building facades to the roof. */
+export const RAPPEL = {
+  // Max buildings to equip (tall ones preferred)
+  MAX_COUNT: 28,
+  MIN_FLOORS: 5,
+  // Climb speed (m/s) — much faster than ladders
+  SPEED: 16,
+  // Horizontal size of climb volume around the rope
+  RADIUS: 0.55,
+  // Offset from south facade (out into street)
+  FACADE_OUT: 0.55,
+};
+
 export const CAMERA = {
   FOV_BASE: 80,
   FOV_SPRINT: 88,
