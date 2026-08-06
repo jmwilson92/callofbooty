@@ -284,10 +284,19 @@ async function start() {
     const strafe = input.locked && !mapView.open
       ? (input.action('right') ? 1 : 0) - (input.action('left') ? 1 : 0)
       : 0;
-    playerCam.update(clock.frameDelta, controller, clock.alpha, strafe);
+    playerCam.update(
+      clock.frameDelta,
+      controller,
+      clock.alpha,
+      strafe,
+      vehicles.active // third-person chase when riding
+    );
 
-    // ADS FOV — sniper/DMR use real optic zoom
-    {
+    // Hide gun overlay in vehicles; ADS FOV only on foot
+    if (weaponOverlay?.group) {
+      weaponOverlay.group.visible = !vehicles.riding;
+    }
+    if (!vehicles.riding) {
       const hipFov = playerCam.fov;
       const def = weapons.def;
       const zoomTarget = def?.scopeZoomFov ?? 48;
@@ -296,7 +305,6 @@ async function start() {
         playerCam.camera.fov = adsFov;
         playerCam.camera.updateProjectionMatrix();
       }
-      // Weapon overlay: normal gun FOV; sniper hides mesh so FOV less critical
       const wFov = THREE.MathUtils.lerp(50, def?.scopeOverlay ? 38 : 42, weapons.ads);
       if (Math.abs(weaponOverlay.camera.fov - wFov) > 0.1) {
         weaponOverlay.camera.fov = wFov;

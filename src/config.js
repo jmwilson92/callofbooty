@@ -481,7 +481,13 @@ export const INPUT = {
 
 /** Rideable vehicles for faster map travel. */
 export const VEHICLES = {
-  ENTER_RANGE: 3.2,
+  ENTER_RANGE: 3.4,
+  // Third-person chase cam while riding
+  CAM_MOTO_DIST: 7.5,
+  CAM_MOTO_HEIGHT: 2.4,
+  CAM_HELI_DIST: 16,
+  CAM_HELI_HEIGHT: 5.5,
+  CAM_LOOK_Y: 1.15,
   MOTORCYCLE: {
     count: 18,
     speed: 22,
@@ -492,13 +498,16 @@ export const VEHICLES = {
     eyeY: 1.35,
   },
   HELICOPTER: {
-    count: 6,
+    // Prefer rooftop pads on tall buildings (1–2 guaranteed + optional ground)
+    count: 2,
+    rooftopOnly: true,
+    minFloors: 10,
     speed: 38,
     accel: 18,
     climb: 14,
     seatY: 1.1,
     eyeY: 1.55,
-    minAGL: 2.5, // min altitude above ground
+    minAGL: 2.5, // min altitude above ground/roof
     maxY: 220,
   },
 };

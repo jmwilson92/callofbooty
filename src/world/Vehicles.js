@@ -1,10 +1,21 @@
 import * as THREE from 'three';
 import { VEHICLES, PLAYER, WORLD, POIS } from '../config.js';
+import { worldBuildings } from './BuildingRegistry.js';
 
 /**
  * Rideable motorcycles + helicopters.
+ * Mesh nose faces local −Z (same as player look). Movement uses that forward.
  * E to mount/dismount. Motorcycle sticks to terrain; heli free-flies (Space/C).
  */
+
+/** Player/camera forward XZ for a yaw (yaw 0 = −Z / north). */
+function forwardXZ(yaw) {
+  return { x: -Math.sin(yaw), z: -Math.cos(yaw) };
+}
+function rightXZ(yaw) {
+  // Right of look: yaw 0 → +X
+  return { x: Math.cos(yaw), z: -Math.sin(yaw) };
+}
 
 function mulberry(seed) {
   let t = seed >>> 0;
@@ -73,33 +84,49 @@ export class VehicleSystem {
       tryMoto(x, z);
     }
 
-    // Helicopters at helipad-ish spots (POIs + a few open pads)
-    const heliSpots = [
-      [PLAYER.SPAWN.x + 25, PLAYER.SPAWN.z - 15],
-      ...POIS.filter((p) => ['airport', 'downtown', 'mcrd', 'missionvalley', 'kearnymesa', 'coronado'].includes(p.id))
-        .map((p) => [p.x + 18, p.z + 12]),
-      [200, 200],
-      [-100, 100],
-    ];
-    let hi = 0;
-    for (const [hx, hz] of heliSpots) {
-      if (hi >= heliN) break;
-      const y = this.terrain.heightAt(hx, hz);
-      if (y < WORLD.WATER_LEVEL + 1) continue;
-      this._addHelicopter(hx, y + 0.5, hz, rng() * Math.PI * 2, rng);
-      hi++;
-    }
-    while (hi < heliN) {
-      const x = (rng() * 2 - 1) * 350 + PLAYER.SPAWN.x;
-      const z = (rng() * 2 - 1) * 350 + PLAYER.SPAWN.z;
-      const y = this.terrain.heightAt(x, z);
-      if (y >= WORLD.WATER_LEVEL + 1.5) {
-        this._addHelicopter(x, y + 0.5, z, rng() * Math.PI * 2, rng);
-        hi++;
-      }
-    }
+    // Helicopters on tall building roofs (prefer downtown skyline)
+    this._spawnRoofHelis(heliN, rng);
 
     return this.vehicles.length;
+  }
+
+  _spawnRoofHelis(count, rng) {
+    const minF = VEHICLES.HELICOPTER?.minFloors ?? 10;
+    const roofs = (worldBuildings || [])
+      .filter((b) => b.floors >= minF && b.w >= 10 && b.d >= 10 && Number.isFinite(b.roofY ?? b.baseY))
+      .map((b) => ({
+        b,
+        score: (b.floors || 0) * 2 + (b.w * b.d) * 0.01 + (Math.hypot((b.x + b.w * 0.5) - PLAYER.SPAWN.x, (b.z + b.d * 0.5) - PLAYER.SPAWN.z) < 200 ? 8 : 0),
+      }))
+      .sort((a, c) => c.score - a.score);
+
+    let hi = 0;
+    const used = [];
+    for (const { b } of roofs) {
+      if (hi >= count) break;
+      const cx = b.x + b.w * 0.5;
+      const cz = b.z + b.d * 0.5;
+      // Avoid stacking two helis on the same roof
+      if (used.some((u) => Math.hypot(u.x - cx, u.z - cz) < 18)) continue;
+      const roofY = (b.roofY ?? (b.baseY + b.floors * 3.5)) + 0.35;
+      this._addHelicopter(cx, roofY, cz, rng() * Math.PI * 2, rng);
+      used.push({ x: cx, z: cz });
+      hi++;
+    }
+    // Fallback: open ground near spawn if not enough tall roofs registered yet
+    while (hi < count) {
+      const a = rng() * Math.PI * 2;
+      const r = 30 + rng() * 50;
+      const x = PLAYER.SPAWN.x + Math.cos(a) * r;
+      const z = PLAYER.SPAWN.z + Math.sin(a) * r;
+      const y = this.terrain.heightAt(x, z) + 0.5;
+      if (y > WORLD.WATER_LEVEL + 1.5) {
+        this._addHelicopter(x, y, z, rng() * Math.PI * 2, rng);
+        hi++;
+      } else {
+        break;
+      }
+    }
   }
 
   clear() {
@@ -118,37 +145,32 @@ export class VehicleSystem {
     const dark = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.7, metalness: 0.2 });
     const chrome = new THREE.MeshStandardMaterial({ color: 0xb0b4b8, roughness: 0.3, metalness: 0.85 });
 
-    // Main body
+    // Nose toward local −Z (player forward). Seat aft (+Z-ish), headlight −Z.
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 1.7), bodyMat);
     body.position.set(0, 0.55, 0);
     body.castShadow = true;
     root.add(body);
-    // Tank
     const tank = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.28, 0.55), bodyMat);
-    tank.position.set(0, 0.85, 0.15);
+    tank.position.set(0, 0.85, -0.15);
     root.add(tank);
-    // Seat
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.55), dark);
-    seat.position.set(0, 0.82, -0.35);
+    seat.position.set(0, 0.82, 0.35);
     root.add(seat);
-    // Wheels
-    for (const zz of [0.65, -0.7]) {
+    for (const zz of [-0.65, 0.7]) {
       const w = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.18, 12), dark);
       w.rotation.z = Math.PI / 2;
       w.position.set(0, 0.32, zz);
       w.castShadow = true;
       root.add(w);
     }
-    // Handlebar
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.06), chrome);
-    bar.position.set(0, 1.0, 0.55);
+    bar.position.set(0, 1.0, -0.55);
     root.add(bar);
-    // Headlight
     const light = new THREE.Mesh(
       new THREE.BoxGeometry(0.18, 0.14, 0.08),
       new THREE.MeshStandardMaterial({ color: 0xfff0c0, emissive: 0xffe080, emissiveIntensity: 0.4 })
     );
-    light.position.set(0, 0.7, 0.9);
+    light.position.set(0, 0.7, -0.9);
     root.add(light);
 
     this.group.add(root);
@@ -174,53 +196,58 @@ export class VehicleSystem {
     });
     const rotorMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2c, roughness: 0.5, metalness: 0.5 });
 
-    // Cabin
+    // Nose toward local −Z (player forward); tail toward +Z
     const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 3.4), bodyMat);
     cabin.position.set(0, 1.1, 0);
     cabin.castShadow = true;
     root.add(cabin);
-    // Nose glass
     const nose = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.9), glass);
-    nose.position.set(0, 1.25, 1.5);
+    nose.position.set(0, 1.25, -1.5);
     root.add(nose);
-    // Tail boom
     const boom = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 3.2), bodyMat);
-    boom.position.set(0, 1.3, -3.0);
+    boom.position.set(0, 1.3, 3.0);
     root.add(boom);
-    // Tail fin
     const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.1, 0.7), bodyMat);
-    fin.position.set(0, 1.85, -4.4);
+    fin.position.set(0, 1.85, 4.4);
     root.add(fin);
-    // Skids
     for (const sx of [-0.75, 0.75]) {
       const skid = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 3.0), dark);
-      skid.position.set(sx, 0.2, 0.1);
+      skid.position.set(sx, 0.2, -0.1);
       root.add(skid);
       const legF = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.55, 0.1), dark);
-      legF.position.set(sx, 0.5, 0.9);
+      legF.position.set(sx, 0.5, -0.9);
       root.add(legF);
       const legR = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.55, 0.1), dark);
-      legR.position.set(sx, 0.5, -0.7);
+      legR.position.set(sx, 0.5, 0.7);
       root.add(legR);
     }
-    // Main rotor (spins when ridden)
     const rotor = new THREE.Group();
     rotor.position.set(0, 2.0, 0);
-    const blade1 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.04, 7.5), rotorMat);
-    const blade2 = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.04, 0.18), rotorMat);
-    rotor.add(blade1, blade2);
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.25, 8), dark);
-    rotor.add(hub);
+    rotor.add(new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.04, 7.5), rotorMat));
+    rotor.add(new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.04, 0.18), rotorMat));
+    rotor.add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.25, 8), dark));
     root.add(rotor);
-    // Tail rotor
     const tailRotor = new THREE.Group();
-    tailRotor.position.set(0.25, 1.85, -4.5);
-    const tb = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.4, 0.12), rotorMat);
-    tailRotor.add(tb);
+    tailRotor.position.set(0.25, 1.85, 4.5);
+    tailRotor.add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.4, 0.12), rotorMat));
     root.add(tailRotor);
 
     root.userData.rotor = rotor;
     root.userData.tailRotor = tailRotor;
+
+    // Roof pad marker (visible helipad ring)
+    const pad = new THREE.Mesh(
+      new THREE.CylinderGeometry(4.2, 4.2, 0.08, 24),
+      new THREE.MeshStandardMaterial({ color: 0x2a2a2e, roughness: 0.85 })
+    );
+    pad.position.y = 0.02;
+    root.add(pad);
+    const H = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 0.05, 0.35),
+      new THREE.MeshStandardMaterial({ color: 0xe8e8e8, emissive: 0x404040, emissiveIntensity: 0.3 })
+    );
+    H.position.y = 0.08;
+    root.add(H);
 
     this.group.add(root);
     this.vehicles.push({
@@ -236,12 +263,14 @@ export class VehicleSystem {
   findNear(px, py, pz) {
     let best = null;
     let bestD = Infinity;
-    const range = VEHICLES.ENTER_RANGE ?? 3.2;
+    const range = VEHICLES.ENTER_RANGE ?? 3.4;
     for (const v of this.vehicles) {
       if (this.active === v) continue;
       const d = Math.hypot(v.x - px, v.z - pz);
-      if (d > range) continue;
-      if (Math.abs(v.y - py) > 4) continue;
+      if (d > range + (v.type === 'helicopter' ? 1.5 : 0)) continue;
+      // Helis on roofs need taller enter window
+      const maxDy = v.type === 'helicopter' ? 6 : 3.5;
+      if (Math.abs(v.y - py) > maxDy) continue;
       if (d < bestD) {
         bestD = d;
         best = v;
@@ -333,9 +362,7 @@ export class VehicleSystem {
     let steer = 0;
     if (input.action('left')) steer += 1;
     if (input.action('right')) steer -= 1;
-    // Blend vehicle yaw toward camera yaw when moving forward
-    const wantYaw = yaw;
-    let dyaw = wantYaw - v.yaw;
+    let dyaw = yaw - v.yaw;
     while (dyaw > Math.PI) dyaw -= Math.PI * 2;
     while (dyaw < -Math.PI) dyaw += Math.PI * 2;
     const turn = (cfg.turnRate ?? 2.4) * (0.35 + Math.min(1, Math.abs(v.speed) / maxSp));
@@ -349,23 +376,20 @@ export class VehicleSystem {
     if (throttle > 0) v.speed = Math.min(maxSp, v.speed + accel * throttle * dt);
     else if (throttle < 0) v.speed = Math.max(-maxSp * 0.35, v.speed + brake * throttle * dt);
     else {
-      // Coast friction
       const fr = 6 * dt;
       if (v.speed > 0) v.speed = Math.max(0, v.speed - fr);
       else v.speed = Math.min(0, v.speed + fr);
     }
 
-    const fx = Math.sin(v.yaw);
-    const fz = Math.cos(v.yaw);
+    // Forward matches player look / mesh nose (−Z at yaw 0)
+    const { x: fx, z: fz } = forwardXZ(v.yaw);
     let nx = v.x + fx * v.speed * dt;
     let nz = v.z + fz * v.speed * dt;
-    // Soft map bounds
     const lim = WORLD.SIZE * 0.48;
     nx = THREE.MathUtils.clamp(nx, -lim, lim);
     nz = THREE.MathUtils.clamp(nz, -lim, lim);
 
     const ground = this.terrain.heightAt(nx, nz);
-    // Don't drive into deep water hard
     if (ground < WORLD.WATER_LEVEL + 0.15) {
       v.speed *= 0.85;
     } else {
@@ -376,7 +400,6 @@ export class VehicleSystem {
 
     v.root.position.set(v.x, v.y, v.z);
     v.root.rotation.y = v.yaw;
-    // Lean into turns
     const lean = THREE.MathUtils.clamp(-dyaw * 0.8 - steer * 0.25, -0.35, 0.35);
     v.root.rotation.z = THREE.MathUtils.lerp(v.root.rotation.z || 0, lean, 1 - Math.exp(-8 * dt));
 
@@ -395,23 +418,20 @@ export class VehicleSystem {
     const minAGL = cfg.minAGL ?? 2.5;
     const maxY = cfg.maxY ?? 220;
 
-    // Face look yaw
     let dyaw = yaw - v.yaw;
     while (dyaw > Math.PI) dyaw -= Math.PI * 2;
     while (dyaw < -Math.PI) dyaw += Math.PI * 2;
     v.yaw += THREE.MathUtils.clamp(dyaw, -2.8 * dt, 2.8 * dt);
 
-    const fx = Math.sin(v.yaw);
-    const fz = Math.cos(v.yaw);
-    const rx = Math.cos(v.yaw);
-    const rz = -Math.sin(v.yaw);
+    const f = forwardXZ(v.yaw);
+    const r = rightXZ(v.yaw);
 
     let wishX = 0;
     let wishZ = 0;
-    if (input.action('forward')) { wishX += fx; wishZ += fz; }
-    if (input.action('back')) { wishX -= fx; wishZ -= fz; }
-    if (input.action('left')) { wishX -= rx; wishZ -= rz; }
-    if (input.action('right')) { wishX += rx; wishZ += rz; }
+    if (input.action('forward')) { wishX += f.x; wishZ += f.z; }
+    if (input.action('back')) { wishX -= f.x; wishZ -= f.z; }
+    if (input.action('left')) { wishX -= r.x; wishZ -= r.z; }
+    if (input.action('right')) { wishX += r.x; wishZ += r.z; }
     const wlen = Math.hypot(wishX, wishZ);
     if (wlen > 1e-4) {
       wishX /= wlen;
@@ -422,14 +442,12 @@ export class VehicleSystem {
       v.vx *= Math.exp(-1.8 * dt);
       v.vz *= Math.exp(-1.8 * dt);
     }
-    // Clamp horizontal speed
     const hsp = Math.hypot(v.vx, v.vz);
     if (hsp > maxSp) {
       v.vx *= maxSp / hsp;
       v.vz *= maxSp / hsp;
     }
 
-    // Vertical
     let climbWish = 0;
     if (input.action('jump')) climbWish += 1;
     if (input.action('crouch')) climbWish -= 1;
@@ -458,8 +476,11 @@ export class VehicleSystem {
 
     v.root.position.set(v.x, v.y, v.z);
     v.root.rotation.y = v.yaw;
-    // Pitch/bank from velocity
-    const pitch = THREE.MathUtils.clamp(-v.vy * 0.02 - (input.action('forward') ? 0.12 : 0) + (input.action('back') ? 0.08 : 0), -0.25, 0.2);
+    // Nose-down when moving forward (mesh nose is −Z)
+    const pitch = THREE.MathUtils.clamp(
+      -v.vy * 0.02 - (input.action('forward') ? 0.12 : 0) + (input.action('back') ? 0.08 : 0),
+      -0.25, 0.2
+    );
     const bank = THREE.MathUtils.clamp((input.action('right') ? 1 : 0) - (input.action('left') ? 1 : 0), -1, 1) * 0.2;
     v.root.rotation.x = THREE.MathUtils.lerp(v.root.rotation.x || 0, pitch, 1 - Math.exp(-5 * dt));
     v.root.rotation.z = THREE.MathUtils.lerp(v.root.rotation.z || 0, -bank, 1 - Math.exp(-5 * dt));
