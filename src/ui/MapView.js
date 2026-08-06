@@ -415,12 +415,29 @@ export class MapView {
         target: best.target,
       };
     } else {
-      // Ground / building aim point
-      const y = this.terrain.heightAt(wx, wz) + 0.4;
-      target = { kind: 'ground', x: wx, y, z: wz, label: 'Map pin' };
+      // Ground / rooftop aim — use building roof when click is on a footprint
+      let y = this.terrain.heightAt(wx, wz) + 0.4;
+      let kind = 'ground';
+      let label = 'Ground';
+      if (this._buildings?.length) {
+        for (const b of this._buildings) {
+          if (wx >= b.x && wx <= b.x + b.w && wz >= b.z && wz <= b.z + b.d) {
+            y = (b.roofY ?? ((b.baseY ?? 0) + (b.floors || 1) * 3.5)) + 0.25;
+            kind = 'roof';
+            label = 'Rooftop';
+            break;
+          }
+        }
+      }
+      target = { kind, x: wx, y, z: wz, label };
     }
     this._selectedTarget = target;
     if (typeof this.onTargetSelect === 'function') this.onTargetSelect(target);
+  }
+
+  /** Optional: pass world buildings so map clicks lock roofs. */
+  setBuildings(list) {
+    this._buildings = list || [];
   }
 
   _drawMinimap(pos, yaw) {

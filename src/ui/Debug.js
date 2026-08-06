@@ -105,8 +105,8 @@ export function createHud() {
       <tr><td>Rappel (gold)</td><td>W/S floor-by-floor · Shift+E or Shift+W express roof</td></tr>
       <tr><td>Zipline (blue)</td><td>E · ride between rooftops</td></tr>
       <tr><td>Heli pilot</td><td>WASD · Space up / C down · E bail (heli crashes)</td></tr>
-      <tr><td>Heli gunner</td><td>V swap seat · M click target · LMB fire · G flares · X ECM auto/man</td></tr>
-      <tr><td>Missiles</td><td>straight from tubes → turn onto map lock · closer = more accurate · A2A helis</td></tr>
+      <tr><td>Heli gunner</td><td>V seat · T map/free aim · M click lock · LMB fire · G flares · X ECM</td></tr>
+      <tr><td>Missiles</td><td>tubes → seek lock · roofs boom on top · free-aim = what’s ahead</td></tr>
       <tr><td>Rearm</td><td>land on Coronado NAS or MCRD gold pad (missiles + flares; fuel unlimited)</td></tr>
       <tr><td>Friends</td><td>top-left Host/Join room · npm run party on host machine</td></tr>
       <tr><td>LMB / RMB</td><td>fire / ADS (on foot)</td></tr>

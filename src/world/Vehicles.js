@@ -316,6 +316,8 @@ export class VehicleSystem {
       seats: { pilot: null, gunner: null },
       // Gunner map-selected target {x,y,z,kind,id?}
       mapTarget: null,
+      // 'map' = fire at map lock · 'direct' = free-aim what's under the reticle
+      aimMode: 'direct',
       // ECM
       flares: cfg.flaresMax ?? 8,
       flaresMax: cfg.flaresMax ?? 8,
@@ -457,16 +459,52 @@ export class VehicleSystem {
     return !!this.active && (this.active.type !== 'helicopter' || this.localSeat === 'pilot');
   }
 
-  /** Gunner map-select a world target (bot / heli / ground). */
+  /** Gunner map-select a world target (bot / heli / ground / roof). */
   setMapTarget(target) {
     if (!this.active || this.active.type !== 'helicopter') return false;
+    if (target && Number.isFinite(target.x) && Number.isFinite(target.z)) {
+      // Snap Y to roof / ground surface so missiles hit the top of buildings
+      target = { ...target, y: this._surfaceYAt(target.x, target.z, target.y) };
+      if (this._buildingAt(target.x, target.z)) target.kind = target.kind || 'building';
+    }
     this.active.mapTarget = target;
+    this.active.aimMode = 'map'; // selecting on map switches into map mode
     this.bus?.emit?.('vehicle:target', target);
     return true;
   }
 
   clearMapTarget() {
     if (this.active) this.active.mapTarget = null;
+  }
+
+  /** Toggle gunner aim: map lock ↔ free aim (what's directly ahead). */
+  toggleAimMode() {
+    if (!this.active || this.active.type !== 'helicopter') return null;
+    const next = this.active.aimMode === 'map' ? 'direct' : 'map';
+    this.active.aimMode = next;
+    this.bus?.emit?.('vehicle:aimMode', { mode: next });
+    return next;
+  }
+
+  /**
+   * Highest solid surface under (x,z): building roof if any, else terrain.
+   * Optional preferredY keeps a ray-hit height when it's already on the roof deck.
+   */
+  _surfaceYAt(x, z, preferredY = null) {
+    const ground = this.terrain.heightAt(x, z);
+    let best = ground;
+    const b = this._buildingAt(x, z);
+    if (b) {
+      const roof = (b.roofY ?? ((b.baseY ?? ground) + (b.floors || 1) * 3.5)) + 0.25;
+      best = Math.max(best, roof);
+      // If preferred is already near the roof deck, keep it
+      if (preferredY != null && preferredY >= roof - 1.5 && preferredY <= roof + 4) {
+        return preferredY;
+      }
+      return roof;
+    }
+    if (preferredY != null && preferredY > ground + 0.5) return preferredY;
+    return ground + 0.3;
   }
 
   toggleEcmMode() {
@@ -757,6 +795,7 @@ export class VehicleSystem {
     // Gunner hotkeys
     if (input?.actionPressed?.('flares')) this.deployFlares();
     if (input?.actionPressed?.('ecmMode')) this.toggleEcmMode();
+    if (input?.actionPressed?.('aimMode')) this.toggleAimMode();
   }
 
   _updateEcmAuto(dt, v, input) {
@@ -953,12 +992,10 @@ export class VehicleSystem {
   }
 
   /**
-   * Gunner fires dual rockets. Missiles leave tubes straight, then turn onto
-   * the map-selected target (bots / helis / ground / buildings).
-   * Range-gated: closer = more accurate seek.
-   * @param {Array} targets live bots
-   * @param {{ yaw?:number, pitch?:number }} [aim] unused for map-target mode
-   * @returns {boolean}
+   * Gunner fires dual rockets.
+   * aimMode 'map'    → seek map-selected target (roofs snapped to top)
+   * aimMode 'direct' → free-aim what's under the reticle / ahead
+   * Missiles leave tubes straight, then turn onto lock. Closer = more accurate.
    */
   tryFireRockets(targets = [], aim = null) {
     const v = this.active;
@@ -974,10 +1011,17 @@ export class VehicleSystem {
     const minR = cfg.rocketMinRange ?? 18;
     const maxR = cfg.rocketMaxRange ?? 220;
     const optR = cfg.rocketOptRange ?? 90;
+    const mode = v.aimMode === 'map' ? 'map' : 'direct';
 
-    // Resolve target: map pick → reticle soft lock → fail
-    let lock = v.mapTarget ? { ...v.mapTarget } : null;
-    if (!lock && aim) {
+    let lock = null;
+    if (mode === 'map') {
+      // Map mode requires a map lock
+      if (!v.mapTarget) return false;
+      lock = { ...v.mapTarget };
+      // Always re-snap Y to roof/ground so locks don't sit under slabs
+      lock.y = this._surfaceYAt(lock.x, lock.z, lock.y);
+    } else if (aim) {
+      // Free-aim: whatever is under the reticle / ahead
       const look = this._lookDir(aim.yaw ?? v.yaw, aim.pitch ?? -0.1);
       const eye = { x: v.x, y: v.y + 1.5, z: v.z };
       lock = this._acquireRocketLock(eye, look, targets, cfg, v);
@@ -987,6 +1031,8 @@ export class VehicleSystem {
       lock.x = lock.target.x;
       lock.y = (lock.target.y ?? 0) + (lock.kind === 'heli' ? 1.2 : 1.1);
       lock.z = lock.target.z;
+    } else if (lock && (lock.kind === 'building' || lock.kind === 'ground' || lock.kind === 'roof')) {
+      lock.y = this._surfaceYAt(lock.x, lock.z, lock.y);
     }
     if (!lock || !Number.isFinite(lock.x + lock.y + lock.z)) return false;
 
@@ -1005,10 +1051,15 @@ export class VehicleSystem {
     // Inject aim error into lock point (metres of miss at range)
     const missM = (1 - accuracy) * 18;
     const jitter = () => (Math.random() - 0.5) * 2 * missM;
+    let lx = lock.x + jitter();
+    let lz = lock.z + jitter();
+    // Keep miss on the roof plane for building targets
+    let ly = lock.y + jitter() * 0.15;
+    if (lock.kind === 'building' || lock.kind === 'roof' || this._buildingAt(lx, lz)) {
+      ly = this._surfaceYAt(lx, lz, lock.y) + jitter() * 0.1;
+    }
     const lockPoint = {
-      x: lock.x + jitter(),
-      y: lock.y + jitter() * 0.35,
-      z: lock.z + jitter(),
+      x: lx, y: ly, z: lz,
       kind: lock.kind,
       id: lock.id,
       target: lock.target,
@@ -1182,21 +1233,40 @@ export class VehicleSystem {
       if (this._pointInBuilding(px, py, pz)) {
         const b = this._buildingAt(px, pz);
         if (b) {
+          const roof = (b.roofY ?? ((b.baseY ?? 0) + (b.floors || 1) * 3.5)) + 0.25;
+          const cx = b.x + b.w * 0.5;
+          const cz = b.z + b.d * 0.5;
+          // Looking down onto the roof (or near roof height) → lock roof deck
+          if (look.y < -0.08 || py >= roof - 3) {
+            // Aim point: blend ray hit toward center so we hit the top slab
+            const ax = lerp(px, cx, 0.25);
+            const az = lerp(pz, cz, 0.25);
+            return {
+              x: ax,
+              y: roof,
+              z: az,
+              kind: 'roof',
+            };
+          }
+          // Side facade hit — still prefer roof if ray is steep; else impact height
           return {
-            x: lerp(px, b.x + b.w * 0.5, 0.15),
-            y: py,
-            z: lerp(pz, b.z + b.d * 0.5, 0.15),
+            x: px,
+            y: Math.min(roof, Math.max(py, (b.baseY ?? 0) + 2)),
+            z: pz,
             kind: 'building',
           };
         }
         return { x: px, y: py, z: pz, kind: 'building' };
       }
     }
+    // End of range: project onto surface under look so we don't aim into the sky forever
+    const ex = eye.x + look.x * range;
+    const ez = eye.z + look.z * range;
     return {
-      x: eye.x + look.x * range,
-      y: eye.y + look.y * range,
-      z: eye.z + look.z * range,
-      kind: 'sky',
+      x: ex,
+      y: this._surfaceYAt(ex, ez),
+      z: ez,
+      kind: 'ground',
     };
   }
 
@@ -1290,11 +1360,20 @@ export class VehicleSystem {
         const ny = r.y + dy;
         const nz = r.z + dz;
 
-        // Proximity fuse near lock
+        // Proximity fuse near lock (use lock height — often roof deck)
         if (r.lock && r.age > 0.15) {
           const pd = Math.hypot(r.lock.x - nx, r.lock.y - ny, r.lock.z - nz);
-          if (pd < 1.6) {
-            this._explodeRocket(r, nx, ny, nz);
+          if (pd < 2.2) {
+            // Snap boom to lock surface if it's a roof/building aim
+            let ex = nx;
+            let ey = ny;
+            let ez = nz;
+            if (r.lock.kind === 'roof' || r.lock.kind === 'building') {
+              ex = r.lock.x;
+              ey = r.lock.y;
+              ez = r.lock.z;
+            }
+            this._explodeRocket(r, ex, ey, ez);
             hit = true;
             break;
           }
@@ -1306,13 +1385,31 @@ export class VehicleSystem {
           hit = true;
           break;
         }
+        // Building collision — explode on roof when diving onto a slab
         if (this._pointInBuilding(nx, ny, nz)) {
-          this._explodeRocket(r, nx, ny, nz);
+          const b = this._buildingAt(nx, nz);
+          if (b) {
+            const roof = (b.roofY ?? ((b.baseY ?? 0) + (b.floors || 1) * 3.5)) + 0.25;
+            // Came from above the roof → detonate on the top of the building
+            if (r.y >= roof - 0.8 || (r.lock && (r.lock.kind === 'roof' || r.lock.kind === 'building') && r.lock.y >= roof - 2)) {
+              this._explodeRocket(r, nx, roof + 0.15, nz);
+            } else {
+              // Side impact
+              this._explodeRocket(r, nx, ny, nz);
+            }
+          } else {
+            this._explodeRocket(r, nx, ny, nz);
+          }
           hit = true;
           break;
         }
         if (this.hash && this._rocketHitsSolid(r.x, r.y, r.z, nx, ny, nz)) {
-          this._explodeRocket(r, nx, ny, nz);
+          // Prefer roof surface under impact if solid is a floor/roof slab
+          const surf = this._surfaceYAt(nx, nz, ny);
+          const ey = (Math.abs(surf - ny) < 3.5 && surf > this.terrain.heightAt(nx, nz) + 2)
+            ? surf
+            : ny;
+          this._explodeRocket(r, nx, ey, nz);
           hit = true;
           break;
         }
@@ -1662,7 +1759,8 @@ export class VehicleSystem {
         const tgt = v.mapTarget ? ` · TGT ${v.mapTarget.kind}` : '';
         const rearm = v.onPad ? ` · REARM ${(v.rearmT / (VEHICLES.HELICOPTER.rearmHoverTime || 2.2) * 100) | 0}%` : '';
         if (this.localSeat === 'gunner') {
-          return `${seat} · M target · LMB fire ${volleys}/8 · G flares (${v.flares}) · X ${ecm} · V pilot · E bail${tgt}${rearm}`;
+          const mode = v.aimMode === 'map' ? 'MAP' : 'FREE';
+          return `${seat} [${mode}] · T mode · M map-lock · LMB fire ${volleys}/8 · G flares (${v.flares}) · X ${ecm} · V pilot${tgt}${rearm}`;
         }
         return `${seat} · fly WASD Space/C · V gunner · E bail · rkt ${volleys}/8${rearm}`;
       }

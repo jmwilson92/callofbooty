@@ -29,6 +29,7 @@ import { LootSystem } from './loot/LootSystem.js';
 import { CombatHud } from './ui/CombatHud.js';
 import { PartyClient } from './net/Party.js';
 import { VEHICLES } from './config.js';
+import { worldBuildings } from './world/BuildingRegistry.js';
 
 // Bootstrap and system wiring. Systems receive their dependencies here and
 // otherwise talk through the event bus.
@@ -150,12 +151,14 @@ async function start() {
   // Friends multiplayer lobby UI
   const party = new PartyClient(bus);
   party.mountUi();
-  // Map: rearm pads + gunner targeting
+  // Map: rearm pads + gunner targeting (rooftop-aware)
   mapView.setRearmPads(VEHICLES.HELICOPTER?.rearmPads ?? []);
+  mapView.setBuildings(worldBuildings);
   mapView.onTargetSelect = (t) => {
     vehicles.setMapTarget(t);
-    hud.setError?.(`Missile lock: ${t.kind}${t.label ? ` · ${t.label}` : ''}`);
-    setTimeout(() => hud.setError?.(''), 1800);
+    const mode = vehicles.active?.aimMode === 'map' ? 'MAP' : 'FREE';
+    hud.setError?.(`${mode} lock: ${t.kind}${t.label ? ` · ${t.label}` : ''} · T toggles mode`);
+    setTimeout(() => hud.setError?.(''), 2200);
   };
   // Imagine → Blender viewmodels (async; falls back to procedural until loaded)
   const weaponLib = await loadWeaponLibrary();
@@ -304,15 +307,20 @@ async function start() {
         }
         const fireDown = input.buttons.has(0);
         if (vehicles.rideType === 'helicopter' && vehicles.isGunner) {
-          // Gunner only: map-targeted missiles (straight from tubes, then seek)
+          // Gunner: map lock or free-aim (T toggles). Missiles then seek.
           if (fireDown && !prevFire && !mapView.open) {
             const ok = vehicles.tryFireRockets(combatTargets, {
               yaw: playerCam.yaw,
               pitch: playerCam.pitch,
             });
-            if (!ok && !vehicles.active?.mapTarget) {
-              hud.setError?.('Gunner: open M, click a target, then LMB');
-              setTimeout(() => hud.setError?.(''), 2000);
+            if (!ok) {
+              const mode = vehicles.active?.aimMode === 'map' ? 'map' : 'direct';
+              if (mode === 'map' && !vehicles.active?.mapTarget) {
+                hud.setError?.('MAP mode: open M, click a target (or press T for free-aim)');
+              } else {
+                hud.setError?.('No shot — check range / ammo');
+              }
+              setTimeout(() => hud.setError?.(''), 2200);
             }
           }
           prevFire = fireDown;

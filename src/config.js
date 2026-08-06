@@ -502,6 +502,7 @@ export const INPUT = {
     seatSwap: ['KeyV'], // solo: pilot ↔ gunner
     flares: ['KeyG'], // gunner manual ECM
     ecmMode: ['KeyX'], // gunner toggle auto/manual ECM
+    aimMode: ['KeyT'], // gunner: map lock ↔ free aim (what's ahead)
   },
 };
 
