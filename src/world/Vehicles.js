@@ -1,19 +1,18 @@
 import * as THREE from 'three';
 import { VEHICLES, PLAYER, WORLD, POIS } from '../config.js';
 import { worldBuildings } from './BuildingRegistry.js';
+import { rayAABB } from '../combat/Hitscan.js';
 
 /**
  * Rideable motorcycles + helicopters.
  * Mesh nose faces local −Z (same as player look). Movement uses that forward.
- * E to mount/dismount. Motorcycle sticks to terrain; heli free-flies (Space/C).
+ * Helis: building collision, static roof pads, dual rocket pods (8+8).
  */
 
-/** Player/camera forward XZ for a yaw (yaw 0 = −Z / north). */
 function forwardXZ(yaw) {
   return { x: -Math.sin(yaw), z: -Math.cos(yaw) };
 }
 function rightXZ(yaw) {
-  // Right of look: yaw 0 → +X
   return { x: Math.cos(yaw), z: -Math.sin(yaw) };
 }
 
@@ -32,27 +31,31 @@ export class VehicleSystem {
    * @param {THREE.Scene} scene
    * @param {import('./Terrain.js').Terrain} terrain
    * @param {import('../core/EventBus.js').EventBus} bus
+   * @param {import('./Collision.js').SpatialHash|null} hash
+   * @param {import('../combat/Effects.js').CombatEffects|null} effects
    */
-  constructor(scene, terrain, bus) {
+  constructor(scene, terrain, bus, hash = null, effects = null) {
     this.scene = scene;
     this.terrain = terrain;
     this.bus = bus;
+    this.hash = hash;
+    this.effects = effects;
     this.group = new THREE.Group();
     this.group.name = 'vehicles';
     this.scene.add(this.group);
     this.vehicles = [];
-    this.active = null; // currently ridden vehicle
+    this.active = null;
     this._near = null;
+    this._rockets = [];
+    this._cand = [];
   }
 
-  /** Scatter motorcycles + helis around spawn / POIs / dry land. */
   spawn() {
     this.clear();
     const rng = mulberry(WORLD.SEED ^ 0x7e41c1e);
     const motoN = VEHICLES.MOTORCYCLE?.count ?? 16;
-    const heliN = VEHICLES.HELICOPTER?.count ?? 5;
+    const heliN = VEHICLES.HELICOPTER?.count ?? 2;
 
-    // Motorcycles near spawn + POIs + random dry spots
     let placed = 0;
     const tryMoto = (x, z) => {
       if (placed >= motoN) return;
@@ -63,20 +66,17 @@ export class VehicleSystem {
       placed++;
     };
 
-    // Cluster near player spawn
     for (let i = 0; i < 5 && placed < motoN; i++) {
       const a = rng() * Math.PI * 2;
       const r = 8 + rng() * 35;
       tryMoto(PLAYER.SPAWN.x + Math.cos(a) * r, PLAYER.SPAWN.z + Math.sin(a) * r);
     }
-    // Near each POI
     for (const p of POIS) {
       if (placed >= motoN) break;
       const a = rng() * Math.PI * 2;
       const r = 12 + rng() * 40;
       tryMoto(p.x + Math.cos(a) * r, p.z + Math.sin(a) * r);
     }
-    // Fill remaining randomly
     let guard = 0;
     while (placed < motoN && guard++ < motoN * 40) {
       const x = (rng() * 2 - 1) * WORLD.SIZE * 0.38;
@@ -84,9 +84,7 @@ export class VehicleSystem {
       tryMoto(x, z);
     }
 
-    // Helicopters on tall building roofs (prefer downtown skyline)
     this._spawnRoofHelis(heliN, rng);
-
     return this.vehicles.length;
   }
 
@@ -96,7 +94,8 @@ export class VehicleSystem {
       .filter((b) => b.floors >= minF && b.w >= 10 && b.d >= 10 && Number.isFinite(b.roofY ?? b.baseY))
       .map((b) => ({
         b,
-        score: (b.floors || 0) * 2 + (b.w * b.d) * 0.01 + (Math.hypot((b.x + b.w * 0.5) - PLAYER.SPAWN.x, (b.z + b.d * 0.5) - PLAYER.SPAWN.z) < 200 ? 8 : 0),
+        score: (b.floors || 0) * 2 + (b.w * b.d) * 0.01
+          + (Math.hypot((b.x + b.w * 0.5) - PLAYER.SPAWN.x, (b.z + b.d * 0.5) - PLAYER.SPAWN.z) < 200 ? 8 : 0),
       }))
       .sort((a, c) => c.score - a.score);
 
@@ -106,14 +105,12 @@ export class VehicleSystem {
       if (hi >= count) break;
       const cx = b.x + b.w * 0.5;
       const cz = b.z + b.d * 0.5;
-      // Avoid stacking two helis on the same roof
       if (used.some((u) => Math.hypot(u.x - cx, u.z - cz) < 18)) continue;
       const roofY = (b.roofY ?? (b.baseY + b.floors * 3.5)) + 0.35;
-      this._addHelicopter(cx, roofY, cz, rng() * Math.PI * 2, rng);
+      this._addHelicopter(cx, roofY, cz, rng() * Math.PI * 2, rng, true);
       used.push({ x: cx, z: cz });
       hi++;
     }
-    // Fallback: open ground near spawn if not enough tall roofs registered yet
     while (hi < count) {
       const a = rng() * Math.PI * 2;
       const r = 30 + rng() * 50;
@@ -121,17 +118,16 @@ export class VehicleSystem {
       const z = PLAYER.SPAWN.z + Math.sin(a) * r;
       const y = this.terrain.heightAt(x, z) + 0.5;
       if (y > WORLD.WATER_LEVEL + 1.5) {
-        this._addHelicopter(x, y, z, rng() * Math.PI * 2, rng);
+        this._addHelicopter(x, y, z, rng() * Math.PI * 2, rng, false);
         hi++;
-      } else {
-        break;
-      }
+      } else break;
     }
   }
 
   clear() {
     this.active = null;
     this.vehicles.length = 0;
+    this._rockets.length = 0;
     while (this.group.children.length) this.group.remove(this.group.children[0]);
   }
 
@@ -145,7 +141,6 @@ export class VehicleSystem {
     const dark = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.7, metalness: 0.2 });
     const chrome = new THREE.MeshStandardMaterial({ color: 0xb0b4b8, roughness: 0.3, metalness: 0.85 });
 
-    // Nose toward local −Z (player forward). Seat aft (+Z-ish), headlight −Z.
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 1.7), bodyMat);
     body.position.set(0, 0.55, 0);
     body.castShadow = true;
@@ -183,7 +178,34 @@ export class VehicleSystem {
     });
   }
 
-  _addHelicopter(x, y, z, yaw, rng) {
+  _addHelicopter(x, y, z, yaw, rng, onRoof = false) {
+    // Static roof pad stays on the building — NOT parented to the heli
+    if (onRoof) {
+      const padGroup = new THREE.Group();
+      padGroup.position.set(x, y - 0.28, z);
+      const pad = new THREE.Mesh(
+        new THREE.CylinderGeometry(4.2, 4.2, 0.1, 24),
+        new THREE.MeshStandardMaterial({ color: 0x2a2a2e, roughness: 0.85 })
+      );
+      pad.receiveShadow = true;
+      padGroup.add(pad);
+      const H = new THREE.Mesh(
+        new THREE.BoxGeometry(1.4, 0.06, 0.35),
+        new THREE.MeshStandardMaterial({ color: 0xe8e8e8, emissive: 0x303030, emissiveIntensity: 0.35 })
+      );
+      H.position.y = 0.08;
+      padGroup.add(H);
+      // Ring edge
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(3.6, 0.08, 6, 32),
+        new THREE.MeshStandardMaterial({ color: 0xd0d0d0, roughness: 0.6 })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.06;
+      padGroup.add(ring);
+      this.group.add(padGroup);
+    }
+
     const root = new THREE.Group();
     root.position.set(x, y, z);
     root.rotation.y = yaw;
@@ -195,8 +217,9 @@ export class VehicleSystem {
       color: 0x6ab0d0, roughness: 0.15, metalness: 0.3, transparent: true, opacity: 0.45,
     });
     const rotorMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2c, roughness: 0.5, metalness: 0.5 });
+    const podMat = new THREE.MeshStandardMaterial({ color: 0x3a3a30, roughness: 0.55, metalness: 0.45 });
+    const rocketMat = new THREE.MeshStandardMaterial({ color: 0xb0a060, roughness: 0.4, metalness: 0.5 });
 
-    // Nose toward local −Z (player forward); tail toward +Z
     const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 3.4), bodyMat);
     cabin.position.set(0, 1.1, 0);
     cabin.castShadow = true;
@@ -232,22 +255,38 @@ export class VehicleSystem {
     tailRotor.add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.4, 0.12), rotorMat));
     root.add(tailRotor);
 
+    // Rocket pods: 8 tubes per side (hardpoints)
+    const nR = VEHICLES.HELICOPTER?.rocketsPerSide ?? 8;
+    const leftTubes = [];
+    const rightTubes = [];
+    for (const side of [-1, 1]) {
+      const pylon = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.12, 1.8), podMat);
+      pylon.position.set(side * 1.35, 0.75, 0.1);
+      root.add(pylon);
+      for (let i = 0; i < nR; i++) {
+        const row = i % 4;
+        const col = Math.floor(i / 4);
+        const tube = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.07, 0.07, 0.95, 6),
+          rocketMat
+        );
+        tube.rotation.x = Math.PI / 2;
+        tube.position.set(
+          side * (1.55 + col * 0.22),
+          0.55 + row * 0.16,
+          0.15
+        );
+        tube.userData.loaded = true;
+        root.add(tube);
+        if (side < 0) leftTubes.push(tube);
+        else rightTubes.push(tube);
+      }
+    }
+
     root.userData.rotor = rotor;
     root.userData.tailRotor = tailRotor;
-
-    // Roof pad marker (visible helipad ring)
-    const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(4.2, 4.2, 0.08, 24),
-      new THREE.MeshStandardMaterial({ color: 0x2a2a2e, roughness: 0.85 })
-    );
-    pad.position.y = 0.02;
-    root.add(pad);
-    const H = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4, 0.05, 0.35),
-      new THREE.MeshStandardMaterial({ color: 0xe8e8e8, emissive: 0x404040, emissiveIntensity: 0.3 })
-    );
-    H.position.y = 0.08;
-    root.add(H);
+    root.userData.leftTubes = leftTubes;
+    root.userData.rightTubes = rightTubes;
 
     this.group.add(root);
     this.vehicles.push({
@@ -257,6 +296,9 @@ export class VehicleSystem {
       speed: 0,
       vy: 0,
       vx: 0, vz: 0,
+      rocketsLeft: nR,
+      rocketsRight: nR,
+      rocketCd: 0,
     });
   }
 
@@ -268,7 +310,6 @@ export class VehicleSystem {
       if (this.active === v) continue;
       const d = Math.hypot(v.x - px, v.z - pz);
       if (d > range + (v.type === 'helicopter' ? 1.5 : 0)) continue;
-      // Helis on roofs need taller enter window
       const maxDy = v.type === 'helicopter' ? 6 : 3.5;
       if (Math.abs(v.y - py) > maxDy) continue;
       if (d < bestD) {
@@ -281,7 +322,6 @@ export class VehicleSystem {
   }
 
   tryUse(controller) {
-    // Exit if riding
     if (this.active) {
       this._dismount(controller);
       return true;
@@ -296,7 +336,8 @@ export class VehicleSystem {
     this.active = v;
     v.speed = 0;
     v.vy = 0;
-    // Snap player onto seat
+    v.vx = 0;
+    v.vz = 0;
     const cfg = v.type === 'helicopter' ? VEHICLES.HELICOPTER : VEHICLES.MOTORCYCLE;
     controller.pos.set(v.x, v.y + (cfg.seatY ?? 1), v.z);
     controller.vel.set(0, 0, 0);
@@ -310,20 +351,18 @@ export class VehicleSystem {
   _dismount(controller) {
     const v = this.active;
     if (!v) return;
-    // Step off to the right of the vehicle
     const side = 1.6;
-    const rx = Math.cos(v.yaw) * side;
-    const rz = -Math.sin(v.yaw) * side;
-    let x = v.x + rx;
-    let z = v.z + rz;
+    const r = rightXZ(v.yaw);
+    let x = v.x + r.x * side;
+    let z = v.z + r.z * side;
     let y = this.terrain.heightAt(x, z);
     if (v.type === 'helicopter' && v.y - y > 4) {
-      // Still airborne — soft land under heli if possible
-      y = Math.min(v.y - 1.2, y + 0.5);
+      // Prefer rooftop under heli if near a building roof
+      y = this._supportY(v.x, v.y, v.z) ?? Math.min(v.y - 1.2, y + 0.5);
       x = v.x;
       z = v.z;
     }
-    controller.pos.set(x, Math.max(y + 0.1, y), z);
+    controller.pos.set(x, Math.max(y + 0.15, y), z);
     controller.vel.set(0, 0, 0);
     controller.grounded = true;
     this.active = null;
@@ -331,11 +370,57 @@ export class VehicleSystem {
   }
 
   /**
-   * Drive active vehicle. Call instead of (or around) controller.tick when mounted.
-   * @returns {boolean} true if player is currently in a vehicle
+   * Highest solid support under a point (roof or terrain).
+   */
+  _supportY(x, y, z) {
+    let best = this.terrain.heightAt(x, z);
+    for (const b of worldBuildings || []) {
+      if (x < b.x - 0.5 || x > b.x + b.w + 0.5) continue;
+      if (z < b.z - 0.5 || z > b.z + b.d + 0.5) continue;
+      const top = b.roofY ?? (b.baseY + (b.floors || 1) * 3.5);
+      if (top <= y + 0.5 && top > best) best = top;
+    }
+    return best;
+  }
+
+  /**
+   * AABB overlap with building volumes (blocks heli from clipping through).
+   */
+  _heliHitsBuilding(x, y, z) {
+    const cfg = VEHICLES.HELICOPTER;
+    const hw = cfg.halfW ?? 3.6;
+    const hh = cfg.halfH ?? 1.6;
+    const hd = cfg.halfD ?? 4.2;
+    const y0 = y;
+    const y1 = y + hh * 2;
+
+    for (const b of worldBuildings || []) {
+      // Expand footprint slightly for rotors
+      const bx0 = b.x - 0.4;
+      const bx1 = b.x + b.w + 0.4;
+      const bz0 = b.z - 0.4;
+      const bz1 = b.z + b.d + 0.4;
+      if (x + hw < bx0 || x - hw > bx1) continue;
+      if (z + hd < bz0 || z - hd > bz1) continue;
+      const bot = (b.baseY ?? 0) - 0.2;
+      const top = (b.roofY ?? (b.baseY + (b.floors || 1) * 3.5)) + 0.15;
+      // Allow sitting just above roof (pad clearance)
+      if (y0 < top - 0.05 && y1 > bot) {
+        // If mostly above roof top with skids, not a hit
+        if (y0 >= top - 0.35) continue;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * @returns {boolean} true if riding
    */
   update(dt, controller, input, yaw) {
-    // Spin parked heli rotors slowly; ridden ones fast
+    // Rockets always tick
+    this._updateRockets(dt);
+
     for (const v of this.vehicles) {
       if (v.type !== 'helicopter') continue;
       const rotor = v.root.userData.rotor;
@@ -343,6 +428,7 @@ export class VehicleSystem {
       const spin = this.active === v ? 28 : 0.4;
       if (rotor) rotor.rotation.y += spin * dt;
       if (tail) tail.rotation.x += spin * 1.6 * dt;
+      if (v.rocketCd > 0) v.rocketCd -= dt;
     }
 
     if (!this.active || !controller) return false;
@@ -352,13 +438,235 @@ export class VehicleSystem {
     return true;
   }
 
+  /**
+   * Fire one rocket from each wing (if ammo remains). Call on LMB edge.
+   * @returns {boolean} true if rockets fired
+   */
+  tryFireRockets(targets = []) {
+    const v = this.active;
+    if (!v || v.type !== 'helicopter') return false;
+    if (v.rocketCd > 0) return false;
+    const left = v.rocketsLeft ?? 0;
+    const right = v.rocketsRight ?? 0;
+    if (left <= 0 && right <= 0) return false;
+
+    const cfg = VEHICLES.HELICOPTER;
+    const f = forwardXZ(v.yaw);
+    const r = rightXZ(v.yaw);
+    const speed = cfg.rocketSpeed ?? 95;
+    const nPer = cfg.rocketsPerSide ?? 8;
+
+    // Index of next tube (from front of remaining)
+    const fireSide = (side, remaining, tubes) => {
+      if (remaining <= 0) return;
+      const idx = nPer - remaining; // 0..7 which tube empties
+      const tube = tubes?.[idx];
+      if (tube) {
+        tube.visible = false;
+        tube.userData.loaded = false;
+      }
+      const ox = v.x + r.x * side * 1.7 + f.x * 0.3;
+      const oy = v.y + 0.7 + (idx % 4) * 0.05;
+      const oz = v.z + r.z * side * 1.7 + f.z * 0.3;
+      const mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.1, 0.9, 6),
+        new THREE.MeshStandardMaterial({
+          color: 0xc8b060,
+          metalness: 0.5,
+          roughness: 0.35,
+          emissive: 0x402000,
+          emissiveIntensity: 0.35,
+        })
+      );
+      mesh.position.set(ox, oy, oz);
+      // Point along velocity (−Z of rocket mesh = forward)
+      mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(f.x, 0.02, f.z).normalize()
+      );
+      this.group.add(mesh);
+      this._rockets.push({
+        mesh,
+        x: ox, y: oy, z: oz,
+        vx: f.x * speed,
+        vy: 0.5,
+        vz: f.z * speed,
+        life: 4.5,
+        damage: cfg.rocketDamage ?? 90,
+        splash: cfg.rocketSplash ?? 5,
+        targets,
+      });
+      this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(ox, oy, oz), 1.6);
+    };
+
+    if (left > 0) {
+      fireSide(-1, left, v.root.userData.leftTubes);
+      v.rocketsLeft = left - 1;
+    }
+    if (right > 0) {
+      fireSide(1, right, v.root.userData.rightTubes);
+      v.rocketsRight = right - 1;
+    }
+    v.rocketCd = cfg.rocketCooldown ?? 0.4;
+    this.bus?.emit?.('vehicle:rocket', {
+      left: v.rocketsLeft,
+      right: v.rocketsRight,
+    });
+    return true;
+  }
+
+  _updateRockets(dt) {
+    for (let i = this._rockets.length - 1; i >= 0; i--) {
+      const r = this._rockets[i];
+      r.life -= dt;
+      r.vy -= 6 * dt; // slight drop
+      const step = Math.min(2.2, Math.hypot(r.vx, r.vy, r.vz) * dt + 0.01);
+      const steps = Math.max(1, Math.ceil(Math.hypot(r.vx, r.vy, r.vz) * dt / 1.5));
+      let hit = false;
+      for (let s = 0; s < steps && !hit; s++) {
+        const sp = Math.hypot(r.vx, r.vy, r.vz) || 1;
+        const d = (Math.hypot(r.vx, r.vy, r.vz) * dt) / steps;
+        const dx = (r.vx / sp) * d;
+        const dy = (r.vy / sp) * d;
+        const dz = (r.vz / sp) * d;
+        const nx = r.x + dx;
+        const ny = r.y + dy;
+        const nz = r.z + dz;
+
+        // Ground
+        const gY = this.terrain.heightAt(nx, nz);
+        if (ny < gY + 0.4) {
+          this._explodeRocket(r, nx, gY + 0.3, nz);
+          hit = true;
+          break;
+        }
+        // Buildings
+        if (this._pointInBuilding(nx, ny, nz)) {
+          this._explodeRocket(r, nx, ny, nz);
+          hit = true;
+          break;
+        }
+        // World solids via hash (quick segment)
+        if (this.hash && this._rocketHitsSolid(r.x, r.y, r.z, nx, ny, nz)) {
+          this._explodeRocket(r, nx, ny, nz);
+          hit = true;
+          break;
+        }
+        // Bots
+        if (r.targets?.length) {
+          for (const t of r.targets) {
+            if (t.dead) continue;
+            const dist = Math.hypot(t.x - nx, (t.y + 1) - ny, t.z - nz);
+            if (dist < 1.4) {
+              this._explodeRocket(r, nx, ny, nz);
+              hit = true;
+              break;
+            }
+          }
+        }
+        r.x = nx;
+        r.y = ny;
+        r.z = nz;
+      }
+      if (hit) {
+        this._rockets.splice(i, 1);
+        continue;
+      }
+      if (r.life <= 0) {
+        this.group.remove(r.mesh);
+        r.mesh.geometry?.dispose?.();
+        this._rockets.splice(i, 1);
+        continue;
+      }
+      r.mesh.position.set(r.x, r.y, r.z);
+      const sp = Math.hypot(r.vx, r.vy, r.vz) || 1;
+      r.mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(r.vx / sp, r.vy / sp, r.vz / sp)
+      );
+      // Trail
+      if ((r._trailAcc = (r._trailAcc || 0) + dt) > 0.04) {
+        r._trailAcc = 0;
+        this.effects?.spawnBallisticTrace?.(
+          new THREE.Vector3(r.x - r.vx * 0.02, r.y - r.vy * 0.02, r.z - r.vz * 0.02),
+          new THREE.Vector3(r.x, r.y, r.z),
+          { bright: true, life: 0.2 }
+        );
+      }
+    }
+  }
+
+  _pointInBuilding(x, y, z) {
+    for (const b of worldBuildings || []) {
+      if (x < b.x || x > b.x + b.w || z < b.z || z > b.z + b.d) continue;
+      const bot = b.baseY ?? 0;
+      const top = b.roofY ?? (bot + (b.floors || 1) * 3.5);
+      if (y >= bot && y <= top + 0.5) return true;
+    }
+    return false;
+  }
+
+  _rocketHitsSolid(x0, y0, z0, x1, y1, z1) {
+    if (!this.hash) return false;
+    const dir = new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0);
+    const len = dir.length();
+    if (len < 1e-4) return false;
+    dir.multiplyScalar(1 / len);
+    const origin = new THREE.Vector3(x0, y0, z0);
+    this.hash.query(
+      Math.min(x0, x1) - 0.5, Math.min(z0, z1) - 0.5,
+      Math.max(x0, x1) + 0.5, Math.max(z0, z1) + 0.5,
+      this._cand
+    );
+    for (const box of this._cand) {
+      if (box.disabled) continue;
+      const tag = box.tag || 'solid';
+      if (tag === 'trigger' || tag === 'door' || tag === 'ladder' || tag === 'glass' || tag === 'thin' || tag === 'elevator') {
+        continue;
+      }
+      if ((box.max.y - box.min.y) < 0.35) continue; // floors
+      const t = rayAABB(origin, dir, box.min, box.max, len + 0.1);
+      if (t != null && t >= 0 && t <= len) return true;
+    }
+    return false;
+  }
+
+  _explodeRocket(r, x, y, z) {
+    if (r.mesh) {
+      this.group.remove(r.mesh);
+      r.mesh.geometry?.dispose?.();
+    }
+    const pt = new THREE.Vector3(x, y, z);
+    this.effects?.spawnImpact?.(pt, 'solid');
+    this.effects?.spawnMuzzleBloom?.(pt, 2.8);
+    // Splash damage to bots
+    const splash = r.splash ?? 5;
+    const dmg = r.damage ?? 90;
+    if (r.targets) {
+      for (const t of r.targets) {
+        if (t.dead) continue;
+        const dist = Math.hypot(t.x - x, (t.y + 1) - y, t.z - z);
+        if (dist > splash) continue;
+        const fall = 1 - dist / splash;
+        const applied = dmg * (0.35 + 0.65 * fall);
+        if (typeof t.applyDamage === 'function') t.applyDamage(applied, dist < 1.2 ? 'chest' : 'chest');
+        else if (t.health != null) {
+          t.health -= applied;
+          if (t.health <= 0) {
+            t.health = 0;
+            t.dead = true;
+          }
+        }
+      }
+    }
+  }
+
   _driveMoto(dt, v, controller, input, yaw) {
     const cfg = VEHICLES.MOTORCYCLE;
     const maxSp = cfg.speed ?? 22;
     const accel = cfg.accel ?? 28;
     const brake = cfg.brake ?? 35;
 
-    // Steer toward look direction (yaw) + A/D nudge
     let steer = 0;
     if (input.action('left')) steer += 1;
     if (input.action('right')) steer -= 1;
@@ -369,7 +677,6 @@ export class VehicleSystem {
     v.yaw += THREE.MathUtils.clamp(dyaw, -turn * dt, turn * dt);
     v.yaw += steer * turn * 0.55 * dt;
 
-    // Throttle
     let throttle = 0;
     if (input.action('forward')) throttle += 1;
     if (input.action('back')) throttle -= 0.7;
@@ -381,7 +688,6 @@ export class VehicleSystem {
       else v.speed = Math.min(0, v.speed + fr);
     }
 
-    // Forward matches player look / mesh nose (−Z at yaw 0)
     const { x: fx, z: fz } = forwardXZ(v.yaw);
     let nx = v.x + fx * v.speed * dt;
     let nz = v.z + fz * v.speed * dt;
@@ -455,28 +761,55 @@ export class VehicleSystem {
     if (climbWish === 0) v.vy *= Math.exp(-2.2 * dt);
     v.vy = THREE.MathUtils.clamp(v.vy, -climb * 1.1, climb);
 
-    v.x += v.vx * dt;
-    v.z += v.vz * dt;
-    v.y += v.vy * dt;
+    // Integrate with collision — try full step, then axis slides
+    const tryPos = (nx, ny, nz) => {
+      const lim = WORLD.SIZE * 0.48;
+      nx = THREE.MathUtils.clamp(nx, -lim, lim);
+      nz = THREE.MathUtils.clamp(nz, -lim, lim);
+      const support = this._supportY(nx, ny + 2, nz);
+      const minY = support + minAGL;
+      if (ny < minY) {
+        ny = minY;
+        if (v.vy < 0) v.vy = 0;
+      }
+      if (ny > maxY) {
+        ny = maxY;
+        if (v.vy > 0) v.vy = 0;
+      }
+      if (this._heliHitsBuilding(nx, ny, nz)) return null;
+      return { x: nx, y: ny, z: nz };
+    };
 
-    const lim = WORLD.SIZE * 0.48;
-    v.x = THREE.MathUtils.clamp(v.x, -lim, lim);
-    v.z = THREE.MathUtils.clamp(v.z, -lim, lim);
-
-    const ground = this.terrain.heightAt(v.x, v.z);
-    const minY = ground + minAGL;
-    if (v.y < minY) {
-      v.y = minY;
-      if (v.vy < 0) v.vy = 0;
+    const nx = v.x + v.vx * dt;
+    const ny = v.y + v.vy * dt;
+    const nz = v.z + v.vz * dt;
+    let ok = tryPos(nx, ny, nz);
+    if (!ok) {
+      // Slide: try horizontal only, vertical only, or stop into surface
+      ok = tryPos(nx, v.y, nz);
+      if (ok) {
+        v.vy *= 0.2;
+      } else {
+        ok = tryPos(v.x, ny, v.z);
+        if (ok) {
+          v.vx *= 0.15;
+          v.vz *= 0.15;
+        } else {
+          // Push out of building if embedded
+          v.vx *= -0.3;
+          v.vz *= -0.3;
+          v.vy = Math.max(v.vy, 2);
+          ok = tryPos(v.x + v.vx * dt, v.y + 0.4, v.z + v.vz * dt)
+            || { x: v.x, y: v.y + 0.5, z: v.z };
+        }
+      }
     }
-    if (v.y > maxY) {
-      v.y = maxY;
-      if (v.vy > 0) v.vy = 0;
-    }
+    v.x = ok.x;
+    v.y = ok.y;
+    v.z = ok.z;
 
     v.root.position.set(v.x, v.y, v.z);
     v.root.rotation.y = v.yaw;
-    // Nose-down when moving forward (mesh nose is −Z)
     const pitch = THREE.MathUtils.clamp(
       -v.vy * 0.02 - (input.action('forward') ? 0.12 : 0) + (input.action('back') ? 0.08 : 0),
       -0.25, 0.2
@@ -494,8 +827,14 @@ export class VehicleSystem {
 
   prompt(px, py, pz) {
     if (this.active) {
-      const t = this.active.type === 'helicopter' ? 'Helicopter' : 'Motorcycle';
-      return `E · Exit ${t}`;
+      if (this.active.type === 'helicopter') {
+        const n = Math.min(this.active.rocketsLeft ?? 0, this.active.rocketsRight ?? 0);
+        const pairs = Math.max(this.active.rocketsLeft ?? 0, this.active.rocketsRight ?? 0);
+        // Remaining dual-fire volleys
+        const volleys = Math.min(this.active.rocketsLeft ?? 0, this.active.rocketsRight ?? 0);
+        return `E · Exit heli · Rockets ${volleys}/8 (LMB)`;
+      }
+      return 'E · Exit motorcycle';
     }
     const v = this.findNear(px, py, pz);
     if (!v) return null;

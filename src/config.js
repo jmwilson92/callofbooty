@@ -509,6 +509,15 @@ export const VEHICLES = {
     eyeY: 1.55,
     minAGL: 2.5, // min altitude above ground/roof
     maxY: 220,
+    halfW: 3.6,
+    halfH: 1.6,
+    halfD: 4.2,
+    // 8 pods per side; each LMB fires L+R together (8 dual volleys)
+    rocketsPerSide: 8,
+    rocketSpeed: 95,
+    rocketDamage: 90,
+    rocketSplash: 5.0,
+    rocketCooldown: 0.4,
   },
 };
 

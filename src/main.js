@@ -117,8 +117,6 @@ async function start() {
   const elevators = new ElevatorSystem(hash);
   const elevCount = elevators.buildFromRegistry();
   scene.add(elevators.group);
-  const vehicles = new VehicleSystem(scene, terrain, bus);
-  const vehicleCount = vehicles.spawn();
 
   const controller = new Controller(terrain, hash, bus);
   // Seat the player on the surface at spawn rather than trusting the config Y.
@@ -139,6 +137,10 @@ async function start() {
   weaponOverlay.setAspect(window.innerWidth / window.innerHeight);
   const weapons = new WeaponSystem(playerCam, hash, bus, effects);
   weapons.attachOverlay(weaponOverlay);
+
+  // Vehicles need hash + effects for collision / rockets
+  const vehicles = new VehicleSystem(scene, terrain, bus, hash, effects);
+  const vehicleCount = vehicles.spawn();
   // Imagine → Blender viewmodels (async; falls back to procedural until loaded)
   const weaponLib = await loadWeaponLibrary();
   weapons.setWeaponModels(weaponLib.byClass);
@@ -263,11 +265,26 @@ async function start() {
           for (let i = 0; i < tr.length; i++) combatTargets.push(tr[i]);
         }
         const fireDown = input.buttons.has(0);
-        if (fireDown && !prevFire) {
-          weapons.firePressed(combatTargets, testRange.active ? testRange : null, combatRng, moving);
+        if (vehicles.rideType === 'helicopter') {
+          // Heli rockets only (no small arms while flying)
+          if (fireDown && !prevFire) {
+            vehicles.tryFireRockets(combatTargets);
+          }
+          prevFire = fireDown;
+        } else if (!vehicles.riding) {
+          if (fireDown && !prevFire) {
+            weapons.firePressed(combatTargets, testRange.active ? testRange : null, combatRng, moving);
+          }
+          prevFire = fireDown;
+          weapons.tick(dt, input, combatTargets, testRange.active ? testRange : null, combatRng, moving);
+        } else {
+          // Motorcycle: still allow guns if wanted — but hide overlay is enough
+          if (fireDown && !prevFire) {
+            weapons.firePressed(combatTargets, testRange.active ? testRange : null, combatRng, moving);
+          }
+          prevFire = fireDown;
+          weapons.tick(dt, input, combatTargets, testRange.active ? testRange : null, combatRng, moving);
         }
-        prevFire = fireDown;
-        weapons.tick(dt, input, combatTargets, testRange.active ? testRange : null, combatRng, moving);
       } else {
         // Keep gravity and collision alive so the player settles while unlocked / on map.
         controller.tick(dt, IDLE_INPUT, playerCam.yaw);
@@ -292,10 +309,10 @@ async function start() {
       vehicles.active // third-person chase when riding
     );
 
-    // Hide gun overlay in vehicles; ADS FOV only on foot
-    if (weaponOverlay?.group) {
-      weaponOverlay.group.visible = !vehicles.riding;
-    }
+    // Hide FPS gun completely while in any vehicle (overlay uses .root not .group)
+    if (weaponOverlay?.root) weaponOverlay.root.visible = !vehicles.riding;
+    if (weapons.viewGroup) weapons.viewGroup.visible = !vehicles.riding;
+
     if (!vehicles.riding) {
       const hipFov = playerCam.fov;
       const def = weapons.def;
@@ -340,8 +357,8 @@ async function start() {
     );
 
     renderer.render(scene, playerCam.camera);
-    // Gun overlay (depth cleared — always visible, never clipped by world)
-    if (input.locked) weaponOverlay.render();
+    // Gun overlay only on foot (hidden while riding)
+    if (input.locked && !vehicles.riding) weaponOverlay.render();
     mapView.update(controller.pos, playerCam.yaw, vehicles.vehicles);
     debug.update(clock.frameDelta, controller, stats);
   }
