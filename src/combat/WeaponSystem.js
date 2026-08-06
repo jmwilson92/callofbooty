@@ -294,13 +294,19 @@ export class WeaponSystem {
       dmg *= partMult(hit.part, def);
       dmg *= falloffMult(hit.dist, def);
       dmg *= hit.damageMult;
-      const res = targetRange
-        ? targetRange.applyDamage(hit.target, dmg, hit.part)
-        : { killed: hit.target.health <= 0, applied: dmg };
-      // If targets manage their own health outside TargetRange
-      if (!targetRange && hit.target.health != null) {
+      let res = { killed: false, applied: dmg };
+      // Prefer target-owned handler (bots), then test range, then raw health
+      if (typeof hit.target.applyDamage === 'function') {
+        res = hit.target.applyDamage(dmg, hit.part);
+      } else if (targetRange) {
+        res = targetRange.applyDamage(hit.target, dmg, hit.part);
+      } else if (hit.target.health != null) {
         hit.target.health -= dmg;
-        if (hit.target.health <= 0) hit.target.dead = true;
+        if (hit.target.health <= 0) {
+          hit.target.health = 0;
+          hit.target.dead = true;
+          res.killed = true;
+        }
       }
       this.effects.showHitmarker(hit.part === 'head');
       this.effects.spawnDamageNumber(hit.point, dmg, hit.part === 'head');

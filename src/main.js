@@ -21,6 +21,7 @@ import { CombatEffects } from './combat/Effects.js';
 import { WeaponSystem } from './combat/WeaponSystem.js';
 import { WeaponOverlay } from './combat/WeaponOverlay.js';
 import { TargetRange } from './combat/Targets.js';
+import { BotSystem } from './combat/Bots.js';
 import { LootSystem } from './loot/LootSystem.js';
 import { CombatHud } from './ui/CombatHud.js';
 
@@ -136,8 +137,12 @@ async function start() {
   const loot = new LootSystem(scene, terrain, bus);
   const lootCount = loot.populate(WORLD.SEED ^ 0x1007);
   const testRange = new TargetRange(scene, terrain);
+  const bots = new BotSystem(scene, terrain, hash, bus);
+  const botCount = bots.spawn();
   const combatRng = mulberry32(WORLD.SEED ^ 0xc0b7);
   let prevFire = false;
+  // Scratch list: live bots + optional P-key test range
+  const combatTargets = [];
 
   bus.on('pointerlock', (locked) => {
     hud.setLocked(locked);
@@ -169,7 +174,7 @@ async function start() {
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
     `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
     `${assetPropStats.placed} glb-props · doors ${doorCount} · elevators ${elevCount} · ` +
-    `loot ${lootCount} · road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
+    `loot ${lootCount} · bots ${botCount} · road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
   );
 
   const loading = document.getElementById('loading');
@@ -223,19 +228,27 @@ async function start() {
         controller.tick(dt, input, playerCam.yaw);
         elevators.update(dt, controller);
 
-        // Combat tick
+        // Combat tick — bots always live; P-key test range merges in
         const moving = controller.speed > 0.6;
-        const targets = testRange.active ? testRange.getLiveTargets() : [];
+        combatTargets.length = 0;
+        const liveBots = bots.getLiveTargets();
+        for (let i = 0; i < liveBots.length; i++) combatTargets.push(liveBots[i]);
+        if (testRange.active) {
+          const tr = testRange.getLiveTargets();
+          for (let i = 0; i < tr.length; i++) combatTargets.push(tr[i]);
+        }
         const fireDown = input.buttons.has(0);
         if (fireDown && !prevFire) {
-          weapons.firePressed(targets, testRange.active ? testRange : null, combatRng, moving);
+          weapons.firePressed(combatTargets, testRange.active ? testRange : null, combatRng, moving);
         }
         prevFire = fireDown;
-        weapons.tick(dt, input, targets, testRange.active ? testRange : null, combatRng, moving);
+        weapons.tick(dt, input, combatTargets, testRange.active ? testRange : null, combatRng, moving);
+        bots.update(dt);
       } else {
         // Keep gravity and collision alive so the player settles while unlocked / on map.
         controller.tick(dt, IDLE_INPUT, playerCam.yaw);
         elevators.update(dt, null);
+        bots.update(dt);
         prevFire = false;
       }
       doors.update(dt);

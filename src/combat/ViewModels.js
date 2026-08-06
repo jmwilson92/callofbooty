@@ -45,12 +45,12 @@ function cyl(parent, rT, rB, h, material, x, y, z, rx = 0, ry = 0, rz = 0, segs 
   return m;
 }
 
-/** Front post + rear U-notch on the sight line. */
+/** Front post + rear U-notch on the sight line (kept small so aim stays clear). */
 function ironSights(root, glow, black, frontZ, rearZ, y = 0.02) {
-  box(root, 0.006, 0.02, 0.006, glow, 0, y + 0.01, frontZ);
-  box(root, 0.008, 0.014, 0.006, black, -0.012, y + 0.007, rearZ);
-  box(root, 0.008, 0.014, 0.006, black, 0.012, y + 0.007, rearZ);
-  box(root, 0.032, 0.005, 0.006, black, 0, y, rearZ);
+  box(root, 0.0035, 0.011, 0.0035, glow, 0, y + 0.0055, frontZ);
+  box(root, 0.0045, 0.008, 0.0035, black, -0.007, y + 0.004, rearZ);
+  box(root, 0.0045, 0.008, 0.0035, black, 0.007, y + 0.004, rearZ);
+  box(root, 0.018, 0.0025, 0.0035, black, 0, y, rearZ);
 }
 
 /** Red-dot: solid housing under a open glass window + center reticle. */

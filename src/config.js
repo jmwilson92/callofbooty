@@ -493,6 +493,25 @@ export const COMBAT = {
   GROUND_LOOT_RANGE: 3.0,
 };
 
+/** Passive practice bots — wander, take damage, do not fight back yet. */
+export const BOTS = {
+  COUNT: 14,
+  HEALTH: 100,
+  SPEED: 2.6,
+  SPEED_JITTER: 0.7,
+  // Spawn ring around player SPAWN (metres)
+  SPAWN_MIN: 18,
+  SPAWN_MAX: 95,
+  WANDER_RADIUS: 55,
+  WAYPOINT_REACH: 1.4,
+  WAYPOINT_PAUSE: 0.6,
+  RESPAWN_TIME: 7,
+  // Body / kit colors cycle
+  COLORS: [0x3d5a3a, 0x2f4a6e, 0x5a3d2e, 0x4a3a5a, 0x3a4a4a],
+  RADIUS: 0.35,
+  HEIGHT: 1.8,
+};
+
 // Rarity multipliers (Phase 3)
 export const RARITY = {
   common:    { id: 'common',    color: 0x9a9a9a, label: 'Common',    dmg: 1.00, reload: 1.00, ads: 1.00, mag: 1.00, weight: 40 },
