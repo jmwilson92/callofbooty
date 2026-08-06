@@ -13,6 +13,7 @@ import { scatterStructures } from './world/structures/Scatter.js';
 import { loadPropLibrary, scatterAssetProps } from './world/Assets.js';
 import { DoorSystem } from './world/Doors.js';
 import { ElevatorSystem } from './world/Elevators.js';
+import { VehicleSystem } from './world/Vehicles.js';
 import { Controller } from './player/Controller.js';
 import { PlayerCamera } from './player/Camera.js';
 import { DebugOverlay, createHud } from './ui/Debug.js';
@@ -116,6 +117,8 @@ async function start() {
   const elevators = new ElevatorSystem(hash);
   const elevCount = elevators.buildFromRegistry();
   scene.add(elevators.group);
+  const vehicles = new VehicleSystem(scene, terrain, bus);
+  const vehicleCount = vehicles.spawn();
 
   const controller = new Controller(terrain, hash, bus);
   // Seat the player on the surface at spawn rather than trusting the config Y.
@@ -185,7 +188,7 @@ async function start() {
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
     `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
     `${assetPropStats.placed} glb-props · doors ${doorCount} · elevators ${elevCount} · ` +
-    `loot ${lootStats.items ?? 0} items + ${lootStats.cases ?? 0} cases · bots ${botCount} · ` +
+    `vehicles ${vehicleCount} · loot ${lootStats.items ?? 0} items + ${lootStats.cases ?? 0} cases · bots ${botCount} · ` +
     `road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
   );
 
@@ -220,28 +223,34 @@ async function start() {
         if (input.actionPressed('quickSwap')) weapons.quickSwap();
         if (input.actionPressed('reload')) weapons.startReload();
 
-        // E = loot/case → elevator → door
+        // E = vehicle → loot → elevator → door
         if (input.actionPressed('interact')) {
-          const gotLoot = loot.tryPickup(
-            weapons,
-            controller.pos.x,
-            controller.pos.y + controller.height * 0.35,
-            controller.pos.z
-          );
-          if (!gotLoot) {
-            const usedElev = elevators.tryUse(controller);
-            if (!usedElev) {
-              doors.tryToggle(
-                controller.pos.x,
-                controller.pos.y + controller.height * 0.5,
-                controller.pos.z
-              );
+          const usedVeh = vehicles.tryUse(controller);
+          if (!usedVeh) {
+            const gotLoot = loot.tryPickup(
+              weapons,
+              controller.pos.x,
+              controller.pos.y + controller.height * 0.35,
+              controller.pos.z
+            );
+            if (!gotLoot) {
+              const usedElev = elevators.tryUse(controller);
+              if (!usedElev) {
+                doors.tryToggle(
+                  controller.pos.x,
+                  controller.pos.y + controller.height * 0.5,
+                  controller.pos.z
+                );
+              }
             }
           }
         }
 
-        controller.tick(dt, input, playerCam.yaw);
-        elevators.update(dt, controller);
+        // Riding: vehicle drives the capsule; else normal on-foot control
+        if (!vehicles.update(dt, controller, input, playerCam.yaw)) {
+          controller.tick(dt, input, playerCam.yaw);
+        }
+        elevators.update(dt, vehicles.riding ? null : controller);
 
         // Combat: bots move/engage first so bullets test current hitboxes
         const moving = controller.speed > 0.6;
@@ -263,6 +272,7 @@ async function start() {
         // Keep gravity and collision alive so the player settles while unlocked / on map.
         controller.tick(dt, IDLE_INPUT, playerCam.yaw);
         elevators.update(dt, null);
+        vehicles.update(dt, null, IDLE_INPUT, playerCam.yaw);
         bots.update(dt, null, null);
         prevFire = false;
       }
@@ -307,7 +317,8 @@ async function start() {
       const py = controller.pos.y + controller.height * 0.5;
       const pz = controller.pos.z;
       hud.setPrompt(
-        loot.prompt(px, py, pz)
+        vehicles.prompt(px, py, pz)
+        || loot.prompt(px, py, pz)
         || elevators.prompt(px, py, pz)
         || doors.prompt(px, py, pz)
       );

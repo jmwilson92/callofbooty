@@ -467,7 +467,7 @@ export const INPUT = {
     jump: ['Space'],
     sprint: ['ShiftLeft', 'ShiftRight'],
     crouch: ['KeyC', 'ControlLeft'],
-    interact: ['KeyE'], // doors, loot, useables
+    interact: ['KeyE'], // doors, loot, vehicles, elevators
     reload: ['KeyR'],
     weapon1: ['Digit1'],
     weapon2: ['Digit2'],
@@ -476,6 +476,30 @@ export const INPUT = {
     testRange: ['KeyP'],
     debug: ['F3'],
     map: ['KeyM'],
+  },
+};
+
+/** Rideable vehicles for faster map travel. */
+export const VEHICLES = {
+  ENTER_RANGE: 3.2,
+  MOTORCYCLE: {
+    count: 18,
+    speed: 22,
+    accel: 28,
+    brake: 35,
+    turnRate: 2.4, // rad/s when steering
+    seatY: 0.85,
+    eyeY: 1.35,
+  },
+  HELICOPTER: {
+    count: 6,
+    speed: 38,
+    accel: 18,
+    climb: 14,
+    seatY: 1.1,
+    eyeY: 1.55,
+    minAGL: 2.5, // min altitude above ground
+    maxY: 220,
   },
 };
 
