@@ -1,0 +1,19 @@
+# Blender commands for this Codespace
+# Open this file and copy/paste lines below into the terminal.
+
+# --- 1) Put Blender on your PATH (run once per new terminal) ---
+export PATH="$HOME/.local/bin:$PATH"
+
+# --- 2) Check Blender works ---
+blender --version
+
+# --- 3) If blender is NOT found, install it first ---
+cd /workspaces/callofbooty
+./tools/install_blender.sh
+export PATH="$HOME/.local/bin:$PATH"
+blender --version
+
+# --- 4) Rebuild prop models with Blender ---
+cd /workspaces/callofbooty
+export PATH="$HOME/.local/bin:$PATH"
+./tools/build_props.sh
