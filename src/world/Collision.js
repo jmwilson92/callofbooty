@@ -124,6 +124,7 @@ export function resolveCapsule(pos, radius, height, hash, candidates, result) {
     let moved = false;
     for (let i = 0; i < candidates.length; i++) {
       const box = candidates[i];
+      if (box.disabled) continue;
       if (box.tag === 'trigger') continue;
 
       // Cheap reject on the vertical axis first.

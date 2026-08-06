@@ -4,6 +4,7 @@ import { placeDowntownDistrict, placeVehicle } from './structures/Catalog.js';
 import { Occupancy } from './Occupancy.js';
 import { claimRoadCorridors, placeParkingLotDetails } from './Roads.js';
 import { worldLadders } from './Ladders.js';
+import { worldDoors } from './Doors.js';
 
 // San Diego POIs — anchors only; buildings seat on natural terrain.
 
@@ -448,6 +449,7 @@ function buildRadioTower(sink, terrain, rng) {
 export function buildAllStructures(sink, terrain, rng) {
   resetOccupancy();
   worldLadders.clear();
+  worldDoors.clear();
   // Roads win: claim freeways/arterials/ramps/downtown streets before any building
   if (terrain.roadLines) claimRoadCorridors(worldOcc, terrain.roadLines);
   buildDowntown(sink, terrain, rng);

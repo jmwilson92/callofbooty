@@ -11,6 +11,7 @@ import { buildAllStructures } from './world/Buildings.js';
 import { scatterProps } from './world/Props.js';
 import { scatterStructures } from './world/structures/Scatter.js';
 import { loadPropLibrary, scatterAssetProps } from './world/Assets.js';
+import { DoorSystem } from './world/Doors.js';
 import { Controller } from './player/Controller.js';
 import { PlayerCamera } from './player/Camera.js';
 import { DebugOverlay, createHud } from './ui/Debug.js';
@@ -97,6 +98,11 @@ async function start() {
   scene.add(terrain.buildWater());
   for (const mesh of sink.buildMeshes()) scene.add(mesh);
 
+  // Interactive doors (E to open/close) — after hash exists, before play
+  const doors = new DoorSystem(hash);
+  const doorCount = doors.buildFromRegistry();
+  scene.add(doors.group);
+
   const controller = new Controller(terrain, hash, bus);
   // Seat the player on the surface at spawn rather than trusting the config Y.
   controller.pos.y = terrain.heightAt(PLAYER.SPAWN.x, PLAYER.SPAWN.z) + 0.5;
@@ -135,7 +141,7 @@ async function start() {
   console.info(
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
     `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
-    `${assetPropStats.placed} glb-props · road segs ${roadPieces} · ` +
+    `${assetPropStats.placed} glb-props · doors ${doorCount} · road segs ${roadPieces} · ` +
     `structures ${JSON.stringify(structureStats)}`
   );
 
@@ -161,11 +167,20 @@ async function start() {
       controller.ads = input.locked && input.buttons.has(2) && !mapView.open;
       // Allow movement while map is open, but not while pointer is unlocked.
       if (input.locked && !mapView.open) {
+        // E = open / close nearest door
+        if (input.actionPressed('interact')) {
+          doors.tryToggle(
+            controller.pos.x,
+            controller.pos.y + controller.height * 0.5,
+            controller.pos.z
+          );
+        }
         controller.tick(dt, input, playerCam.yaw);
       } else {
         // Keep gravity and collision alive so the player settles while unlocked / on map.
         controller.tick(dt, IDLE_INPUT, playerCam.yaw);
       }
+      doors.update(dt);
       input.endTick();
     });
 
@@ -178,6 +193,17 @@ async function start() {
     sun.target.position.set(controller.pos.x, controller.pos.y, controller.pos.z);
     sun.position.copy(sun.target.position).add(sunOffset);
     sun.target.updateMatrixWorld();
+
+    // Door prompt when near a usable entrance
+    if (input.locked && !mapView.open) {
+      hud.setPrompt(doors.prompt(
+        controller.pos.x,
+        controller.pos.y + controller.height * 0.5,
+        controller.pos.z
+      ));
+    } else {
+      hud.setPrompt(null);
+    }
 
     renderer.render(scene, playerCam.camera);
     mapView.update(controller.pos, playerCam.yaw);

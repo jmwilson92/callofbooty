@@ -467,6 +467,7 @@ export const INPUT = {
     jump: ['Space'],
     sprint: ['ShiftLeft', 'ShiftRight'],
     crouch: ['KeyC', 'ControlLeft'],
+    interact: ['KeyE'], // doors, future useables
     debug: ['F3'],
     map: ['KeyM'],
   },

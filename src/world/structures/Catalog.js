@@ -2,6 +2,7 @@ import { BUILDINGS, DOWNTOWN_PLATE } from '../../config.js';
 import { makeBuilding, makeShed, slab } from '../BuildingKit.js';
 import { Occupancy } from '../Occupancy.js';
 import { worldLadders } from '../Ladders.js';
+import { worldDoors } from '../Doors.js';
 
 // High-detail procedural kits (box primitives only). Original colors — no brands.
 
@@ -645,8 +646,9 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
 }
 
 /**
- * Exterior street entrance on the south facade — clearly outside the building.
- * Steps + canopy + door leaves sit outside the wall plane.
+ * Exterior street entrance on the south facade.
+ * Frame / steps / canopy are static. Door leaves are interactive (E to open)
+ * via worldDoors — not solid BoxSink blocks that seal the doorway shut.
  */
 function addMainEntrance(sink, x, z, w, d, baseY) {
   const doorW = Math.min(3.4, Math.max(2.4, w * 0.28));
@@ -659,17 +661,15 @@ function addMainEntrance(sink, x, z, w, d, baseY) {
   sink.addSpan(dx - 0.4, baseY + 0.1, facadeZ - 1.8, dx + doorW + 0.4, baseY + 0.22, facadeZ - 0.05, C.concrete);
   sink.addSpan(dx - 0.25, baseY + 0.22, facadeZ - 1.1, dx + doorW + 0.25, baseY + 0.34, facadeZ - 0.05, C.concrete);
 
-  // Door frame protruding slightly outside
-  sink.addSpan(dx - 0.2, baseY, facadeZ - 0.2, dx + doorW + 0.2, baseY + doorH + 0.25, facadeZ + 0.15, C.dark);
-  // Door leaves (outside the wall)
-  sink.addSpan(dx, baseY + 0.08, facadeZ - 0.18, dx + doorW * 0.48, baseY + doorH, facadeZ - 0.02, 0x1e2830);
-  sink.addSpan(dx + doorW * 0.52, baseY + 0.08, facadeZ - 0.18, dx + doorW, baseY + doorH, facadeZ - 0.02, 0x1e2830);
-  // Glass on doors
-  sink.addSpan(dx + 0.18, baseY + 0.85, facadeZ - 0.22, dx + doorW * 0.42, baseY + doorH - 0.35, facadeZ - 0.12, C.glass);
-  sink.addSpan(dx + doorW * 0.58, baseY + 0.85, facadeZ - 0.22, dx + doorW - 0.18, baseY + doorH - 0.35, facadeZ - 0.12, C.glass);
-  // Handles
-  sink.addSpan(dx + doorW * 0.45, baseY + 1.15, facadeZ - 0.28, dx + doorW * 0.48, baseY + 1.55, facadeZ - 0.18, C.metalLite);
-  sink.addSpan(dx + doorW * 0.52, baseY + 1.15, facadeZ - 0.28, dx + doorW * 0.55, baseY + 1.55, facadeZ - 0.18, C.metalLite);
+  // Door FRAME only — left, right, header (never a solid slab across the opening)
+  const frameT = 0.18;
+  const frameDepth = 0.28;
+  // Left jamb
+  sink.addSpan(dx - 0.18, baseY, facadeZ - 0.15, dx + 0.05, baseY + doorH + 0.2, facadeZ + frameDepth, C.dark);
+  // Right jamb
+  sink.addSpan(dx + doorW - 0.05, baseY, facadeZ - 0.15, dx + doorW + 0.18, baseY + doorH + 0.2, facadeZ + frameDepth, C.dark);
+  // Header
+  sink.addSpan(dx - 0.18, baseY + doorH, facadeZ - 0.15, dx + doorW + 0.18, baseY + doorH + 0.28, facadeZ + frameDepth, C.dark);
 
   // Canopy over entrance (outside)
   sink.addSpan(dx - 0.9, baseY + doorH + 0.05, facadeZ - 2.2, dx + doorW + 0.9, baseY + doorH + 0.35, facadeZ + 0.35, C.metalLite);
@@ -679,6 +679,17 @@ function addMainEntrance(sink, x, z, w, d, baseY) {
   // Side light boxes (exterior)
   sink.addSpan(dx - 0.55, baseY + 1.2, facadeZ - 0.15, dx - 0.25, baseY + 2.1, facadeZ + 0.1, C.glass);
   sink.addSpan(dx + doorW + 0.25, baseY + 1.2, facadeZ - 0.15, dx + doorW + 0.55, baseY + 2.1, facadeZ + 0.1, C.glass);
+
+  // Interactive double doors (meshes + collision live in DoorSystem)
+  worldDoors.register({
+    x: x + w * 0.5,
+    y: baseY,
+    z: facadeZ - 0.06,
+    width: doorW - 0.08,
+    height: doorH,
+    face: 'S',
+    thickness: frameT,
+  });
 }
 
 /**

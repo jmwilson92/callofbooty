@@ -78,6 +78,18 @@ export function createHud() {
   cross.innerHTML = '<span></span><span></span>';
   document.body.appendChild(cross);
 
+  const prompt = document.createElement('div');
+  prompt.id = 'interact-prompt';
+  prompt.style.cssText = [
+    'position:fixed', 'left:50%', 'bottom:18%', 'transform:translateX(-50%)',
+    'z-index:15', 'pointer-events:none', 'display:none',
+    'padding:8px 14px', 'border-radius:6px',
+    'background:rgba(8,12,16,0.78)', 'border:1px solid rgba(127,212,255,0.35)',
+    'color:#e8ecf0', 'font:600 13px/1.2 ui-monospace,Menlo,Consolas,monospace',
+    'letter-spacing:0.04em', 'text-shadow:0 1px 2px rgba(0,0,0,0.8)',
+  ].join(';');
+  document.body.appendChild(prompt);
+
   const hint = document.createElement('div');
   hint.id = 'hint';
   hint.innerHTML = `
@@ -88,6 +100,7 @@ export function createHud() {
       <tr><td>Shift</td><td>sprint</td></tr>
       <tr><td>Space</td><td>jump / mantle</td></tr>
       <tr><td>C or Ctrl</td><td>crouch</td></tr>
+      <tr><td>E</td><td>open / close door</td></tr>
       <tr><td>Sprint + C</td><td>slide (jump to cancel and keep your speed)</td></tr>
       <tr><td>M</td><td>tactical map (your location)</td></tr>
       <tr><td>F3</td><td>performance overlay</td></tr>
@@ -101,10 +114,19 @@ export function createHud() {
     setLocked(locked) {
       hint.style.display = locked ? 'none' : 'flex';
       cross.style.display = locked ? 'block' : 'none';
+      if (!locked) prompt.style.display = 'none';
       if (locked) err.textContent = '';
     },
     setError(msg) {
       err.textContent = msg;
+    },
+    setPrompt(text) {
+      if (!text) {
+        prompt.style.display = 'none';
+        return;
+      }
+      prompt.textContent = text;
+      prompt.style.display = 'block';
     },
   };
 }
