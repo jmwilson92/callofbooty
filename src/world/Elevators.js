@@ -23,8 +23,9 @@ export const worldElevators = {
 };
 
 function cabinFloorY(spec, floor) {
-  // Align with building floor slabs (seat + f * floorH + ~0.16 slab top)
-  return spec.baseY + floor * spec.floorH + 0.02;
+  // Align with building floor slab tops (Catalog slabs use baseY + f*floorH + deck)
+  const deck = spec.deck ?? 0.16;
+  return spec.baseY + floor * spec.floorH + deck;
 }
 
 /**
@@ -69,47 +70,48 @@ export class ElevatorSystem {
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a6a8a, roughness: 0.55, metalness: 0.25 });
     const ceilMat = new THREE.MeshStandardMaterial({ color: 0x2a3540, roughness: 0.8 });
 
-    // Floor only — no sealed cabin box
-    const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(w * 0.94, 0.1, d * 0.94), floorMat);
+    // Floor plate only — no sealed cabin collision (meshes are visual)
+    const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(w * 0.96, 0.1, d * 0.96), floorMat);
     floorMesh.position.y = 0.05;
     floorMesh.receiveShadow = true;
     root.add(floorMesh);
 
-    // Three walls; door face is OPEN so player walks onto the floor landing
-    const wallH = Math.min(2.35, spec.floorH - 0.75);
-    const t = 0.05;
-    const hw = w * 0.45;
-    const hd = d * 0.45;
+    // Three low rails; door face fully open so player walks onto the landing
+    // Keep walls short so they never read as a low ceiling / crouch trap
+    const wallH = Math.min(1.35, spec.floorH * 0.35);
+    const t = 0.04;
+    const hw = w * 0.46;
+    const hd = d * 0.46;
     const mkWall = (sx, sy, sz, px, py, pz) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), wallMat);
       m.position.set(px, py, pz);
       m.castShadow = true;
       root.add(m);
     };
-    if (face !== 'S') mkWall(w * 0.9, wallH, t, 0, wallH * 0.5 + 0.08, -hd);
-    if (face !== 'N') mkWall(w * 0.9, wallH, t, 0, wallH * 0.5 + 0.08, hd);
-    if (face !== 'W') mkWall(t, wallH, d * 0.85, -hw, wallH * 0.5 + 0.08, 0);
-    if (face !== 'E') mkWall(t, wallH, d * 0.85, hw, wallH * 0.5 + 0.08, 0);
+    if (face !== 'S') mkWall(w * 0.88, wallH, t, 0, wallH * 0.5 + 0.08, -hd);
+    if (face !== 'N') mkWall(w * 0.88, wallH, t, 0, wallH * 0.5 + 0.08, hd);
+    if (face !== 'W') mkWall(t, wallH, d * 0.82, -hw, wallH * 0.5 + 0.08, 0);
+    if (face !== 'E') mkWall(t, wallH, d * 0.82, hw, wallH * 0.5 + 0.08, 0);
 
-    // Partial ceiling (not a full lid that traps you)
-    const ceil = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, 0.06, d * 0.7), ceilMat);
-    ceil.position.y = wallH + 0.15;
-    root.add(ceil);
-
+    // Small overhead lamp only — no full ceiling mesh that looks like a crouch cage
     const lamp = new THREE.Mesh(
-      new THREE.BoxGeometry(0.2, 0.05, 0.2),
+      new THREE.BoxGeometry(0.28, 0.05, 0.28),
       new THREE.MeshStandardMaterial({ color: 0xb0ff20, emissive: 0x406010, emissiveIntensity: 0.7 })
     );
-    lamp.position.y = wallH + 0.1;
+    lamp.position.y = Math.min(2.4, spec.floorH - 0.9);
     root.add(lamp);
+    // Tiny visual ceil plate (no collision — not in hash)
+    const ceil = new THREE.Mesh(new THREE.BoxGeometry(w * 0.45, 0.04, d * 0.45), ceilMat);
+    ceil.position.y = lamp.position.y + 0.06;
+    root.add(ceil);
 
     this.group.add(root);
 
-    // Walkable floor collision (moves with car)
-    const pad = 0.04;
+    // Walkable floor collision (moves with car) — thin so it never forms a wall pocket
+    const pad = 0.02;
     const floorBox = this.hash.add(
-      new THREE.Vector3(spec.x0 + pad, y, spec.z0 + pad),
-      new THREE.Vector3(spec.x1 - pad, y + 0.12, spec.z1 - pad),
+      new THREE.Vector3(spec.x0 + pad, y - 0.02, spec.z0 + pad),
+      new THREE.Vector3(spec.x1 - pad, y + 0.08, spec.z1 - pad),
       'elevator'
     );
 
@@ -133,6 +135,7 @@ export class ElevatorSystem {
       dir: 1,
       ridePlayer: false,
       justArrived: false,
+      arriveT: 0,
       cx,
       cz,
       halfW: w * 0.5,
@@ -146,16 +149,43 @@ export class ElevatorSystem {
   _setCarY(car, y) {
     car.y = y;
     car.root.position.y = y;
-    car.floorBox.min.y = y;
-    car.floorBox.max.y = y + 0.12;
+    car.floorBox.min.y = y - 0.02;
+    car.floorBox.max.y = y + 0.08;
   }
 
   playerInCabin(car, px, py, pz) {
     const s = car.spec;
-    // Slightly tight so "in cabin" means really aboard
-    if (px < s.x0 + 0.05 || px > s.x1 - 0.05) return false;
-    if (pz < s.z0 + 0.05 || pz > s.z1 - 0.05) return false;
-    return py >= car.y - 0.4 && py <= car.y + 2.4;
+    // Slightly loose so "still in cabin" covers the threshold while exiting
+    if (px < s.x0 - 0.05 || px > s.x1 + 0.05) return false;
+    if (pz < s.z0 - 0.05 || pz > s.z1 + 0.05) return false;
+    return py >= car.y - 0.5 && py <= car.y + 2.6;
+  }
+
+  /** Brief nudge toward the open door after arrival so jambs don't trap the capsule. */
+  _exitAssist(car, controller, dt) {
+    if (!controller || !car.justArrived) return;
+    car.arriveT = (car.arriveT || 0) + dt;
+    // Short window only — long enough to clear the threshold, not force you out
+    if (car.arriveT > 0.45) {
+      car.justArrived = false;
+      car.arriveT = 0;
+      return;
+    }
+    const px = controller.pos.x;
+    const pz = controller.pos.z;
+    if (!this.playerInCabin(car, px, controller.pos.y, pz)) {
+      car.justArrived = false;
+      car.arriveT = 0;
+      return;
+    }
+    // Keep feet on the cabin deck during the settle
+    controller.pos.y = car.y + 0.04;
+    controller.vel.y = 0;
+    controller.grounded = true;
+    // Soft push toward hallway through the open face
+    const push = 2.4 * dt;
+    controller.pos.x += car.exitX * push;
+    controller.pos.z += car.exitZ * push;
   }
 
   findNear(px, py, pz) {
@@ -239,12 +269,15 @@ export class ElevatorSystem {
           car.floor = car.targetFloor;
           car.moving = false;
           car.justArrived = true;
+          car.arriveT = 0;
           car.ridePlayer = false;
-          // Stay put in cabin — no eject nudge, no XZ pull
           if (controller && this.playerInCabin(car, controller.pos.x, controller.pos.y, controller.pos.z)) {
-            controller.pos.y = car.y + 0.05;
+            controller.pos.y = car.y + 0.04;
             controller.vel.y = 0;
             controller.grounded = true;
+            // On arrival, start slightly toward the door so the first step clears the jamb
+            controller.pos.x += car.exitX * 0.25;
+            controller.pos.z += car.exitZ * 0.25;
           }
         } else {
           const step = Math.sign(dy) * speed * dt;
@@ -259,15 +292,17 @@ export class ElevatorSystem {
       const pz = controller.pos.z;
       const inCabin = this.playerInCabin(car, px, py, pz);
 
-      // Stick Y only while moving — keep XZ exactly where the player stood
+      // Stick Y only while moving — keep XZ free for the player
       if (inCabin && car.moving) {
         car.ridePlayer = true;
         controller.pos.y = car.y + 0.04;
         controller.vel.y = 0;
         controller.grounded = true;
         controller.coyote = 0.12;
-        // Do NOT pull toward door or cabin center — that caused the twitch
       }
+
+      // After stop: brief assist out the door (top floor was worst for jambs)
+      if (!car.moving) this._exitAssist(car, controller, dt);
     }
   }
 

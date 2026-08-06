@@ -266,7 +266,28 @@ export class Controller {
     // --- crouch height, blocked by low ceilings ---
     const targetHeight = (wantCrouch || this.sliding) ? PLAYER.HEIGHT_CROUCH : PLAYER.HEIGHT_STAND;
     if (targetHeight > this.height) {
-      const headroom = this._spanClear(this.pos.x, this.pos.z, this.pos.y + this.height + 0.02, this.pos.y + targetHeight);
+      let headroom = this._spanClear(
+        this.pos.x, this.pos.z,
+        this.pos.y + this.height + 0.02,
+        this.pos.y + targetHeight
+      );
+      // If stuck crouching under a lip (elevator jamb / slab edge), try a few
+      // short offsets so releasing crouch can stand again once clear.
+      if (!headroom && !wantCrouch) {
+        const offs = [[0.35, 0], [-0.35, 0], [0, 0.35], [0, -0.35], [0.45, 0.45], [-0.45, 0.45]];
+        for (const [ox, oz] of offs) {
+          if (this._spanClear(
+            this.pos.x + ox, this.pos.z + oz,
+            this.pos.y + this.height + 0.02,
+            this.pos.y + targetHeight
+          )) {
+            this.pos.x += ox * 0.35;
+            this.pos.z += oz * 0.35;
+            headroom = true;
+            break;
+          }
+        }
+      }
       if (headroom) {
         this.height = Math.min(targetHeight, this.height + PLAYER.CROUCH_LERP * dt);
       }

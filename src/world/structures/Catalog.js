@@ -530,13 +530,15 @@ function addOpenStaircase(sink, x, z, w, d, baseY, floors, floorH) {
 /**
  * Interior elevator bank — deep inside the footprint only.
  * Doors always face the building interior (never the exterior facade).
- * Returns hole rect for floor slabs.
+ * Returns hole rect for floor slabs (expanded on the door face so exits
+ * never clip the floor slab lip — critical on the top floor under the roof).
  */
 function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.random) {
-  const ew = Math.min(2.6, Math.max(2.2, w * 0.2));
-  const ed = Math.min(2.6, Math.max(2.2, d * 0.2));
+  // Roomier cabin so radius-0.4 capsule can turn and exit
+  const ew = Math.min(3.0, Math.max(2.5, w * 0.22));
+  const ed = Math.min(3.0, Math.max(2.5, d * 0.22));
   // Keep shaft well clear of exterior walls so nothing reads as facade elevators
-  const margin = Math.max(3.2, Math.min(w, d) * 0.22);
+  const margin = Math.max(3.0, Math.min(w, d) * 0.2);
   if (w < margin * 2 + ew + 0.5 || d < margin * 2 + ed + 0.5) {
     // Too skinny for a true interior shaft — skip rather than clip the facade
     return null;
@@ -559,9 +561,12 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
   ez = Math.max(z + margin, Math.min(ez, z + d - ed - margin));
 
   const totalH = floors * floorH;
-  const T = 0.2;
-  const doorW = Math.min(1.4, ew - 0.5);
-  const doorH = 2.15;
+  const T = 0.18;
+  // Wide / tall doors: standing (1.8) + margin, and two-abreast capsule clearance
+  const doorW = Math.min(1.85, ew - 0.45);
+  const doorH = 2.55;
+  // Match floor slab tops (seat + f*floorH + 0.16)
+  const deck = 0.16;
   const bcx = x + w * 0.5;
   const bcz = z + d * 0.5;
   const scx = ex + ew / 2;
@@ -588,59 +593,59 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
   if (face !== 'E') full(ex + ew - T, ez, ex + ew, ez + ed);
 
   // Door face: open doorway each floor (walk out of cabin onto landing)
+  // Opening starts slightly below deck so feet never catch a sill lip.
   for (let f = 0; f < floors; f++) {
     const fy0 = baseY + f * floorH;
     const fy1 = fy0 + floorH;
+    const openBot = fy0 + deck - 0.08;
+    const openTop = Math.min(fy1 - 0.15, openBot + doorH);
     if (face === 'S') {
-      sink.addSpan(ex, fy0, ez, d0x, fy0 + doorH, ez + T, C.metalLite);
-      sink.addSpan(d1x, fy0, ez, ex + ew, fy0 + doorH, ez + T, C.metalLite);
-      sink.addSpan(ex, fy0 + doorH, ez, ex + ew, fy1, ez + T, C.metalLite);
+      sink.addSpan(ex, openBot, ez, d0x, openTop, ez + T, C.metalLite);
+      sink.addSpan(d1x, openBot, ez, ex + ew, openTop, ez + T, C.metalLite);
+      sink.addSpan(ex, openTop, ez, ex + ew, fy1, ez + T, C.metalLite);
     } else if (face === 'N') {
-      sink.addSpan(ex, fy0, ez + ed - T, d0x, fy0 + doorH, ez + ed, C.metalLite);
-      sink.addSpan(d1x, fy0, ez + ed - T, ex + ew, fy0 + doorH, ez + ed, C.metalLite);
-      sink.addSpan(ex, fy0 + doorH, ez + ed - T, ex + ew, fy1, ez + ed, C.metalLite);
+      sink.addSpan(ex, openBot, ez + ed - T, d0x, openTop, ez + ed, C.metalLite);
+      sink.addSpan(d1x, openBot, ez + ed - T, ex + ew, openTop, ez + ed, C.metalLite);
+      sink.addSpan(ex, openTop, ez + ed - T, ex + ew, fy1, ez + ed, C.metalLite);
     } else if (face === 'W') {
-      sink.addSpan(ex, fy0, ez, ex + T, fy0 + doorH, d0z, C.metalLite);
-      sink.addSpan(ex, fy0, d1z, ex + T, fy0 + doorH, ez + ed, C.metalLite);
-      sink.addSpan(ex, fy0 + doorH, ez, ex + T, fy1, ez + ed, C.metalLite);
+      sink.addSpan(ex, openBot, ez, ex + T, openTop, d0z, C.metalLite);
+      sink.addSpan(ex, openBot, d1z, ex + T, openTop, ez + ed, C.metalLite);
+      sink.addSpan(ex, openTop, ez, ex + T, fy1, ez + ed, C.metalLite);
     } else {
-      sink.addSpan(ex + ew - T, fy0, ez, ex + ew, fy0 + doorH, d0z, C.metalLite);
-      sink.addSpan(ex + ew - T, fy0, d1z, ex + ew, fy0 + doorH, ez + ed, C.metalLite);
-      sink.addSpan(ex + ew - T, fy0 + doorH, ez, ex + ew, fy1, ez + ed, C.metalLite);
+      sink.addSpan(ex + ew - T, openBot, ez, ex + ew, openTop, d0z, C.metalLite);
+      sink.addSpan(ex + ew - T, openBot, d1z, ex + ew, openTop, ez + ed, C.metalLite);
+      sink.addSpan(ex + ew - T, openTop, ez, ex + ew, fy1, ez + ed, C.metalLite);
     }
-    // Hallway landing threshold OUTSIDE the door so you can step onto the floor
-    const landPad = 1.35;
-    const landY0 = fy0;
-    const landY1 = fy0 + 0.14;
+    // Thin hallway landing OUTSIDE the shaft only (never into the cabin)
+    const landPad = 1.5;
+    const landY = fy0 + deck;
     if (face === 'S') {
-      sink.addSpan(ex - 0.1, landY0, ez - landPad, ex + ew + 0.1, landY1, ez + 0.05, C.concrete);
+      sink.addSpan(ex - 0.15, landY - 0.05, ez - landPad, ex + ew + 0.15, landY + 0.03, ez - 0.02, C.concrete);
     } else if (face === 'N') {
-      sink.addSpan(ex - 0.1, landY0, ez + ed - 0.05, ex + ew + 0.1, landY1, ez + ed + landPad, C.concrete);
+      sink.addSpan(ex - 0.15, landY - 0.05, ez + ed + 0.02, ex + ew + 0.15, landY + 0.03, ez + ed + landPad, C.concrete);
     } else if (face === 'W') {
-      sink.addSpan(ex - landPad, landY0, ez - 0.1, ex + 0.05, landY1, ez + ed + 0.1, C.concrete);
+      sink.addSpan(ex - landPad, landY - 0.05, ez - 0.15, ex - 0.02, landY + 0.03, ez + ed + 0.15, C.concrete);
     } else {
-      sink.addSpan(ex + ew - 0.05, landY0, ez - 0.1, ex + ew + landPad, landY1, ez + ed + 0.1, C.concrete);
+      sink.addSpan(ex + ew + 0.02, landY - 0.05, ez - 0.15, ex + ew + landPad, landY + 0.03, ez + ed + 0.15, C.concrete);
     }
-    // Call panel beside door (hallway)
-    const panelInset = 0.15;
+    // Call panel beside door (hallway) — keep clear of the doorway opening
+    const panelInset = 0.2;
     if (face === 'S') {
-      sink.addSpan(d1x + 0.05, fy0 + 1.0, ez - panelInset - 0.12, d1x + 0.18, fy0 + 1.4, ez - panelInset, C.metal);
-      neonStrip(sink, d1x + 0.07, fy0 + 1.12, ez - panelInset - 0.1, d1x + 0.16, fy0 + 1.25, ez - panelInset - 0.02, C.neonLime);
+      sink.addSpan(d1x + 0.12, landY + 0.9, ez - panelInset - 0.1, d1x + 0.28, landY + 1.3, ez - panelInset, C.metal);
+      neonStrip(sink, d1x + 0.14, landY + 1.0, ez - panelInset - 0.08, d1x + 0.26, landY + 1.15, ez - panelInset - 0.02, C.neonLime);
     } else if (face === 'N') {
-      sink.addSpan(d1x + 0.05, fy0 + 1.0, ez + ed + panelInset, d1x + 0.18, fy0 + 1.4, ez + ed + panelInset + 0.12, C.metal);
+      sink.addSpan(d1x + 0.12, landY + 0.9, ez + ed + panelInset, d1x + 0.28, landY + 1.3, ez + ed + panelInset + 0.1, C.metal);
     } else if (face === 'W') {
-      sink.addSpan(ex - panelInset - 0.12, fy0 + 1.0, d1z + 0.05, ex - panelInset, fy0 + 1.4, d1z + 0.18, C.metal);
+      sink.addSpan(ex - panelInset - 0.1, landY + 0.9, d1z + 0.12, ex - panelInset, landY + 1.3, d1z + 0.28, C.metal);
     } else {
-      sink.addSpan(ex + ew + panelInset, fy0 + 1.0, d1z + 0.05, ex + ew + panelInset + 0.12, fy0 + 1.4, d1z + 0.18, C.metal);
+      sink.addSpan(ex + ew + panelInset, landY + 0.9, d1z + 0.12, ex + ew + panelInset + 0.1, landY + 1.3, d1z + 0.28, C.metal);
     }
   }
 
-  // Interior glass accents on non-door faces only
-  if (face !== 'S') sink.addSpan(ex + 0.15, baseY + 0.4, ez + 0.15, ex + ew - 0.15, baseY + totalH - 0.3, ez + 0.22, C.glass);
-  if (face !== 'N') sink.addSpan(ex + 0.15, baseY + 0.4, ez + ed - 0.22, ex + ew - 0.15, baseY + totalH - 0.3, ez + ed - 0.15, C.glass);
+  // No interior glass collision panels — they shrank the cabin and trapped players.
 
-  // Rideable car is a live mesh (ElevatorSystem)
-  const cabinPad = 0.18;
+  // Cabin AABB (slight inset from shaft walls, open door face handled at runtime)
+  const cabinPad = 0.12;
   worldElevators.register({
     x0: ex + cabinPad,
     z0: ez + cabinPad,
@@ -649,12 +654,24 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
     baseY,
     floors,
     floorH,
+    deck,
     startFloor: 0,
     doorFace: face,
   });
 
+  // Floor-slab hole: shaft + exit threshold so the slab lip never blocks walk-out
+  const exitPad = 1.55;
+  let hx0 = ex - 0.08;
+  let hz0 = ez - 0.08;
+  let hx1 = ex + ew + 0.08;
+  let hz1 = ez + ed + 0.08;
+  if (face === 'S') hz0 = ez - exitPad;
+  else if (face === 'N') hz1 = ez + ed + exitPad;
+  else if (face === 'W') hx0 = ex - exitPad;
+  else hx1 = ex + ew + exitPad;
+
   return {
-    x0: ex - 0.05, z0: ez - 0.05, x1: ex + ew + 0.05, z1: ez + ed + 0.05,
+    x0: hx0, z0: hz0, x1: hx1, z1: hz1,
     ex, ez, ew, ed, face,
   };
 }
@@ -944,7 +961,7 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain
     sink.addSpan(x + bodyW - T, y0, z, x + bodyW, y1, z + d, col);
   }
 
-  // Podium / setback — NEVER cover the south entrance
+  // Podium / setback — NEVER cover the south entrance or fill the interior
   const variant = Math.floor(rng() * 3);
   if (variant === 1) {
     // Side wings only (east/west), leave south clear for doors
@@ -953,8 +970,20 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain
     // North podium only
     sink.addSpan(x - 0.5, seat, z + d - 0.1, x + bodyW + 0.5, seat + floorH * 2.2, z + d + 1.0, C.concrete);
   } else if (variant === 2 && fCount > 10) {
+    // Upper setback as a HOLLOW shell (was a solid prism that sealed top floors
+    // and trapped players exiting the elevator / climbing to the roof).
     const topY = seat + h * 0.75;
-    sink.addSpan(x + bodyW * 0.1, topY, z + d * 0.1, x + bodyW * 0.9, seat + h, z + d * 0.9, band);
+    const inset = Math.min(bodyW, d) * 0.1;
+    const tSet = 0.4;
+    const x0 = x + inset;
+    const x1 = x + bodyW - inset;
+    const z0 = z + inset;
+    const z1 = z + d - inset;
+    // Four facade faces only — interior stays open for elevators + stairs
+    sink.addSpan(x0, topY, z0, x1, seat + h, z0 + tSet, band);
+    sink.addSpan(x0, topY, z1 - tSet, x1, seat + h, z1, band);
+    sink.addSpan(x0, topY, z0, x0 + tSet, seat + h, z1, band);
+    sink.addSpan(x1 - tSet, topY, z0, x1, seat + h, z1, band);
   }
 
   // Interior stairs (always) + holes for elevator + stair well
