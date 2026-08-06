@@ -202,21 +202,16 @@ export class LootSystem {
         g.add(c);
       }
     }
-    // Bright loot beacon (emissive) — easy to spot in towers
+    // Warm emissive beacon only — NO PointLights (hundreds washed the map blue)
     const stripe = new THREE.Mesh(
       new THREE.BoxGeometry(1.05, 0.03, 0.08),
-      mat(0x40e0ff, { em: 0.55, metal: 0.05, rough: 0.35 })
+      mat(0xffc040, { em: 0.45, metal: 0.05, rough: 0.35 })
     );
     stripe.position.set(0, 0.5, 0);
     stripe.name = 'caseStripe';
     g.add(stripe);
-    // Soft point light so cases glow in dark floors
-    const light = new THREE.PointLight(0x50d0ff, 0.55, 6, 2);
-    light.position.set(0, 0.55, 0);
-    g.add(light);
     g.userData.lidPivot = lidPivot;
     g.userData.stripe = stripe;
-    g.userData.light = light;
     return g;
   }
 
