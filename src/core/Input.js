@@ -75,13 +75,7 @@ export class Input {
     });
 
     document.addEventListener('pointerlockchange', () => {
-      // Any lock on our canvas counts (some browsers retarget the element)
-      const el = document.pointerLockElement;
-      this.locked = el === this.dom || el === document.body || el === document.documentElement;
-      // Prefer keeping our canvas as the lock target
-      if (el && el !== this.dom && this.dom.requestPointerLock && !this.locked) {
-        this.locked = !!el;
-      }
+      // Treat any pointer-lock element as locked (some browsers retarget)
       this.locked = !!document.pointerLockElement;
       this.bus.emit('pointerlock', this.locked);
       if (!this.locked) this.keys.clear();
