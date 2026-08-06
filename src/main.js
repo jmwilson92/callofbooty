@@ -351,7 +351,7 @@ async function start() {
               if (mode === 'map' && !vehicles.active?.mapTarget) {
                 hud.setError?.('MAP mode: open M, click a target (or press T for free-aim)');
               } else {
-                hud.setError?.('No shot — check range / ammo');
+                hud.setError?.('No shot — check ammo / cooldown');
               }
               setTimeout(() => hud.setError?.(''), 2200);
             }

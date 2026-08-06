@@ -231,7 +231,7 @@ export function createHud() {
         gunnerBadge.style.color = '#7fd4ff';
         gunnerBadge.innerHTML =
           `<div style="font-size:15px">FREE AIM</div>` +
-          `<div style="font-size:11px;font-weight:600;opacity:0.9;margin-top:4px;letter-spacing:0.04em">Missiles strike what's ahead under reticle</div>` +
+          `<div style="font-size:11px;font-weight:600;opacity:0.9;margin-top:4px;letter-spacing:0.04em">Dumbfire — straight from pods, hits first thing</div>` +
           `<div style="font-size:10px;opacity:0.65;margin-top:5px">T · map mode · Rockets ${state.volleys ?? '—'}/8 · Flares ${state.flares ?? '—'}</div>`;
       }
     },

@@ -1034,8 +1034,8 @@ export class VehicleSystem {
 
   /**
    * Gunner fires dual rockets.
-   * MAP mode  → precise strike on map pin (rooftops land on roof deck).
-   * FREE mode → leave tubes along look / nose and hit what's directly ahead.
+   * MAP mode  → guided seek to map pin (rooftops land on roof deck).
+   * FREE mode → pure dumbfire: straight out of the pods, hit first thing.
    */
   tryFireRockets(targets = [], aim = null) {
     const v = this.active;
@@ -1050,39 +1050,102 @@ export class VehicleSystem {
     const cfg = VEHICLES.HELICOPTER;
     const minR = cfg.rocketMinRange ?? 18;
     const maxR = cfg.rocketMaxRange ?? 220;
-    const optR = cfg.rocketOptRange ?? 90;
     const mode = v.aimMode === 'map' ? 'map' : 'direct';
 
-    let lock = null;
-    if (mode === 'map') {
-      // Map mode requires a map lock — hit exactly that point (roof if building)
-      if (!v.mapTarget) return false;
-      lock = { ...v.mapTarget };
-      if (lock.target && !lock.target.dead) {
-        lock.x = lock.target.x;
-        lock.y = (lock.target.y ?? 0) + (lock.kind === 'heli' ? 1.2 : 1.1);
-        lock.z = lock.target.z;
-      } else {
-        // Pin / roof / ground — force surface top so booms sit on the deck
-        lock.y = this._surfaceYAt(lock.x, lock.z, lock.y);
-        if (this._buildingAt(lock.x, lock.z)) {
-          lock.kind = 'roof';
+    const bodyF = forwardXZ(v.yaw);
+    const bodyR = rightXZ(v.yaw);
+    const speed = cfg.rocketSpeed ?? 92;
+    const nPer = cfg.rocketsPerSide ?? 8;
+
+    // ── FREE AIM: dumbfire only — no lock, no seek ─────────────────────
+    if (mode === 'direct') {
+      // Exactly along heli nose (pod aim), level with airframe — no look curve
+      const fireDir = new THREE.Vector3(bodyF.x, 0, bodyF.z).normalize();
+
+      const fireSide = (side, remaining, tubes) => {
+        if (remaining <= 0) return;
+        const idx = nPer - remaining;
+        const tube = tubes?.[idx];
+        if (tube) {
+          tube.visible = false;
+          tube.userData.loaded = false;
         }
+        // Spawn at pod hardpoints, velocity pure forward
+        const ox = v.x + bodyR.x * side * 1.7 + bodyF.x * 0.55;
+        const oy = v.y + 0.7 + (idx % 4) * 0.05;
+        const oz = v.z + bodyR.z * side * 1.7 + bodyF.z * 0.55;
+        const mesh = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.1, 0.9, 6),
+          new THREE.MeshStandardMaterial({
+            color: 0xc8b060,
+            metalness: 0.5,
+            roughness: 0.35,
+            emissive: 0x402000,
+            emissiveIntensity: 0.35,
+          })
+        );
+        mesh.position.set(ox, oy, oz);
+        try {
+          mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), fireDir.clone());
+        } catch { /* ok */ }
+        this.group.add(mesh);
+
+        this._rockets.push({
+          mesh,
+          x: ox, y: oy, z: oz,
+          vx: fireDir.x * speed,
+          vy: fireDir.y * speed, // 0 — level
+          vz: fireDir.z * speed,
+          speed,
+          life: 5.5,
+          age: 0,
+          phase: 'boost',
+          boostT: 99, // never enter guide phase
+          damage: cfg.rocketDamage ?? 95,
+          splash: cfg.rocketSplash ?? 5.5,
+          targets,
+          guided: false, // DUMBFIRE
+          turnRate: 0,
+          lock: null,
+          lockTarget: null,
+          lockHeli: null,
+          accuracy: 1,
+          owner: v,
+          aimMode: 'direct',
+          noGravity: true,
+        });
+        this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(ox, oy, oz), 1.6);
+      };
+
+      if (left > 0) {
+        fireSide(-1, left, v.root.userData.leftTubes);
+        v.rocketsLeft = left - 1;
       }
-    } else if (aim) {
-      // FREE AIM: what's under reticle / directly ahead of look
-      const look = this._lookDir(aim.yaw ?? v.yaw, aim.pitch ?? -0.1);
-      const eye = { x: v.x, y: v.y + 1.5, z: v.z };
-      lock = this._acquireRocketLock(eye, look, targets, cfg, v);
-      if (lock?.target && !lock.target.dead) {
-        lock.x = lock.target.x;
-        lock.y = (lock.target.y ?? 0) + (lock.kind === 'heli' ? 1.2 : 1.1);
-        lock.z = lock.target.z;
-      } else if (lock && (lock.kind === 'building' || lock.kind === 'ground' || lock.kind === 'roof')) {
-        lock.y = this._surfaceYAt(lock.x, lock.z, lock.y);
+      if (right > 0) {
+        fireSide(1, right, v.root.userData.rightTubes);
+        v.rocketsRight = right - 1;
       }
+      v.rocketCd = cfg.rocketCooldown ?? 0.45;
+      this.bus?.emit?.('vehicle:rocket', {
+        left: v.rocketsLeft,
+        right: v.rocketsRight,
+        mode: 'direct',
+      });
+      return true;
     }
-    if (!lock || !Number.isFinite(lock.x + lock.y + lock.z)) return false;
+
+    // ── MAP MODE: guided pin strike ────────────────────────────────────
+    if (!v.mapTarget) return false;
+    let lock = { ...v.mapTarget };
+    if (lock.target && !lock.target.dead) {
+      lock.x = lock.target.x;
+      lock.y = (lock.target.y ?? 0) + (lock.kind === 'heli' ? 1.2 : 1.1);
+      lock.z = lock.target.z;
+    } else {
+      lock.y = this._surfaceYAt(lock.x, lock.z, lock.y);
+      if (this._buildingAt(lock.x, lock.z)) lock.kind = 'roof';
+    }
+    if (!Number.isFinite(lock.x + lock.y + lock.z)) return false;
 
     const dist = Math.hypot(lock.x - v.x, lock.y - (v.y + 1), lock.z - v.z);
     if (dist < minR || dist > maxR) {
@@ -1090,57 +1153,12 @@ export class VehicleSystem {
       return false;
     }
 
-    // MAP = precision strike (tiny error). FREE = range-based accuracy.
-    let accuracy = 1;
-    let lockPoint;
-    if (mode === 'map') {
-      accuracy = 0.98;
-      // Land dead-on the pin (especially rooftops)
-      lockPoint = {
-        x: lock.x,
-        y: lock.y,
-        z: lock.z,
-        kind: lock.kind,
-        id: lock.id,
-        target: lock.target,
-      };
-    } else {
-      if (dist > optR) {
-        accuracy = 1 - (dist - optR) / Math.max(1, maxR - optR);
-        accuracy = THREE.MathUtils.clamp(accuracy, 0.25, 1);
-      }
-      const missM = (1 - accuracy) * 10;
-      const jitter = () => (Math.random() - 0.5) * 2 * missM;
-      let lx = lock.x + jitter();
-      let lz = lock.z + jitter();
-      let ly = lock.y + jitter() * 0.12;
-      if (lock.kind === 'building' || lock.kind === 'roof' || this._buildingAt(lx, lz)) {
-        ly = this._surfaceYAt(lx, lz, lock.y);
-      }
-      lockPoint = {
-        x: lx, y: ly, z: lz,
-        kind: lock.kind,
-        id: lock.id,
-        target: lock.target,
-      };
-    }
-
-    const bodyF = forwardXZ(v.yaw);
-    const bodyR = rightXZ(v.yaw);
-    const speed = cfg.rocketSpeed ?? 92;
-    const nPer = cfg.rocketsPerSide ?? 8;
-    // FREE: leave tubes along look (what's ahead). MAP: tubes forward, then turn hard to pin.
-    let fireDir;
-    if (mode === 'direct' && aim) {
-      const look = this._lookDir(aim.yaw ?? v.yaw, aim.pitch ?? -0.05);
-      fireDir = new THREE.Vector3(look.x, look.y, look.z).normalize();
-      // Blend a little body-forward so pods clear the cabin
-      fireDir.x = fireDir.x * 0.9 + bodyF.x * 0.1;
-      fireDir.z = fireDir.z * 0.9 + bodyF.z * 0.1;
-      fireDir.normalize();
-    } else {
-      fireDir = new THREE.Vector3(bodyF.x, -0.04, bodyF.z).normalize();
-    }
+    const lockPoint = {
+      x: lock.x, y: lock.y, z: lock.z,
+      kind: lock.kind, id: lock.id, target: lock.target,
+    };
+    // Leave tubes straight along body, then seek pin
+    const fireDir = new THREE.Vector3(bodyF.x, -0.02, bodyF.z).normalize();
 
     const fireSide = (side, remaining, tubes) => {
       if (remaining <= 0) return;
@@ -1150,9 +1168,9 @@ export class VehicleSystem {
         tube.visible = false;
         tube.userData.loaded = false;
       }
-      const ox = v.x + bodyR.x * side * 1.7 + bodyF.x * 0.3;
+      const ox = v.x + bodyR.x * side * 1.7 + bodyF.x * 0.55;
       const oy = v.y + 0.7 + (idx % 4) * 0.05;
-      const oz = v.z + bodyR.z * side * 1.7 + bodyF.z * 0.3;
+      const oz = v.z + bodyR.z * side * 1.7 + bodyF.z * 0.55;
       const mesh = new THREE.Mesh(
         new THREE.CylinderGeometry(0.08, 0.1, 0.9, 6),
         new THREE.MeshStandardMaterial({
@@ -1169,36 +1187,28 @@ export class VehicleSystem {
       } catch { /* ok */ }
       this.group.add(mesh);
 
-      const dir = fireDir.clone();
-      dir.x += bodyR.x * side * 0.03;
-      dir.normalize();
-
       this._rockets.push({
         mesh,
         x: ox, y: oy, z: oz,
-        vx: dir.x * speed,
-        vy: dir.y * speed,
-        vz: dir.z * speed,
+        vx: fireDir.x * speed,
+        vy: fireDir.y * speed,
+        vz: fireDir.z * speed,
         speed,
         life: 6,
         age: 0,
-        phase: 'boost', // straight from tubes, then guide
-        // FREE: short boost then hit ahead. MAP: brief boost then hard turn onto pin.
-        boostT: mode === 'map' ? (cfg.rocketBoostTime ?? 0.42) : Math.min(0.22, cfg.rocketBoostTime ?? 0.42),
+        phase: 'boost',
+        boostT: cfg.rocketBoostTime ?? 0.42,
         damage: cfg.rocketDamage ?? 95,
         splash: cfg.rocketSplash ?? 5.5,
         targets,
         guided: true,
-        // MAP seeks harder so it lands on the pin/roof
-        turnRate: mode === 'map'
-          ? (cfg.rocketTurnRate ?? 3.8) * 1.35
-          : (cfg.rocketTurnRate ?? 3.8) * (0.6 + 0.4 * accuracy),
+        turnRate: (cfg.rocketTurnRate ?? 3.8) * 1.35,
         lock: { ...lockPoint },
         lockTarget: lockPoint.target ?? null,
         lockHeli: lock.kind === 'heli' ? lock.target : null,
-        accuracy,
+        accuracy: 0.98,
         owner: v,
-        aimMode: mode,
+        aimMode: 'map',
       });
       this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(ox, oy, oz), 1.6);
     };
@@ -1217,7 +1227,7 @@ export class VehicleSystem {
       right: v.rocketsRight,
       lock: lock.kind,
       dist,
-      accuracy,
+      mode: 'map',
     });
     return true;
   }
@@ -1358,11 +1368,14 @@ export class VehicleSystem {
       r.life -= dt;
       r.age = (r.age ?? 0) + dt;
 
-      // Straight boost from tubes, then guide onto target
-      if (r.phase === 'boost') {
+      // FREE dumbfire: never guide, never gravity-curve — laser-straight
+      if (r.aimMode === 'direct' || r.guided === false || r.noGravity) {
+        // Keep constant velocity from pods (no drop, no seek)
+        r.phase = 'boost';
+      } else if (r.phase === 'boost') {
         r.boostT = (r.boostT ?? 0.42) - dt;
         if (r.boostT <= 0) r.phase = 'guide';
-        // slight gravity during boost
+        // slight gravity during boost (map missiles only)
         r.vy -= 2 * dt;
       } else if (r.guided && r.phase === 'guide') {
         // ECM spoof: if flare cloud near missile, retarget toward flare
@@ -1435,8 +1448,8 @@ export class VehicleSystem {
         const ny = r.y + dy;
         const nz = r.z + dz;
 
-        // Proximity fuse near lock (use lock height — often roof deck)
-        if (r.lock && r.age > 0.15) {
+        // Proximity fuse near lock — MAP guided only (not free dumbfire)
+        if (r.guided && r.lock && r.age > 0.15) {
           const pd = Math.hypot(r.lock.x - nx, r.lock.y - ny, r.lock.z - nz);
           if (pd < 2.2) {
             // Snap boom to lock surface if it's a roof/building aim
