@@ -111,25 +111,25 @@ export class CombatHud {
       <div id="ch-range" class="panel" style="position:absolute;left:50%;top:12px;transform:translateX(-50%);
         padding:7px 14px;font-size:11px;display:none"></div>
 
-      <!-- Scope: clear center (look-through) + ring so peripherals stay; no outer tube mesh -->
+      <!-- Scope look-through: large clear center so peripherals stay visible -->
       <div id="ch-scope" style="
         position:absolute;inset:0;display:none;pointer-events:none;
         background: radial-gradient(circle at center,
-          transparent 0%, transparent 34%,
-          rgba(0,0,0,0.35) 38%, rgba(0,0,0,0.85) 44%, #000 50%);
+          transparent 0%, transparent 48%,
+          rgba(0,0,0,0.25) 56%, rgba(0,0,0,0.7) 68%, rgba(0,0,0,0.92) 78%);
       ">
         <svg id="ch-scope-reticle" width="100%" height="100%" style="position:absolute;inset:0">
-          <g stroke="#c8d0d8" stroke-width="1" opacity="0.75">
-            <line x1="50%" y1="36%" x2="50%" y2="46.5%" />
-            <line x1="50%" y1="53.5%" x2="50%" y2="64%" />
-            <line x1="36%" y1="50%" x2="46.5%" y2="50%" />
-            <line x1="53.5%" y1="50%" x2="64%" y2="50%" />
-            <circle cx="50%" cy="45%" r="1.2" fill="#c8d0d8" />
-            <circle cx="50%" cy="55%" r="1.2" fill="#c8d0d8" />
-            <circle cx="45%" cy="50%" r="1.2" fill="#c8d0d8" />
-            <circle cx="55%" cy="50%" r="1.2" fill="#c8d0d8" />
+          <g id="ch-scope-marks" stroke="#d0d8e0" stroke-width="1" opacity="0.8">
+            <line x1="50%" y1="38%" x2="50%" y2="47%" />
+            <line x1="50%" y1="53%" x2="50%" y2="62%" />
+            <line x1="38%" y1="50%" x2="47%" y2="50%" />
+            <line x1="53%" y1="50%" x2="62%" y2="50%" />
+            <circle cx="50%" cy="46%" r="1.2" fill="#d0d8e0" />
+            <circle cx="50%" cy="54%" r="1.2" fill="#d0d8e0" />
+            <circle cx="46%" cy="50%" r="1.2" fill="#d0d8e0" />
+            <circle cx="54%" cy="50%" r="1.2" fill="#d0d8e0" />
           </g>
-          <circle cx="50%" cy="50%" r="1.8" fill="#ff3030" opacity="0.95" />
+          <circle cx="50%" cy="50%" r="1.6" fill="#ff3030" opacity="0.95" />
         </svg>
       </div>
     `;
@@ -249,6 +249,16 @@ export class CombatHud {
       if (show) {
         const a = Math.min(1, (state.ads - 0.55) / 0.45);
         this._els.scope.style.opacity = String(a);
+        // Marksman: huge clear center so map stays in peripherals.
+        // Sniper: slightly tighter ring (still mostly open).
+        const open = state.weaponClass === 'dmr' || state.weaponClass === 'marksman';
+        this._els.scope.style.background = open
+          ? `radial-gradient(circle at center,
+              transparent 0%, transparent 58%,
+              rgba(0,0,0,0.2) 66%, rgba(0,0,0,0.55) 76%, rgba(0,0,0,0.88) 88%)`
+          : `radial-gradient(circle at center,
+              transparent 0%, transparent 48%,
+              rgba(0,0,0,0.25) 56%, rgba(0,0,0,0.7) 68%, rgba(0,0,0,0.92) 78%)`;
       }
     }
   }

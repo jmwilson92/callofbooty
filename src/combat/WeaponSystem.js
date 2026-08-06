@@ -239,20 +239,24 @@ export class WeaponSystem {
     this._muzzle = vm.muzzle;
     this.viewGroup.add(vm.root);
 
-    // Compact muzzle flash — sniper/DMR keep it tiny so hip tip isn't a blob
-    const isLong = def.class === 'sniper' || def.class === 'dmr';
-    const flash = new THREE.Mesh(
-      new THREE.SphereGeometry(isLong ? 0.016 : 0.026, 8, 8),
-      new THREE.MeshBasicMaterial({
-        color: 0xffe8a0, transparent: true, opacity: 0, depthTest: false, depthWrite: false,
-      })
-    );
-    flash.position.copy(vm.muzzle.position);
-    flash.position.x += 0.008;
-    flash.frustumCulled = false;
-    flash.renderOrder = 1000;
-    vm.root.add(flash);
-    this._muzzleFlash = flash;
+    // No muzzle flash sphere on scoped rifles — it reads as a hacky tip blob in hip fire
+    if (def.class === 'sniper' || def.class === 'dmr') {
+      this._muzzleFlash = null;
+    } else {
+      const flash = new THREE.Mesh(
+        new THREE.SphereGeometry(0.024, 8, 8),
+        new THREE.MeshBasicMaterial({
+          color: 0xffe8a0, transparent: true, opacity: 0, depthTest: false, depthWrite: false,
+        })
+      );
+      flash.position.copy(vm.muzzle.position);
+      flash.position.x += 0.008;
+      flash.visible = false;
+      flash.frustumCulled = false;
+      flash.renderOrder = 1000;
+      vm.root.add(flash);
+      this._muzzleFlash = flash;
+    }
   }
 
   /**
@@ -373,6 +377,7 @@ export class WeaponSystem {
     this._kick = Math.min(1, this._kick + 0.65);
     // Small flash — not a big orb in the FOV
     if (this._muzzleFlash) {
+      this._muzzleFlash.visible = true;
       this._muzzleFlash.material.opacity = 0.85;
       this._muzzleFlash.scale.setScalar(0.55 + Math.random() * 0.25);
     }
@@ -414,6 +419,7 @@ export class WeaponSystem {
     this._kick = Math.max(0, this._kick - dt * 7);
     if (this._muzzleFlash && this._muzzleFlash.material.opacity > 0) {
       this._muzzleFlash.material.opacity = Math.max(0, this._muzzleFlash.material.opacity - dt * 20);
+      if (this._muzzleFlash.material.opacity <= 0.02) this._muzzleFlash.visible = false;
     }
     if (this._muzzleLight) {
       this._muzzleLight.intensity = Math.max(0, this._muzzleLight.intensity - dt * 28);
@@ -574,6 +580,7 @@ export class WeaponSystem {
       ads: this.ads,
       scopeOverlay: !!(def?.scopeOverlay),
       scopeZoomFov: def?.scopeZoomFov ?? null,
+      weaponClass: def?.class ?? null,
       slot: this.active,
       slot0: this.slots[0] ? WEAPONS[this.slots[0].weaponId]?.name : null,
       slot1: this.slots[1] ? WEAPONS[this.slots[1].weaponId]?.name : null,

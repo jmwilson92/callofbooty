@@ -55,8 +55,12 @@ export async function loadWeaponLibrary(catalogUrl = '/assets/weapons_catalog.js
           o.castShadow = false;
           o.receiveShadow = false;
           const n = (o.name || '').toLowerCase();
-          // Hide solid optic_body leftovers; force glass panes nearly invisible
-          if (n.includes('optic_body') || n === 'opticbody') {
+          // Hide leftover tip/optic junk that reads as hip-fire blobs
+          if (
+            n.includes('optic_body') || n === 'opticbody'
+            || n.includes('brake') || n.includes('muzzle_dev')
+            || n.includes('ocular_glass') || n === 'glass'
+          ) {
             o.visible = false;
           }
           if (o.material) {
@@ -64,12 +68,13 @@ export async function loadWeaponLibrary(catalogUrl = '/assets/weapons_catalog.js
             for (const m of mats) {
               if (m.isMeshStandardMaterial) {
                 m.envMapIntensity = 0.8;
-                if (n.includes('glass') || n.includes('optic_glass')) {
+                if (n.includes('glass') || n.includes('optic')) {
                   m.transparent = true;
-                  m.opacity = 0.08;
+                  m.opacity = 0.06;
                   m.depthWrite = false;
                   m.metalness = 0.05;
                   m.roughness = 0.1;
+                  m.emissive?.setHex?.(0x000000);
                 }
                 m.needsUpdate = true;
               }
