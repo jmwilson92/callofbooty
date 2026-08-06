@@ -51,24 +51,50 @@ export class Input {
       this.pressed.clear();
     });
 
-    // Listen on `window`, not on the canvas. The menu overlay covers the whole
-    // viewport, so a canvas-only listener never sees the click that is supposed
-    // to start the game. Skip when the tactical map is open (needs drag/zoom).
-    window.addEventListener('click', (e) => {
+    // Pointer lock from any click that isn't interactive UI / map.
+    // Hint overlay uses pointer-events:none so clicks fall through to canvas/body.
+    const tryLockFromEvent = (e) => {
       if (e.target?.closest?.('#fullmap')) return;
+      if (e.target?.closest?.('#party-ui')) return;
+      if (e.target?.closest?.('input, button, textarea, select, a, label')) return;
       this.requestLock();
+    };
+    window.addEventListener('click', tryLockFromEvent);
+    // Also bind canvas / document — some embeds only count element-local gestures
+    this.dom.addEventListener('click', tryLockFromEvent);
+    this.dom.style.touchAction = 'none';
+    this.dom.style.outline = 'none';
+    // Canvas must fill the viewport so clicks hit it
+    Object.assign(this.dom.style, {
+      position: 'fixed',
+      inset: '0',
+      width: '100%',
+      height: '100%',
+      display: 'block',
+      zIndex: '1',
     });
 
     document.addEventListener('pointerlockchange', () => {
-      this.locked = document.pointerLockElement === this.dom;
+      // Any lock on our canvas counts (some browsers retarget the element)
+      const el = document.pointerLockElement;
+      this.locked = el === this.dom || el === document.body || el === document.documentElement;
+      // Prefer keeping our canvas as the lock target
+      if (el && el !== this.dom && this.dom.requestPointerLock && !this.locked) {
+        this.locked = !!el;
+      }
+      this.locked = !!document.pointerLockElement;
       this.bus.emit('pointerlock', this.locked);
       if (!this.locked) this.keys.clear();
     });
 
+    document.addEventListener('pointerlockerror', () => {
+      this.bus.emit('pointerlock:error', new Error('pointerlockerror'));
+    });
+
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
-      this.mouseDX += e.movementX;
-      this.mouseDY += e.movementY;
+      this.mouseDX += e.movementX || 0;
+      this.mouseDY += e.movementY || 0;
     });
 
     this.dom.addEventListener('mousedown', (e) => this.buttons.add(e.button));
@@ -76,18 +102,40 @@ export class Input {
     this.dom.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  // Ask for pointer lock. Browsers reject this if it is not driven by a user
-  // gesture, and Chrome enforces a ~1s cooldown after Esc -- report the failure
-  // rather than leaving the player clicking at a screen that does nothing.
+  // Ask for pointer lock. Must run in a user-gesture stack (click / key).
+  // Chrome enforces a short cooldown after Esc.
   requestLock() {
-    if (this.locked) return;
+    if (this.locked || document.pointerLockElement) return;
+    const el = this.dom;
+    if (!el || typeof el.requestPointerLock !== 'function') {
+      this.bus.emit('pointerlock:error', new Error('Pointer Lock API unavailable'));
+      return;
+    }
     try {
-      const p = this.dom.requestPointerLock();
-      if (p && typeof p.catch === 'function') {
-        p.catch((err) => this.bus.emit('pointerlock:error', err));
+      // Focus helps some browsers accept the lock
+      el.focus?.({ preventScroll: true });
+      const p = el.requestPointerLock({ unadjustedMovement: false });
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          // success handled by pointerlockchange
+        }).catch((err) => {
+          // Retry without options (older Chrome / Safari)
+          try {
+            const p2 = el.requestPointerLock();
+            if (p2 && typeof p2.catch === 'function') {
+              p2.catch((err2) => this.bus.emit('pointerlock:error', err2 || err));
+            }
+          } catch (err2) {
+            this.bus.emit('pointerlock:error', err2 || err);
+          }
+        });
       }
     } catch (err) {
-      this.bus.emit('pointerlock:error', err);
+      try {
+        el.requestPointerLock();
+      } catch (err2) {
+        this.bus.emit('pointerlock:error', err2 || err);
+      }
     }
   }
 

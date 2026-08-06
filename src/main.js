@@ -200,11 +200,16 @@ async function start() {
     }
   });
   bus.on('pointerlock:error', () => {
-    // Chrome blocks re-locking for about a second after Esc.
-    hud.setError('Pointer lock was blocked by the browser. Click again in a moment.');
+    // Chrome blocks re-locking for about a second after Esc; embeds may block entirely.
+    hud.setError(
+      'Pointer lock blocked — click CLICK TO PLAY again. ' +
+      'If this keeps failing, open the game in a normal browser tab (not a VS Code Simple Browser).'
+    );
   });
   hud.setLocked(false);
   combatHud.setVisible(false);
+  // Explicit play button (pointer-events: auto) so start isn't stuck behind UI
+  hud.bindPlay?.(() => input.requestLock());
 
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);

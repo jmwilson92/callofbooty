@@ -92,33 +92,44 @@ export function createHud() {
 
   const hint = document.createElement('div');
   hint.id = 'hint';
+  // Allow the play button to receive clicks; rest of overlay stays pass-through
+  // via CSS on #hint (pointer-events: none) + button (pointer-events: auto).
   hint.innerHTML = `
     <h1>Call of Booty <small>— Phase 1</small></h1>
-    <p class="lead">Click to lock the pointer and drop in.</p>
+    <p class="lead">Click below (or anywhere) to lock the pointer and drop in.</p>
+    <button type="button" id="hint-play" class="hint-play">CLICK TO PLAY</button>
     <table>
       <tr><td>WASD</td><td>move</td></tr>
       <tr><td>Shift</td><td>sprint</td></tr>
       <tr><td>Space</td><td>jump / mantle</td></tr>
-      <tr><td>C</td><td>crouch (not Ctrl — Ctrl+W closes the tab)</td></tr>
+      <tr><td>C</td><td>crouch</td></tr>
       <tr><td>E</td><td>vehicle / loot / door / elevator</td></tr>
-      <tr><td>Shift+E</td><td>elevator / rappel express to TOP</td></tr>
-      <tr><td>Rappel (gold)</td><td>W/S floor-by-floor · Shift+E or Shift+W express roof</td></tr>
-      <tr><td>Zipline (blue)</td><td>E · ride between rooftops</td></tr>
-      <tr><td>Heli pilot</td><td>WASD · Space up / C down · E bail (heli crashes)</td></tr>
-      <tr><td>Heli gunner</td><td>V seat · T map/free aim · M click lock · LMB fire · G flares · X ECM</td></tr>
-      <tr><td>Missiles</td><td>tubes → seek lock · roofs boom on top · free-aim = what’s ahead</td></tr>
-      <tr><td>Rearm</td><td>land on Coronado NAS or MCRD gold pad (missiles + flares; fuel unlimited)</td></tr>
-      <tr><td>Friends</td><td>top-left Host/Join room · npm run party on host machine</td></tr>
-      <tr><td>LMB / RMB</td><td>fire / ADS (on foot)</td></tr>
-      <tr><td>R · 1/2/Q</td><td>reload · weapon slots / swap</td></tr>
-      <tr><td>P</td><td>test range</td></tr>
-      <tr><td>Bots</td><td>squads of 4–5, smarter flanks (fair TTK)</td></tr>
-      <tr><td>Sprint + C</td><td>slide</td></tr>
-      <tr><td>M · F3 · Esc</td><td>map · perf · unlock</td></tr>
+      <tr><td>V / T</td><td>heli gunner seat · map/free aim</td></tr>
+      <tr><td>M</td><td>tactical map</td></tr>
+      <tr><td>Esc</td><td>release pointer</td></tr>
     </table>
     <p class="err"></p>`;
   document.body.appendChild(hint);
   const err = hint.querySelector('.err');
+  const playBtn = hint.querySelector('#hint-play');
+
+  // Inline styles so the button always works even if CSS is stale
+  if (playBtn) {
+    Object.assign(playBtn.style, {
+      pointerEvents: 'auto',
+      cursor: 'pointer',
+      margin: '0.5rem 0 1.2rem',
+      padding: '14px 28px',
+      font: '700 16px/1 ui-monospace, Menlo, Consolas, monospace',
+      letterSpacing: '0.12em',
+      color: '#0d1116',
+      background: 'linear-gradient(180deg, #9ae0ff, #7fd4ff)',
+      border: 'none',
+      borderRadius: '8px',
+      boxShadow: '0 4px 24px rgba(127,212,255,0.45)',
+      zIndex: '50',
+    });
+  }
 
   return {
     setLocked(locked) {
@@ -128,7 +139,7 @@ export function createHud() {
       if (locked) err.textContent = '';
     },
     setError(msg) {
-      err.textContent = msg;
+      err.textContent = msg || '';
     },
     setPrompt(text) {
       if (!text) {
@@ -137,6 +148,25 @@ export function createHud() {
       }
       prompt.textContent = text;
       prompt.style.display = 'block';
+    },
+    /** Wire the CLICK TO PLAY button to Input.requestLock */
+    bindPlay(requestLockFn) {
+      if (!playBtn) return;
+      const go = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        requestLockFn?.();
+      };
+      playBtn.addEventListener('click', go);
+      playBtn.addEventListener('pointerup', go);
+      // Keyboard when menu is up
+      window.addEventListener('keydown', (e) => {
+        if (hint.style.display === 'none') return;
+        if (e.code === 'Enter' || e.code === 'Space') {
+          e.preventDefault();
+          requestLockFn?.();
+        }
+      });
     },
   };
 }

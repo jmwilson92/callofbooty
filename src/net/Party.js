@@ -41,9 +41,10 @@ export class PartyClient {
     `;
     Object.assign(el.style, {
       position: 'fixed',
+      // Sit under the play overlay (z=20) until in-game; still usable top-left
       top: '8px',
       left: '8px',
-      zIndex: '40',
+      zIndex: '15',
       background: 'rgba(8,12,16,0.78)',
       color: '#d8e0e8',
       font: '12px/1.35 ui-monospace, monospace',
@@ -51,6 +52,8 @@ export class PartyClient {
       borderRadius: '6px',
       border: '1px solid rgba(120,160,200,0.25)',
       maxWidth: '280px',
+      // Don't block the whole screen — only the panel captures events
+      pointerEvents: 'auto',
     });
     document.body.appendChild(el);
     this._ui = el;
