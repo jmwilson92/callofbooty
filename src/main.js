@@ -19,6 +19,7 @@ import { DebugOverlay, createHud } from './ui/Debug.js';
 import { MapView } from './ui/MapView.js';
 import { CombatEffects } from './combat/Effects.js';
 import { WeaponSystem } from './combat/WeaponSystem.js';
+import { WeaponOverlay } from './combat/WeaponOverlay.js';
 import { TargetRange } from './combat/Targets.js';
 import { LootSystem } from './loot/LootSystem.js';
 import { CombatHud } from './ui/CombatHud.js';
@@ -125,9 +126,12 @@ async function start() {
   const mapView = new MapView(terrain);
   const clock = new Clock();
 
-  // Combat + loot
+  // Combat + loot — weapon overlay scene (always-on-top gun)
   const effects = new CombatEffects(scene, playerCam.camera);
+  const weaponOverlay = new WeaponOverlay(renderer);
+  weaponOverlay.setAspect(window.innerWidth / window.innerHeight);
   const weapons = new WeaponSystem(playerCam, hash, bus, effects);
+  weapons.attachOverlay(weaponOverlay);
   weapons.giveWeapon('vector7', 'common'); // starter AR for testing
   const loot = new LootSystem(scene, terrain, bus);
   const lootCount = loot.populate(WORLD.SEED ^ 0x1007);
@@ -151,6 +155,7 @@ async function start() {
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     playerCam.setAspect(window.innerWidth / window.innerHeight);
+    weaponOverlay.setAspect(window.innerWidth / window.innerHeight);
   });
 
   const sunOffset = sun.position.clone();
@@ -279,6 +284,8 @@ async function start() {
     );
 
     renderer.render(scene, playerCam.camera);
+    // Gun overlay (depth cleared — always visible, never clipped by world)
+    if (input.locked) weaponOverlay.render();
     mapView.update(controller.pos, playerCam.yaw);
     debug.update(clock.frameDelta, controller, stats);
   }

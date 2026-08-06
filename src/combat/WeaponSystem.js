@@ -44,21 +44,30 @@ export class WeaponSystem {
     this.armor = 0;
     this.armorLevel = 0;
 
+    // Mount viewmodel on the dedicated overlay scene (not world camera) so it
+    // never depth-fights walls and is always lit/visible.
+    this.overlay = null;
     this.viewGroup = new THREE.Group();
     this.viewGroup.name = 'viewWeapon';
-    this.camera.camera.add(this.viewGroup);
-    // Local fill light so the gun is never black against dark maps
-    const fill = new THREE.PointLight(0xfff0e0, 0.85, 2.5, 1.5);
-    fill.position.set(0.1, 0.05, 0.1);
-    this.camera.camera.add(fill);
     this._vmRoot = null;
     this._vmMag = null;
     this._muzzle = new THREE.Object3D();
-    this._kick = 0; // visual gun kick on fire
+    this._kick = 0;
     this._muzzleFlash = null;
+    this._muzzleLight = null;
 
     // Give starter sidearm so player can shoot before finding loot
     this.giveWeapon('sidearm', 'common');
+  }
+
+  /** Attach to WeaponOverlay mount after construction. */
+  attachOverlay(overlay) {
+    this.overlay = overlay;
+    overlay.mount.add(this.viewGroup);
+    // Point light riding with the gun for specular pop
+    this._muzzleLight = new THREE.PointLight(0xffcc88, 0, 1.2, 2);
+    this.viewGroup.add(this._muzzleLight);
+    this._rebuildView();
   }
 
   get current() {
@@ -189,9 +198,15 @@ export class WeaponSystem {
   }
 
   _rebuildView() {
+    // Keep point light if present
+    const keep = [];
     while (this.viewGroup.children.length) {
       const c = this.viewGroup.children[0];
       this.viewGroup.remove(c);
+      if (c.isLight) {
+        keep.push(c);
+        continue;
+      }
       c.traverse?.((o) => {
         if (o.geometry) o.geometry.dispose();
         if (o.material) {
@@ -200,8 +215,11 @@ export class WeaponSystem {
         }
       });
     }
+    for (const k of keep) this.viewGroup.add(k);
+
     this._vmRoot = null;
     this._vmMag = null;
+    this._muzzleFlash = null;
     const def = this.def;
     if (!def) return;
     const vm = buildViewModel(def);
@@ -209,12 +227,17 @@ export class WeaponSystem {
     this._vmMag = vm.mag;
     this._muzzle = vm.muzzle;
     this.viewGroup.add(vm.root);
-    // Muzzle flash sprite
+
+    // Bright muzzle flash disc
     const flash = new THREE.Mesh(
-      new THREE.SphereGeometry(0.04, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffe080, transparent: true, opacity: 0 })
+      new THREE.SphereGeometry(0.06, 10, 10),
+      new THREE.MeshBasicMaterial({
+        color: 0xffe8a0, transparent: true, opacity: 0, depthTest: false,
+      })
     );
     flash.position.copy(vm.muzzle.position);
+    flash.frustumCulled = false;
+    flash.renderOrder = 1000;
     vm.root.add(flash);
     this._muzzleFlash = flash;
   }
@@ -314,11 +337,12 @@ export class WeaponSystem {
     this.shotCooldown = 60 / def.rpm;
     this.lastShotAge = 0;
     this.boltReady = def.fireMode !== 'bolt';
-    this._kick = Math.min(1, this._kick + 0.55);
+    this._kick = Math.min(1, this._kick + 0.65);
     if (this._muzzleFlash) {
       this._muzzleFlash.material.opacity = 1;
-      this._muzzleFlash.scale.setScalar(1.4 + Math.random() * 0.8);
+      this._muzzleFlash.scale.setScalar(1.6 + Math.random());
     }
+    if (this._muzzleLight) this._muzzleLight.intensity = 3.5;
 
     // Recoil pattern (first shot deterministic)
     const pat = def.recoilPattern;
@@ -352,44 +376,53 @@ export class WeaponSystem {
 
     // Viewmodel ADS pose + fire kick + reload mag motion
     const adsT = this.ads;
-    this._kick = Math.max(0, this._kick - dt * 6);
+    this._kick = Math.max(0, this._kick - dt * 7);
     if (this._muzzleFlash && this._muzzleFlash.material.opacity > 0) {
-      this._muzzleFlash.material.opacity = Math.max(0, this._muzzleFlash.material.opacity - dt * 18);
+      this._muzzleFlash.material.opacity = Math.max(0, this._muzzleFlash.material.opacity - dt * 20);
     }
-    const kickZ = this._kick * 0.04;
-    const kickX = this._kick * 0.01;
+    if (this._muzzleLight) {
+      this._muzzleLight.intensity = Math.max(0, this._muzzleLight.intensity - dt * 28);
+    }
+    // Hip: lower-right. ADS: centered and closer.
+    const kickZ = this._kick * 0.05;
+    const kickX = this._kick * 0.012;
     this.viewGroup.position.set(
-      THREE.MathUtils.lerp(0.02, -0.14, adsT) + kickX,
-      THREE.MathUtils.lerp(-0.02, 0.05, adsT) - this._kick * 0.015,
-      THREE.MathUtils.lerp(0.02, 0.1, adsT) + kickZ
+      THREE.MathUtils.lerp(0.08, 0.0, adsT) + kickX,
+      THREE.MathUtils.lerp(-0.06, -0.02, adsT) - this._kick * 0.02,
+      THREE.MathUtils.lerp(0.0, 0.06, adsT) + kickZ
     );
     this.viewGroup.rotation.set(
-      THREE.MathUtils.lerp(0.02, -0.02, adsT) - this._kick * 0.08,
-      THREE.MathUtils.lerp(0.08, 0, adsT),
-      THREE.MathUtils.lerp(0.03, 0, adsT)
+      THREE.MathUtils.lerp(0.05, 0.0, adsT) - this._kick * 0.1,
+      THREE.MathUtils.lerp(0.14, 0.0, adsT),
+      THREE.MathUtils.lerp(0.04, 0.0, adsT)
     );
+    // Slight idle sway so it doesn't look frozen
+    if (this._vmRoot && !this.reloading) {
+      const t = performance.now() * 0.001;
+      this._vmRoot.position.y = Math.sin(t * 1.6) * 0.004;
+      this._vmRoot.rotation.z = Math.sin(t * 1.1) * 0.008;
+    }
 
     // Magazine yank during reload
     if (this._vmMag) {
       if (this.reloading) {
         const t = 1 - this.reloadT / Math.max(1e-4, this.reloadDur);
-        // 0–0.35 drop out, 0.35–0.7 hold, 0.7–1 insert
         let my = 0;
         let mx = 0;
         if (t < 0.35) {
           const u = t / 0.35;
-          my = -u * 0.35;
-          mx = u * 0.08;
+          my = -u * 0.28;
+          mx = u * 0.06;
         } else if (t < 0.7) {
-          my = -0.35;
-          mx = 0.08;
+          my = -0.28;
+          mx = 0.06;
         } else {
           const u = (t - 0.7) / 0.3;
-          my = -0.35 * (1 - u);
-          mx = 0.08 * (1 - u);
+          my = -0.28 * (1 - u);
+          mx = 0.06 * (1 - u);
         }
         this._vmMag.position.set(mx, my, 0);
-        this._vmMag.visible = t < 0.38 || t > 0.68;
+        this._vmMag.visible = t < 0.4 || t > 0.65;
       } else {
         this._vmMag.position.set(0, 0, 0);
         this._vmMag.visible = true;

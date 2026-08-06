@@ -83,7 +83,7 @@ export const CAMERA = {
   PITCH_CLAMP_DEG: 88,
   // Eye node chases the capsule eye position; smooths step-ups.
   FOLLOW_RATE: 25,
-  NEAR: 0.1,
+  NEAR: 0.05,
   FAR: 2800,
 
   BOB_AMP_VERT: 0.035,
