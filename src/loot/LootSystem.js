@@ -414,58 +414,45 @@ export class LootSystem {
   }
 
   /**
-   * Place case against a wall, facing room center (opens outward).
-   * Avoids doorways (south mid for kit buildings), elevators (inner core),
-   * stair corner (+X/+Z), and other cases.
+   * Place case against a wall. Mesh layout: local +Z = front (latches / open face),
+   * local −Z = hinge. Yaw is always computed so +Z points INTO the room
+   * (toward footprint center) — never into the wall.
    */
   _pickWallCaseSpot(b, floorIdx, rng, placedXZ, minSep) {
-    const wallInset = 0.75; // off wall so lid/body fit
-    const doorKeepout = 1.8; // no cases mid-south facade (door)
-    const elevKeep = 2.2; // clear center/core
+    const wallInset = 0.85;
     const y = b.floorYs?.[floorIdx] ?? (b.baseY + 0.15 + floorIdx * 3.4);
+    const roomCx = b.x + b.w * 0.5;
+    const roomCz = b.z + b.d * 0.5;
 
-    // Candidate wall slots: N/S/E/W edges, several positions along each
-    const candidates = [];
     const along = (len) => {
-      const n = Math.max(2, Math.floor(len / 2.5));
+      const n = Math.max(2, Math.floor(len / 2.8));
       const out = [];
       for (let i = 0; i < n; i++) out.push((i + 0.5) / n);
       return out;
     };
 
-    // South wall (z = min) — skip middle (doorway)
+    // Wall slots only (no hardcoded yaw — derived from room center)
+    const candidates = [];
+    // South (min Z) — skip doorway mid-facade
     for (const t of along(b.w)) {
-      if (Math.abs(t - 0.5) < 0.22) continue; // doorway keepout
-      candidates.push({
-        lx: b.w * t, lz: wallInset,
-        yaw: 0, // front (+local Z) faces +world Z = into room
-      });
+      if (Math.abs(t - 0.5) < 0.22) continue;
+      candidates.push({ lx: b.w * t, lz: wallInset });
     }
-    // North wall (z = max) — front faces -Z into room
+    // North (max Z)
     for (const t of along(b.w)) {
-      candidates.push({
-        lx: b.w * t, lz: b.d - wallInset,
-        yaw: Math.PI,
-      });
+      candidates.push({ lx: b.w * t, lz: b.d - wallInset });
     }
-    // West wall (x = min) — front faces +X into room
+    // West (min X)
     for (const t of along(b.d)) {
-      if (t < 0.15) continue; // near south door corner
-      candidates.push({
-        lx: wallInset, lz: b.d * t,
-        yaw: -Math.PI / 2,
-      });
+      if (t < 0.15) continue;
+      candidates.push({ lx: wallInset, lz: b.d * t });
     }
-    // East wall (x = max) — avoid stair/elev core in +X/+Z
+    // East (max X) — skip stair/elev corner
     for (const t of along(b.d)) {
-      if (t > 0.55) continue; // skip stair core region
-      candidates.push({
-        lx: b.w - wallInset, lz: b.d * t,
-        yaw: Math.PI / 2,
-      });
+      if (t > 0.55) continue;
+      candidates.push({ lx: b.w - wallInset, lz: b.d * t });
     }
 
-    // Shuffle
     for (let i = candidates.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
       const tmp = candidates[i];
@@ -473,22 +460,18 @@ export class LootSystem {
       candidates[j] = tmp;
     }
 
-    const cx = b.x + b.w * 0.5;
-    const cz = b.z + b.d * 0.5;
-
     for (const c of candidates) {
+      if (c.lx > b.w * 0.65 && c.lz > b.d * 0.65) continue; // stair core
       const x = b.x + c.lx;
       const z = b.z + c.lz;
-      // Not in building core (elevators / open shaft)
-      if (Math.hypot(x - cx, z - cz) < elevKeep * 0.55 && b.w > 10 && b.d > 10) {
-        // Only reject deep-center placements; wall spots are fine
-        if (c.lx > b.w * 0.3 && c.lx < b.w * 0.7 && c.lz > b.d * 0.3 && c.lz < b.d * 0.7) {
-          continue;
-        }
-      }
-      // Stair/elev corner +X/+Z of footprint
-      if (c.lx > b.w * 0.65 && c.lz > b.d * 0.65) continue;
-      // Separation from other cases
+
+      // Front (+local Z) must point toward room center = open into the room
+      const dx = roomCx - x;
+      const dz = roomCz - z;
+      const len = Math.hypot(dx, dz) || 1;
+      // Three.js: local +Z after rotation.y maps to (sin(yaw), cos(yaw))
+      const yaw = Math.atan2(dx / len, dz / len);
+
       let ok = true;
       for (const p of placedXZ) {
         if (Math.hypot(p.x - x, p.z - z) < minSep) {
@@ -497,7 +480,7 @@ export class LootSystem {
         }
       }
       if (!ok) continue;
-      return { x, y, z, yaw: c.yaw };
+      return { x, y, z, yaw };
     }
     return null;
   }
