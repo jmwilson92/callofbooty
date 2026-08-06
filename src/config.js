@@ -495,19 +495,19 @@ export const COMBAT = {
 
 /** Passive practice bots — wander, take damage, do not fight back yet. */
 export const BOTS = {
-  COUNT: 14,
+  COUNT: 16,
   HEALTH: 100,
-  SPEED: 2.6,
-  SPEED_JITTER: 0.7,
+  SPEED: 2.5,
+  SPEED_JITTER: 0.6,
   // Spawn ring around player SPAWN (metres)
-  SPAWN_MIN: 18,
-  SPAWN_MAX: 95,
-  WANDER_RADIUS: 55,
-  WAYPOINT_REACH: 1.4,
-  WAYPOINT_PAUSE: 0.6,
-  RESPAWN_TIME: 7,
-  // Body / kit colors cycle
-  COLORS: [0x3d5a3a, 0x2f4a6e, 0x5a3d2e, 0x4a3a5a, 0x3a4a4a],
+  SPAWN_MIN: 16,
+  SPAWN_MAX: 100,
+  WANDER_RADIUS: 60,
+  WAYPOINT_REACH: 1.3,
+  WAYPOINT_PAUSE: 0.5,
+  RESPAWN_TIME: 6,
+  // Camo / kit palette
+  COLORS: [0x3d5234, 0x2c3d52, 0x4a3c2e, 0x3a3a3e, 0x4a5240, 0x2a3830],
   RADIUS: 0.35,
   HEIGHT: 1.8,
 };
@@ -683,13 +683,14 @@ export const LOOT = {
     heal: 14,
   },
   WEAPON_SPAWN_WEIGHTS: {
-    vector7: 12, kestrel: 11, pike: 14, warden: 6,
-    longshot: 10, marksman: 10, breaker: 10, sidearm: 18,
+    // Longshot weighted high so snipers show up often in cases
+    vector7: 10, kestrel: 9, pike: 12, warden: 5,
+    longshot: 18, marksman: 11, breaker: 9, sidearm: 14,
   },
   AMMO_PICKUPS: {
     light: { amount: 30 },
     heavy: { amount: 24 },
-    long:  { amount: 6 },
+    long:  { amount: 8 },
     shell: { amount: 8 },
   },
   // Outdoor free loot is intentionally sparse — cases are the main source

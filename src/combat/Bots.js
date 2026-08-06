@@ -97,63 +97,134 @@ export class BotSystem {
     return bot;
   }
 
-  /** Local-space humanoid (feet at origin) so we can move the group. */
+  /**
+   * Operator-style humanoid (feet at origin).
+   * Cylinders + beveled boxes for a less “Minecraft” read; still cheap to draw.
+   */
   _buildLocalMesh(color) {
     const g = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.1 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xd4a070, roughness: 0.75 });
-    const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.6 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.78, metalness: 0.08 });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.65, metalness: 0.2 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xc9a07a, roughness: 0.82, metalness: 0.02 });
+    const vestMat = new THREE.MeshStandardMaterial({ color: 0x252830, roughness: 0.55, metalness: 0.25 });
+    const bootMat = new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.7, metalness: 0.1 });
 
-    // Legs
-    const legGeo = new THREE.BoxGeometry(0.16, 0.75, 0.16);
-    const lLeg = new THREE.Mesh(legGeo, darkMat);
-    lLeg.position.set(-0.12, 0.38, 0);
-    lLeg.castShadow = true;
-    g.add(lLeg);
-    const rLeg = new THREE.Mesh(legGeo, darkMat);
-    rLeg.position.set(0.12, 0.38, 0);
-    rLeg.castShadow = true;
-    g.add(rLeg);
-    // Torso
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.55, 0.24), bodyMat);
-    torso.position.set(0, 1.05, 0);
-    torso.castShadow = true;
-    g.add(torso);
-    // Vest
-    const vest = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.35, 0.26), darkMat);
-    vest.position.set(0, 1.15, 0);
-    g.add(vest);
-    // Arms
-    const armGeo = new THREE.BoxGeometry(0.12, 0.55, 0.12);
-    const lArm = new THREE.Mesh(armGeo, bodyMat);
-    lArm.position.set(-0.3, 1.05, 0);
-    lArm.castShadow = true;
-    g.add(lArm);
-    const rArm = new THREE.Mesh(armGeo, bodyMat);
-    rArm.position.set(0.3, 1.05, 0);
-    rArm.castShadow = true;
-    g.add(rArm);
-    // Head
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.28), skinMat);
-    head.position.set(0, 1.55, 0);
-    head.castShadow = true;
-    g.add(head);
-    // Helmet
-    const helm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.3), darkMat);
-    helm.position.set(0, 1.68, 0);
-    g.add(helm);
-    // Threat diamond above head
+    const add = (mesh, parent = g) => {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+
+    // Boots
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.24), bootMat)).position.set(-0.11, 0.05, 0.02);
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.24), bootMat)).position.set(0.11, 0.05, 0.02);
+
+    // Legs as thigh + shin cylinders (pivots at hips / knees for anim)
+    const makeLeg = (x) => {
+      const root = new THREE.Group();
+      root.position.set(x, 0.95, 0);
+      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.42, 8), darkMat);
+      thigh.position.y = -0.21;
+      thigh.castShadow = true;
+      root.add(thigh);
+      const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.4, 8), darkMat);
+      shin.position.y = -0.62;
+      shin.castShadow = true;
+      root.add(shin);
+      // knee pad
+      const knee = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.1), vestMat);
+      knee.position.y = -0.42;
+      root.add(knee);
+      g.add(root);
+      return root;
+    };
+    const lLeg = makeLeg(-0.12);
+    const rLeg = makeLeg(0.12);
+
+    // Hips / belt
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.22), darkMat)).position.set(0, 0.98, 0);
+
+    // Torso + plate carrier
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.48, 0.22), bodyMat)).position.set(0, 1.28, 0);
+    const vest = add(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.36, 0.26), vestMat));
+    vest.position.set(0, 1.32, 0.01);
+    // Mag pouches on chest
+    for (const px of [-0.1, 0.1]) {
+      const p = add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.08), darkMat));
+      p.position.set(px, 1.22, 0.16);
+    }
+    // Radio / admin pouch
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.06), darkMat)).position.set(0.18, 1.38, 0.14);
+
+    // Shoulders / arms
+    const makeArm = (x, sign) => {
+      const root = new THREE.Group();
+      root.position.set(x, 1.48, 0);
+      const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.32, 8), bodyMat);
+      upper.position.y = -0.16;
+      upper.castShadow = true;
+      root.add(upper);
+      const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.3, 8), bodyMat);
+      lower.position.y = -0.45;
+      lower.castShadow = true;
+      root.add(lower);
+      // glove
+      const hand = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.1, 0.08), darkMat);
+      hand.position.y = -0.62;
+      root.add(hand);
+      // slight rest pose (arms hang forward a bit)
+      root.rotation.z = sign * 0.08;
+      root.rotation.x = 0.12;
+      g.add(root);
+      return root;
+    };
+    const lArm = makeArm(-0.28, -1);
+    const rArm = makeArm(0.28, 1);
+
+    // Neck + head (sphere-ish)
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.1, 8), skinMat)).position.set(0, 1.58, 0);
+    const head = add(new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), skinMat));
+    head.position.set(0, 1.72, 0);
+    head.scale.set(1, 1.05, 0.95);
+
+    // Ballistic helmet
+    const helm = add(new THREE.Mesh(new THREE.SphereGeometry(0.145, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), darkMat));
+    helm.position.set(0, 1.78, 0);
+    // NVG mount stub
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.08), vestMat)).position.set(0, 1.88, 0.08);
+    // Goggles on helmet
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 0.06), vestMat)).position.set(0, 1.76, 0.12);
+
+    // Backpack / assault pack
+    const pack = add(new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.35, 0.14), darkMat));
+    pack.position.set(0, 1.3, -0.18);
+
+    // Held rifle silhouette (low-poly, for read)
+    const gun = new THREE.Group();
+    gun.position.set(0.12, 1.15, 0.28);
+    gun.rotation.set(-0.15, 0.35, 0.1);
+    const rec = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.32), darkMat);
+    gun.add(rec);
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.28, 6), vestMat);
+    bar.rotation.x = Math.PI / 2;
+    bar.position.z = 0.28;
+    gun.add(bar);
+    g.add(gun);
+
+    // Threat tag (small, above head)
     const tag = new THREE.Mesh(
-      new THREE.BoxGeometry(0.2, 0.08, 0.08),
+      new THREE.BoxGeometry(0.16, 0.05, 0.05),
       new THREE.MeshBasicMaterial({ color: 0xff3333 })
     );
-    tag.position.set(0, 1.95, 0);
+    tag.position.set(0, 2.05, 0);
     g.add(tag);
 
     g.userData.lLeg = lLeg;
     g.userData.rLeg = rLeg;
     g.userData.lArm = lArm;
     g.userData.rArm = rArm;
+    g.userData.gun = gun;
     return g;
   }
 
@@ -314,25 +385,44 @@ export class BotSystem {
 
   _walkAnim(bot, dt, distToWp) {
     const t = performance.now() * 0.001;
-    const phase = t * bot.speed * 2.2 + bot.id;
-    const swing = Math.sin(phase) * 0.45;
+    const phase = t * bot.speed * 2.4 + bot.id * 0.7;
+    const swing = Math.sin(phase) * 0.55;
     const { lLeg, rLeg, lArm, rArm } = bot.mesh.userData;
+    // Hip-rooted leg swing
     if (lLeg) lLeg.rotation.x = swing;
     if (rLeg) rLeg.rotation.x = -swing;
-    if (lArm) lArm.rotation.x = -swing * 0.6;
-    if (rArm) rArm.rotation.x = swing * 0.6;
-    // bob
-    bot.mesh.position.y = bot.y + Math.abs(Math.sin(phase)) * 0.03;
+    // Opposite arm swing (natural gait)
+    if (lArm) {
+      lArm.rotation.x = 0.12 - swing * 0.55;
+      lArm.rotation.z = -0.08;
+    }
+    if (rArm) {
+      rArm.rotation.x = 0.12 + swing * 0.55;
+      rArm.rotation.z = 0.08;
+    }
+    // Subtle torso bob + yaw sway
+    bot.mesh.position.y = bot.y + Math.abs(Math.sin(phase)) * 0.025;
+    bot.mesh.rotation.y = bot.yaw + Math.sin(phase * 0.5) * 0.03;
   }
 
   _idleAnim(bot, dt) {
     const { lLeg, rLeg, lArm, rArm } = bot.mesh.userData;
-    if (lLeg) lLeg.rotation.x *= 0.85;
-    if (rLeg) rLeg.rotation.x *= 0.85;
-    if (lArm) lArm.rotation.x *= 0.85;
-    if (rArm) rArm.rotation.x *= 0.85;
+    const damp = Math.exp(-8 * dt);
+    if (lLeg) lLeg.rotation.x *= damp;
+    if (rLeg) rLeg.rotation.x *= damp;
+    if (lArm) {
+      lArm.rotation.x = THREE.MathUtils.lerp(lArm.rotation.x, 0.15, 1 - damp);
+      lArm.rotation.z = THREE.MathUtils.lerp(lArm.rotation.z, -0.08, 1 - damp);
+    }
+    if (rArm) {
+      rArm.rotation.x = THREE.MathUtils.lerp(rArm.rotation.x, 0.15, 1 - damp);
+      rArm.rotation.z = THREE.MathUtils.lerp(rArm.rotation.z, 0.08, 1 - damp);
+    }
     bot.mesh.position.set(bot.x, bot.y, bot.z);
     bot.mesh.rotation.y = bot.yaw;
+    // Idle breathe
+    const t = performance.now() * 0.001;
+    bot.mesh.position.y = bot.y + Math.sin(t * 1.8 + bot.id) * 0.008;
   }
 
   _respawn(bot) {
