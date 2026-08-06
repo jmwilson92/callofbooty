@@ -52,6 +52,22 @@ function buildFromGlb(def, template) {
     model.position.sub(s);
   }
 
+  // Sanity: barrel (Muzzle) must be on −Z (in front of camera). If the GLB
+  // faces the wrong way, spin 180° around up so hip fire isn't behind the eye.
+  if (muzzleObj) {
+    root.updateMatrixWorld(true);
+    const m = localPos(root, muzzleObj);
+    if (m.z > 0.05) {
+      model.rotation.y += Math.PI;
+      root.updateMatrixWorld(true);
+      // Re-center Sight after flip
+      if (sightObj) {
+        const s2 = localPos(root, sightObj);
+        model.position.sub(s2);
+      }
+    }
+  }
+
   const pose = VM_POSE[classToModelKey(def.class)] || VM_POSE.ar;
   model.scale.setScalar(pose.scale);
   model.position.add(pose.offset);

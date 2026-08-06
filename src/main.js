@@ -274,8 +274,8 @@ async function start() {
         playerCam.camera.fov = worldFov;
         playerCam.camera.updateProjectionMatrix();
       }
-      // Weapon overlay FOV tracks world slightly; mild ADS tighten on optic
-      const wFov = THREE.MathUtils.lerp(55, 42, weapons.ads);
+      // Overlay FOV: hip slightly tighter so gun fills lower-right; ADS zooms optic
+      const wFov = THREE.MathUtils.lerp(52, 40, weapons.ads);
       if (Math.abs(weaponOverlay.camera.fov - wFov) > 0.1) {
         weaponOverlay.camera.fov = wFov;
         weaponOverlay.camera.updateProjectionMatrix();

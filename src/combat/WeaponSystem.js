@@ -401,20 +401,20 @@ export class WeaponSystem {
     if (this._muzzleLight) {
       this._muzzleLight.intensity = Math.max(0, this._muzzleLight.intensity - dt * 28);
     }
-    // Camera looks −Z: gun MUST sit at negative Z (in front), or it vanishes.
-    // Hip  = classic FPS lower-right, always visible, clear of crosshair center.
-    // ADS  = pull to center so iron sights / optic sit on the aim point.
+    // Camera looks −Z: gun MUST sit at negative Z (in front).
+    // Hip  = classic FPS lower-right — big, always visible.
+    // ADS  = center so optic/irons hit the crosshair.
     const kickZ = this._kick * 0.04;
     const kickX = this._kick * 0.008;
     this.viewGroup.position.set(
-      THREE.MathUtils.lerp(0.22, 0.0, adsT) + kickX,
-      THREE.MathUtils.lerp(-0.22, -0.02, adsT) - this._kick * 0.012,
-      THREE.MathUtils.lerp(-0.38, -0.28, adsT) + kickZ
+      THREE.MathUtils.lerp(0.2, 0.0, adsT) + kickX,
+      THREE.MathUtils.lerp(-0.18, -0.01, adsT) - this._kick * 0.012,
+      THREE.MathUtils.lerp(-0.42, -0.32, adsT) + kickZ
     );
     this.viewGroup.rotation.set(
-      THREE.MathUtils.lerp(0.06, 0.0, adsT) - this._kick * 0.06,
-      THREE.MathUtils.lerp(0.28, 0.0, adsT),
-      THREE.MathUtils.lerp(0.06, 0.0, adsT)
+      THREE.MathUtils.lerp(0.04, 0.0, adsT) - this._kick * 0.06,
+      THREE.MathUtils.lerp(0.22, 0.0, adsT),
+      THREE.MathUtils.lerp(0.05, 0.0, adsT)
     );
     // Tiny idle sway (only when hip; ADS stays rock solid for aiming)
     if (this._vmRoot && !this.reloading) {

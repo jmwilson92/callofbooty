@@ -9,7 +9,7 @@ export class WeaponOverlay {
   constructor(renderer) {
     this.renderer = renderer;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(55, 1, 0.01, 5);
+    this.camera = new THREE.PerspectiveCamera(52, 1, 0.01, 5);
     this.camera.position.set(0, 0, 0);
 
     // Soft key/fill so slim barrels and thin sights still catch light
