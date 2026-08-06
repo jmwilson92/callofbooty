@@ -342,7 +342,7 @@ async function start() {
     renderer.render(scene, playerCam.camera);
     // Gun overlay (depth cleared — always visible, never clipped by world)
     if (input.locked) weaponOverlay.render();
-    mapView.update(controller.pos, playerCam.yaw);
+    mapView.update(controller.pos, playerCam.yaw, vehicles.vehicles);
     debug.update(clock.frameDelta, controller, stats);
   }
 

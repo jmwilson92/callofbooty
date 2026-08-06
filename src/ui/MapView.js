@@ -341,9 +341,11 @@ export class MapView {
   /**
    * @param {{ x:number, y:number, z:number }} pos
    * @param {number} yaw
+   * @param {Array<{type:string,x:number,z:number,yaw?:number}>|null} vehicles
    */
-  update(pos, yaw) {
+  update(pos, yaw, vehicles = null) {
     this._lastPos = pos;
+    this._vehicles = vehicles;
     this._drawMinimap(pos, yaw);
     if (this.open) this._drawFullMap(pos, yaw);
   }
@@ -371,8 +373,8 @@ export class MapView {
       py: ((z - (pos.z - halfR)) / range) * side,
     });
 
-    // Minimap: buildings only (roads already in baked raster asphalt)
     this._drawBuildings(ctx, toPx, { minPx: 1.5, stroke: false, alpha: 0.55 });
+    this._drawVehicles(ctx, toPx, 4.5 * dpr, false);
     this._drawPois(ctx, toPx, 3.2 * dpr, false);
     this._drawPlayer(ctx, side / 2, side / 2, yaw, 7 * dpr);
   }
@@ -389,7 +391,6 @@ export class MapView {
     ctx.clearRect(0, 0, side, side);
     ctx.imageSmoothingEnabled = this.zoom < 4;
 
-    // Crop raster to pan/zoom window (asphalt already baked into terrain colors)
     const srcX = (x0 + this.half) / WORLD.SIZE * this._raster.width;
     const srcY = (z0 + this.half) / WORLD.SIZE * this._raster.height;
     const srcW = (view / WORLD.SIZE) * this._raster.width;
@@ -398,13 +399,13 @@ export class MapView {
 
     const toPx = (x, z) => this.worldToViewPx(x, z, side);
 
-    // Buildings first (what you care about when zoomed) — no polyline overlay clutter
     this._drawBuildings(ctx, toPx, {
       minPx: this.zoom < 2 ? 1.2 : 0.8,
       stroke: this.zoom >= 1.8,
       alpha: 0.82,
       detailed: true,
     });
+    this._drawVehicles(ctx, toPx, Math.max(5, 6 * dpr * Math.min(1.8, Math.sqrt(this.zoom))), true);
     this._drawPois(ctx, toPx, Math.max(3, 4.5 * dpr * Math.min(2, Math.sqrt(this.zoom))), true);
 
     const p = toPx(pos.x, pos.z);
@@ -417,6 +418,74 @@ export class MapView {
     this.fullCoords.textContent =
       `${pos.x.toFixed(0)}, ${pos.z.toFixed(0)}  ·  ${this._headingLabel(yaw)}  ·  ×${this.zoom.toFixed(1)}`;
     this.fullNearest.textContent = this.nearestPoi(pos.x, pos.z);
+  }
+
+  /**
+   * Motorcycle = small diamond; helicopter = H pad mark.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {(x:number,z:number)=>{px:number,py:number}} toPx
+   * @param {number} size
+   * @param {boolean} withLabels
+   */
+  _drawVehicles(ctx, toPx, size, withLabels) {
+    const list = this._vehicles;
+    if (!list?.length) return;
+    const dpr = this.fullDpr || this.miniDpr || 1;
+
+    for (const v of list) {
+      const { px, py } = toPx(v.x, v.z);
+      // Cull far off-canvas
+      if (px < -20 || py < -20 || px > 4000 || py > 4000) continue;
+
+      if (v.type === 'helicopter') {
+        // Helipad-style H
+        ctx.fillStyle = 'rgba(40, 200, 120, 0.9)';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.lineWidth = Math.max(1, size * 0.12);
+        ctx.beginPath();
+        ctx.arc(px, py, size * 0.95, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#0a120e';
+        ctx.font = `700 ${Math.max(9, size * 1.05)}px ui-monospace, Menlo, monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('H', px, py + 0.5);
+        if (withLabels && this.zoom >= 2) {
+          ctx.font = `600 ${Math.max(10, 10 * dpr)}px ui-monospace, Menlo, monospace`;
+          ctx.fillStyle = '#7dffb0';
+          ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+          ctx.lineWidth = 2.5 * dpr;
+          ctx.textBaseline = 'bottom';
+          ctx.strokeText('HELO', px, py - size * 1.3);
+          ctx.fillText('HELO', px, py - size * 1.3);
+        }
+      } else {
+        // Motorcycle diamond
+        const s = size * 0.75;
+        ctx.fillStyle = 'rgba(255, 170, 60, 0.92)';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.lineWidth = Math.max(1, size * 0.1);
+        ctx.beginPath();
+        ctx.moveTo(px, py - s);
+        ctx.lineTo(px + s * 0.75, py);
+        ctx.lineTo(px, py + s);
+        ctx.lineTo(px - s * 0.75, py);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        if (withLabels && this.zoom >= 3.5) {
+          ctx.font = `600 ${Math.max(9, 9 * dpr)}px ui-monospace, Menlo, monospace`;
+          ctx.fillStyle = '#ffc070';
+          ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+          ctx.lineWidth = 2 * dpr;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.strokeText('MOTO', px, py - s * 1.4);
+          ctx.fillText('MOTO', px, py - s * 1.4);
+        }
+      }
+    }
   }
 
   /**
