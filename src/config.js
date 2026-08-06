@@ -498,6 +498,10 @@ export const INPUT = {
     testRange: ['KeyP'],
     debug: ['F3'],
     map: ['KeyM'],
+    // Heli crew
+    seatSwap: ['KeyV'], // solo: pilot ↔ gunner
+    flares: ['KeyG'], // gunner manual ECM
+    ecmMode: ['KeyX'], // gunner toggle auto/manual ECM
   },
 };
 
@@ -534,22 +538,53 @@ export const VEHICLES = {
     halfW: 3.6,
     halfH: 1.6,
     halfD: 4.2,
-    // Bail-out crash: unmanned heli falls unless someone remounts (takes over)
+    // Pilot flies; gunner (passenger) targets + fires + ECM
+    // Solo: V swaps seats. Multiplayer: one player pilot, one gunner.
+    // Bail-out crash: unmanned heli falls unless someone remounts
     crashGravity: 26,
     crashMaxFall: 55,
-    crashBailHeight: 4.5, // AGL above this → crash; lower just lands
-    // 8 pods per side; each LMB fires L+R together (8 dual volleys)
+    crashBailHeight: 4.5,
+    // Fuel OFF for now — unlimited. Flip enableFuel later.
+    enableFuel: false,
+    maxFuel: 100,
+    // 8 pods per side; gunner fires L+R dual volleys
     rocketsPerSide: 8,
-    rocketSpeed: 88,
-    rocketDamage: 90,
+    rocketSpeed: 92,
+    rocketDamage: 95,
     rocketSplash: 5.5,
-    rocketCooldown: 0.4,
-    // Guided missiles — steer toward look lock (bots / buildings / ground)
-    rocketTurnRate: 3.4, // rad/s seek rate
-    rocketLockRange: 260,
-    rocketLockConeDeg: 14, // soft lock cone around reticle
-    rocketGuideDelay: 0.08, // s before seek engages
+    rocketCooldown: 0.45,
+    // Straight boost, then turn onto gunner map-selected target
+    rocketBoostTime: 0.42, // s flying nose-straight from tubes
+    rocketTurnRate: 3.8, // rad/s after boost
+    // Engagement envelope — must be in range to fire; closer = tighter seek
+    rocketMinRange: 18,
+    rocketMaxRange: 220,
+    rocketOptRange: 90, // best accuracy near this
+    // ECM / countermeasures (gunner)
+    flaresMax: 8,
+    flareCooldown: 0.55,
+    flareDuration: 2.8, // how long a cloud spoofs seekers
+    flareRadius: 28,
+    ecmDefaultAuto: true,
+    // Rearm at military pads (missiles + flares; fuel later)
+    rearmPads: [
+      { id: 'coronado_nas', name: 'Coronado NAS', x: -210, z: 500, r: 22 },
+      { id: 'mcrd', name: 'MCRD Depot', x: 30, z: 180, r: 18 },
+    ],
+    rearmHoverTime: 2.2, // s skids on pad before rearm completes
   },
+};
+
+/** Friends multiplayer (small lobby). */
+export const MULTIPLAYER = {
+  enabled: true,
+  // Override with ?party=ws://host:port or env in party server
+  defaultUrl: '', // empty = same host, port 8787
+  defaultPort: 8787,
+  maxPlayers: 8, // friends group
+  teamSize: 4, // 4–5 squads
+  tickHz: 20,
+  roomCodeLen: 4,
 };
 
 // ===================== COMBAT =====================
@@ -568,34 +603,45 @@ export const COMBAT = {
 };
 
 /**
- * World bots — wander, enter building approaches, sometimes engage the player.
- * TTK vs 100 HP: SMG CQC ~0.35s, AR mid ~0.4s, sniper head 1-shot / body 2.
+ * World bots — squads of 4–5, smarter tactics, tougher but not laser beams.
+ * TTK vs 100 HP: longer fights; they flank and use cover better.
  */
 export const BOTS = {
-  COUNT: 52,
-  HEALTH: 100,
-  SPEED: 2.7,
-  SPEED_JITTER: 0.7,
+  COUNT: 48,
+  HEALTH: 120,
+  ARMOR: 25,
+  SPEED: 2.9,
+  SPEED_JITTER: 0.55,
   // Spawn ring around player SPAWN (metres)
-  SPAWN_MIN: 18,
-  SPAWN_MAX: 220,
-  WANDER_RADIUS: 90,
+  SPAWN_MIN: 22,
+  SPAWN_MAX: 240,
+  WANDER_RADIUS: 70,
   WAYPOINT_REACH: 1.4,
-  WAYPOINT_PAUSE: 0.35,
-  RESPAWN_TIME: 8,
+  WAYPOINT_PAUSE: 0.45,
+  RESPAWN_TIME: 12,
+  // Squads
+  TEAM_SIZE_MIN: 4,
+  TEAM_SIZE_MAX: 5,
+  TEAM_SPACING: 4.5, // spawn cluster radius
   // Building approaches
-  BUILDING_WAYPOINT_CHANCE: 0.42,
-  // Combat
-  AGGRO_RANGE: 58,
-  LOSE_RANGE: 78,
-  FIRE_RANGE: 52,
-  FIRE_COOLDOWN: 0.14,
-  FIRE_DAMAGE: 9,
-  FIRE_SPREAD_DEG: 4.5,
-  AGGRESSIVE_FRACTION: 0.55, // fraction that will shoot when they see you
-  REACTION_TIME: 0.35,
-  // Camo / kit palette
+  BUILDING_WAYPOINT_CHANCE: 0.5,
+  // Combat — smarter, not death lasers
+  AGGRO_RANGE: 62,
+  LOSE_RANGE: 90,
+  FIRE_RANGE: 48,
+  FIRE_COOLDOWN: 0.22, // slower ROF
+  FIRE_DAMAGE: 7, // softer hits
+  FIRE_SPREAD_DEG: 5.5,
+  AGGRESSIVE_FRACTION: 0.72,
+  REACTION_TIME: 0.45,
+  // Tactics
+  FLANK_CHANCE: 0.4,
+  SUPPRESS_PAUSE: 0.55, // brief hold after volley
+  COVER_SEEK_CHANCE: 0.35,
+  TEAM_SHARE_AGGRO: true, // whole squad aggro when one spots you
+  // Camo / kit palette (per team tint applied in code)
   COLORS: [0x3d5234, 0x2c3d52, 0x4a3c2e, 0x3a3a3e, 0x4a5240, 0x2a3830, 0x3a4540, 0x2e3540],
+  TEAM_COLORS: [0x3d5234, 0x2c3d52, 0x5a3a2a, 0x3a3a4e, 0x4a5240, 0x523a3a, 0x2e4540, 0x3e3540],
   RADIUS: 0.35,
   HEIGHT: 1.8,
 };

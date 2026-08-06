@@ -48,9 +48,13 @@ export class VehicleSystem {
     this.scene.add(this.group);
     this.vehicles = [];
     this.active = null;
+    /** @type {'pilot'|'gunner'} local seat when solo / assigned */
+    this.localSeat = 'pilot';
     this._near = null;
     this._rockets = [];
     this._cand = [];
+    this._rearmPads = [];
+    this._flareClouds = []; // active ECM spoofs
   }
 
   spawn() {
@@ -58,6 +62,7 @@ export class VehicleSystem {
     const rng = mulberry(WORLD.SEED ^ 0x7e41c1e);
     const motoN = VEHICLES.MOTORCYCLE?.count ?? 16;
     const heliN = VEHICLES.HELICOPTER?.count ?? 2;
+    this._spawnRearmPads();
 
     let placed = 0;
     const tryMoto = (x, z) => {
@@ -129,8 +134,11 @@ export class VehicleSystem {
 
   clear() {
     this.active = null;
+    this.localSeat = 'pilot';
     this.vehicles.length = 0;
     this._rockets.length = 0;
+    this._flareClouds.length = 0;
+    this._rearmPads.length = 0;
     while (this.group.children.length) this.group.remove(this.group.children[0]);
   }
 
@@ -292,7 +300,9 @@ export class VehicleSystem {
     root.userData.rightTubes = rightTubes;
 
     this.group.add(root);
+    const cfg = VEHICLES.HELICOPTER;
     this.vehicles.push({
+      id: `heli_${this.vehicles.length}_${(Math.random() * 1e6) | 0}`,
       type: 'helicopter',
       root,
       x, y, z, yaw,
@@ -302,7 +312,59 @@ export class VehicleSystem {
       rocketsLeft: nR,
       rocketsRight: nR,
       rocketCd: 0,
+      // Crew: pilot flies, gunner targets/fires/ECM
+      seats: { pilot: null, gunner: null },
+      // Gunner map-selected target {x,y,z,kind,id?}
+      mapTarget: null,
+      // ECM
+      flares: cfg.flaresMax ?? 8,
+      flaresMax: cfg.flaresMax ?? 8,
+      ecmAuto: cfg.ecmDefaultAuto !== false,
+      flareCd: 0,
+      // Fuel reserved (disabled)
+      fuel: cfg.maxFuel ?? 100,
+      // Rearm progress while on pad
+      rearmT: 0,
+      onPad: null,
+      health: 100,
+      maxHealth: 100,
     });
+  }
+
+  /** Military rearm pads (Coronado NAS, MCRD). Visual + zone. */
+  _spawnRearmPads() {
+    const pads = VEHICLES.HELICOPTER?.rearmPads ?? [];
+    for (const p of pads) {
+      const y = this.terrain.heightAt(p.x, p.z) + 0.05;
+      const g = new THREE.Group();
+      g.position.set(p.x, y, p.z);
+      const pad = new THREE.Mesh(
+        new THREE.CylinderGeometry(p.r * 0.55, p.r * 0.55, 0.12, 28),
+        new THREE.MeshStandardMaterial({ color: 0x2a3228, roughness: 0.85, metalness: 0.15 })
+      );
+      pad.receiveShadow = true;
+      g.add(pad);
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(p.r * 0.48, 0.1, 6, 36),
+        new THREE.MeshStandardMaterial({
+          color: 0xc8a020, emissive: 0x604000, emissiveIntensity: 0.45, metalness: 0.4,
+        })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.1;
+      g.add(ring);
+      // "REARM" marker bars
+      const barMat = new THREE.MeshStandardMaterial({
+        color: 0xe8d080, emissive: 0x806000, emissiveIntensity: 0.35,
+      });
+      for (const [ox, oz, sx, sz] of [[0, 0, 3.2, 0.45], [0, 0, 0.45, 3.2]]) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(sx, 0.08, sz), barMat);
+        b.position.set(ox, 0.12, oz);
+        g.add(b);
+      }
+      this.group.add(g);
+      this._rearmPads.push({ ...p, y, mesh: g });
+    }
   }
 
   findNear(px, py, pz) {
@@ -344,15 +406,24 @@ export class VehicleSystem {
     v.crashing = false;
     v.wrecked = false;
     v.speed = 0;
-    // Keep a little residual fall if they grab a falling bird mid-crash
     if (v.type === 'helicopter') {
       v.vy = Math.min(0, v.vy * 0.35);
       v.vx *= 0.5;
       v.vz *= 0.5;
+      // Solo default pilot; empty gunner for friend/passenger
+      if (!v.seats) v.seats = { pilot: null, gunner: null };
+      this.localSeat = v.seats.pilot && !v.seats.gunner ? 'gunner' : 'pilot';
+      v.seats[this.localSeat] = 'local';
+      if (!v.flaresMax) {
+        v.flaresMax = VEHICLES.HELICOPTER?.flaresMax ?? 8;
+        v.flares = v.flaresMax;
+      }
+      if (v.ecmAuto == null) v.ecmAuto = VEHICLES.HELICOPTER?.ecmDefaultAuto !== false;
     } else {
       v.vy = 0;
       v.vx = 0;
       v.vz = 0;
+      this.localSeat = 'pilot';
     }
     const cfg = v.type === 'helicopter' ? VEHICLES.HELICOPTER : VEHICLES.MOTORCYCLE;
     controller.pos.set(v.x, v.y + (cfg.seatY ?? 1), v.z);
@@ -361,7 +432,84 @@ export class VehicleSystem {
     controller.sliding = false;
     controller.mantling = false;
     controller.onLadder = false;
-    this.bus?.emit?.('vehicle:mount', { type: v.type, takeover: true });
+    this.bus?.emit?.('vehicle:mount', { type: v.type, seat: this.localSeat, takeover: true });
+  }
+
+  /** Solo seat swap: pilot ↔ gunner (V). Multiplayer will assign seats externally. */
+  swapSeat() {
+    if (!this.active || this.active.type !== 'helicopter') return false;
+    const v = this.active;
+    const next = this.localSeat === 'pilot' ? 'gunner' : 'pilot';
+    if (v.seats) {
+      v.seats[this.localSeat] = null;
+      v.seats[next] = 'local';
+    }
+    this.localSeat = next;
+    this.bus?.emit?.('vehicle:seat', { seat: next });
+    return true;
+  }
+
+  get isGunner() {
+    return !!this.active && this.active.type === 'helicopter' && this.localSeat === 'gunner';
+  }
+
+  get isPilot() {
+    return !!this.active && (this.active.type !== 'helicopter' || this.localSeat === 'pilot');
+  }
+
+  /** Gunner map-select a world target (bot / heli / ground). */
+  setMapTarget(target) {
+    if (!this.active || this.active.type !== 'helicopter') return false;
+    this.active.mapTarget = target;
+    this.bus?.emit?.('vehicle:target', target);
+    return true;
+  }
+
+  clearMapTarget() {
+    if (this.active) this.active.mapTarget = null;
+  }
+
+  toggleEcmMode() {
+    if (!this.active || this.active.type !== 'helicopter') return false;
+    this.active.ecmAuto = !this.active.ecmAuto;
+    this.bus?.emit?.('vehicle:ecm', { auto: this.active.ecmAuto });
+    return this.active.ecmAuto;
+  }
+
+  /** Manual flare deploy (gunner). */
+  deployFlares() {
+    const v = this.active;
+    if (!v || v.type !== 'helicopter') return false;
+    if ((v.flareCd ?? 0) > 0) return false;
+    if ((v.flares ?? 0) <= 0) return false;
+    const cfg = VEHICLES.HELICOPTER;
+    v.flares -= 1;
+    v.flareCd = cfg.flareCooldown ?? 0.55;
+    this._flareClouds.push({
+      x: v.x, y: v.y, z: v.z,
+      life: cfg.flareDuration ?? 2.8,
+      r: cfg.flareRadius ?? 28,
+      mesh: this._makeFlareMesh(v.x, v.y, v.z),
+    });
+    this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(v.x, v.y, v.z), 2.2);
+    this.bus?.emit?.('vehicle:flare', { left: v.flares });
+    return true;
+  }
+
+  _makeFlareMesh(x, y, z) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 6, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffaa40, transparent: true, opacity: 0.9 })
+      );
+      m.position.set(Math.cos(a) * 1.2, 0.3 + (i % 3) * 0.2, Math.sin(a) * 1.2);
+      g.add(m);
+    }
+    this.group.add(g);
+    return g;
   }
 
   _dismount(controller) {
@@ -413,7 +561,12 @@ export class VehicleSystem {
     }
 
     controller.prevPos?.copy?.(controller.pos);
+    if (v.seats) {
+      if (v.seats.pilot === 'local') v.seats.pilot = null;
+      if (v.seats.gunner === 'local') v.seats.gunner = null;
+    }
     this.active = null;
+    this.localSeat = 'pilot';
     this.bus?.emit?.('vehicle:dismount', { type: v.type, crashing: !!v.crashing });
   }
 
@@ -522,14 +675,13 @@ export class VehicleSystem {
    */
   update(dt, controller, input, yaw) {
     try {
-      // Rockets always tick
       this._updateRockets(dt);
+      this._updateFlares(dt);
     } catch (err) {
-      console.warn('[vehicles] rocket update failed', err);
+      console.warn('[vehicles] rocket/flare update failed', err);
       this._rockets.length = 0;
     }
 
-    // Unmanned / abandoned helis keep falling even when player is on foot
     try {
       this._updateCrashes(dt);
     } catch (err) {
@@ -548,15 +700,25 @@ export class VehicleSystem {
       if (rotor) rotor.rotation.y += spin * dt;
       if (tail) tail.rotation.x += spin * 1.6 * dt;
       if (v.rocketCd > 0) v.rocketCd -= dt;
+      if (v.flareCd > 0) v.flareCd -= dt;
     }
 
     if (!this.active || !controller) return false;
     const v = this.active;
     try {
-      if (v.type === 'motorcycle') this._driveMoto(dt, v, controller, input, yaw);
-      else this._driveHeli(dt, v, controller, input, yaw);
+      if (v.type === 'motorcycle') {
+        this._driveMoto(dt, v, controller, input, yaw);
+      } else {
+        // Gunner: ride along, no flight controls. Pilot: fly.
+        if (this.localSeat === 'gunner') {
+          this._rideAlongGunner(dt, v, controller, input);
+        } else {
+          this._driveHeli(dt, v, controller, input, yaw);
+        }
+        this._updateRearm(dt, v);
+        this._updateEcmAuto(dt, v, input);
+      }
     } catch (err) {
-      // Never let a vehicle glitch freeze the whole game loop
       console.warn('[vehicles] drive failed — recovering', err);
       this._sanitizeVehicle(v);
       if (v.root) v.root.position.set(v.x, v.y, v.z);
@@ -566,6 +728,117 @@ export class VehicleSystem {
       controller.prevPos?.copy?.(controller.pos);
     }
     return true;
+  }
+
+  /** Passenger holds seat; pilot (or physics) moves the airframe. */
+  _rideAlongGunner(dt, v, controller, input) {
+    const cfg = VEHICLES.HELICOPTER;
+    // Solo gunner (no remote pilot): autopilot hover so you can map-target safely.
+    // Multiplayer: remote pilot drives; gunner just rides along.
+    const remotePilot = v.seats?.pilot && v.seats.pilot !== 'local';
+    if (!remotePilot) {
+      v.vx *= Math.exp(-2.2 * dt);
+      v.vz *= Math.exp(-2.2 * dt);
+      v.vy *= Math.exp(-2.5 * dt);
+      const support = this._supportY(v.x, v.y + 2, v.z);
+      const minY = support + (cfg.minAGL ?? 2.5);
+      if (v.y < minY) v.y = minY;
+      if (v.root) {
+        v.root.position.set(v.x, v.y, v.z);
+        v.root.rotation.y = v.yaw;
+      }
+    }
+    controller.pos.set(v.x, v.y + (cfg.seatY ?? 1.1), v.z);
+    controller.vel.set(v.vx, v.vy, v.vz);
+    controller.grounded = false;
+    controller.speed = Math.hypot(v.vx, v.vz);
+    controller.prevPos?.copy?.(controller.pos);
+
+    // Gunner hotkeys
+    if (input?.actionPressed?.('flares')) this.deployFlares();
+    if (input?.actionPressed?.('ecmMode')) this.toggleEcmMode();
+  }
+
+  _updateEcmAuto(dt, v, input) {
+    if (this.localSeat !== 'gunner' && this.localSeat !== 'pilot') return;
+    // Auto ECM only when gunner seat is local (or solo pilot holds both for testing)
+    if (this.localSeat === 'pilot' && v.seats?.gunner && v.seats.gunner !== 'local') return;
+    if (!v.ecmAuto) return;
+    if ((v.flareCd ?? 0) > 0 || (v.flares ?? 0) <= 0) return;
+    // Threat: rocket seeking this heli
+    const threat = this._incomingThreat(v);
+    if (threat) this.deployFlares();
+  }
+
+  _incomingThreat(v) {
+    for (const r of this._rockets) {
+      if (r.lockHeli === v || r.lockTarget === v) return true;
+      if (r.lock?.kind === 'heli' && r.lock.id === v.id) return true;
+      // Proximity seek toward us
+      if (r.lock && Math.hypot(r.lock.x - v.x, r.lock.y - (v.y + 1), r.lock.z - v.z) < 40) {
+        if (r.age > 0.2 && Math.hypot(r.x - v.x, r.y - v.y, r.z - v.z) < 55) return true;
+      }
+    }
+    return false;
+  }
+
+  _updateFlares(dt) {
+    for (let i = this._flareClouds.length - 1; i >= 0; i--) {
+      const c = this._flareClouds[i];
+      c.life -= dt;
+      if (c.mesh) {
+        c.mesh.position.y += dt * 1.5;
+        c.mesh.traverse((o) => {
+          if (o.material?.opacity != null) o.material.opacity = Math.max(0, c.life / 2.8);
+        });
+      }
+      if (c.life <= 0) {
+        if (c.mesh) this.group.remove(c.mesh);
+        this._flareClouds.splice(i, 1);
+      }
+    }
+  }
+
+  _updateRearm(dt, v) {
+    const cfg = VEHICLES.HELICOPTER;
+    const pads = this._rearmPads;
+    if (!pads?.length) return;
+    let on = null;
+    for (const p of pads) {
+      const d = Math.hypot(v.x - p.x, v.z - p.z);
+      const support = this._supportY(v.x, v.y + 2, v.z);
+      const low = v.y - support < (cfg.minAGL ?? 2.5) + 1.5;
+      if (d < p.r && low && Math.abs(v.vy) < 4) {
+        on = p;
+        break;
+      }
+    }
+    v.onPad = on;
+    if (!on) {
+      v.rearmT = 0;
+      return;
+    }
+    // Stationary-ish on pad
+    if (Math.hypot(v.vx, v.vz) > 3) {
+      v.rearmT = 0;
+      return;
+    }
+    v.rearmT = (v.rearmT ?? 0) + dt;
+    const need = cfg.rearmHoverTime ?? 2.2;
+    if (v.rearmT >= need) {
+      const nR = cfg.rocketsPerSide ?? 8;
+      v.rocketsLeft = nR;
+      v.rocketsRight = nR;
+      v.flares = v.flaresMax ?? cfg.flaresMax ?? 8;
+      // Restock visual tubes
+      const left = v.root?.userData?.leftTubes ?? [];
+      const right = v.root?.userData?.rightTubes ?? [];
+      for (const t of left) { t.visible = true; t.userData.loaded = true; }
+      for (const t of right) { t.visible = true; t.userData.loaded = true; }
+      v.rearmT = 0;
+      this.bus?.emit?.('vehicle:rearm', { pad: on.name });
+      this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(v.x, v.y + 1, v.z), 1.4);
+    }
   }
 
   /**
@@ -679,43 +952,73 @@ export class VehicleSystem {
   }
 
   /**
-   * Fire one rocket from each wing (if ammo remains). Call on LMB edge.
-   * Aim with look direction — missiles guide toward reticle lock
-   * (bots, buildings, or ground aim point).
-   * @param {Array} targets live bots / combat targets
-   * @param {{ yaw:number, pitch:number }} [aim] camera look
-   * @returns {boolean} true if rockets fired
+   * Gunner fires dual rockets. Missiles leave tubes straight, then turn onto
+   * the map-selected target (bots / helis / ground / buildings).
+   * Range-gated: closer = more accurate seek.
+   * @param {Array} targets live bots
+   * @param {{ yaw?:number, pitch?:number }} [aim] unused for map-target mode
+   * @returns {boolean}
    */
   tryFireRockets(targets = [], aim = null) {
     const v = this.active;
     if (!v || v.type !== 'helicopter') return false;
+    // Only gunner fires (solo: swap to gunner with V)
+    if (this.localSeat !== 'gunner') return false;
     if (v.rocketCd > 0) return false;
     const left = v.rocketsLeft ?? 0;
     const right = v.rocketsRight ?? 0;
     if (left <= 0 && right <= 0) return false;
 
     const cfg = VEHICLES.HELICOPTER;
+    const minR = cfg.rocketMinRange ?? 18;
+    const maxR = cfg.rocketMaxRange ?? 220;
+    const optR = cfg.rocketOptRange ?? 90;
+
+    // Resolve target: map pick → reticle soft lock → fail
+    let lock = v.mapTarget ? { ...v.mapTarget } : null;
+    if (!lock && aim) {
+      const look = this._lookDir(aim.yaw ?? v.yaw, aim.pitch ?? -0.1);
+      const eye = { x: v.x, y: v.y + 1.5, z: v.z };
+      lock = this._acquireRocketLock(eye, look, targets, cfg, v);
+    }
+    // Refresh live bot/heli positions
+    if (lock?.target && !lock.target.dead) {
+      lock.x = lock.target.x;
+      lock.y = (lock.target.y ?? 0) + (lock.kind === 'heli' ? 1.2 : 1.1);
+      lock.z = lock.target.z;
+    }
+    if (!lock || !Number.isFinite(lock.x + lock.y + lock.z)) return false;
+
+    const dist = Math.hypot(lock.x - v.x, lock.y - (v.y + 1), lock.z - v.z);
+    if (dist < minR || dist > maxR) {
+      this.bus?.emit?.('vehicle:rocket-denied', { reason: dist > maxR ? 'range' : 'tooclose', dist });
+      return false;
+    }
+
+    // Accuracy 0..1 — best near optR, worse toward maxR
+    let accuracy = 1;
+    if (dist > optR) {
+      accuracy = 1 - (dist - optR) / Math.max(1, maxR - optR);
+      accuracy = THREE.MathUtils.clamp(accuracy, 0.15, 1);
+    }
+    // Inject aim error into lock point (metres of miss at range)
+    const missM = (1 - accuracy) * 18;
+    const jitter = () => (Math.random() - 0.5) * 2 * missM;
+    const lockPoint = {
+      x: lock.x + jitter(),
+      y: lock.y + jitter() * 0.35,
+      z: lock.z + jitter(),
+      kind: lock.kind,
+      id: lock.id,
+      target: lock.target,
+    };
+
     const bodyF = forwardXZ(v.yaw);
     const bodyR = rightXZ(v.yaw);
-    const speed = cfg.rocketSpeed ?? 88;
+    const speed = cfg.rocketSpeed ?? 92;
     const nPer = cfg.rocketsPerSide ?? 8;
-
-    const yaw = aim?.yaw ?? v.yaw;
-    const pitch = aim?.pitch ?? -0.12;
-    const look = this._lookDir(yaw, pitch);
-    const eye = {
-      x: v.x,
-      y: v.y + (cfg.seatY ?? 1.1) + 0.4,
-      z: v.z,
-    };
-    const lock = this._acquireRocketLock(eye, look, targets, cfg);
-
-    // Fire slightly toward look, not just nose-forward
-    const fireDir = new THREE.Vector3(look.x, look.y, look.z).normalize();
-    // Blend a little body forward so pods don't clip cabin
-    fireDir.x = fireDir.x * 0.85 + bodyF.x * 0.15;
-    fireDir.z = fireDir.z * 0.85 + bodyF.z * 0.15;
-    fireDir.normalize();
+    // Leave tubes straight along body forward (+ slight down)
+    const fireDir = new THREE.Vector3(bodyF.x, -0.04, bodyF.z).normalize();
 
     const fireSide = (side, remaining, tubes) => {
       if (remaining <= 0) return;
@@ -740,18 +1043,12 @@ export class VehicleSystem {
       );
       mesh.position.set(ox, oy, oz);
       try {
-        mesh.quaternion.setFromUnitVectors(
-          new THREE.Vector3(0, 1, 0),
-          fireDir.clone()
-        );
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), fireDir.clone());
       } catch { /* ok */ }
       this.group.add(mesh);
 
-      // Slight outward spread per wing so dual fire isn't identical
-      const spread = side * 0.04;
       const dir = fireDir.clone();
-      dir.x += bodyR.x * spread;
-      dir.z += bodyR.z * spread;
+      dir.x += bodyR.x * side * 0.03;
       dir.normalize();
 
       this._rockets.push({
@@ -761,17 +1058,20 @@ export class VehicleSystem {
         vy: dir.y * speed,
         vz: dir.z * speed,
         speed,
-        life: 5.5,
+        life: 6,
         age: 0,
-        damage: cfg.rocketDamage ?? 90,
+        phase: 'boost', // straight from tubes, then guide
+        boostT: cfg.rocketBoostTime ?? 0.42,
+        damage: cfg.rocketDamage ?? 95,
         splash: cfg.rocketSplash ?? 5.5,
         targets,
-        // Guidance
         guided: true,
-        guideDelay: cfg.rocketGuideDelay ?? 0.08,
-        turnRate: cfg.rocketTurnRate ?? 3.4,
-        lock: lock ? { ...lock } : null,
-        lockTarget: lock?.target ?? null, // live bot ref for tracking
+        turnRate: (cfg.rocketTurnRate ?? 3.8) * (0.55 + 0.45 * accuracy),
+        lock: { ...lockPoint },
+        lockTarget: lockPoint.target ?? null,
+        lockHeli: lock.kind === 'heli' ? lock.target : null,
+        accuracy,
+        owner: v,
       });
       this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(ox, oy, oz), 1.6);
     };
@@ -784,11 +1084,13 @@ export class VehicleSystem {
       fireSide(1, right, v.root.userData.rightTubes);
       v.rocketsRight = right - 1;
     }
-    v.rocketCd = cfg.rocketCooldown ?? 0.4;
+    v.rocketCd = cfg.rocketCooldown ?? 0.45;
     this.bus?.emit?.('vehicle:rocket', {
       left: v.rocketsLeft,
       right: v.rocketsRight,
-      lock: lock?.kind ?? null,
+      lock: lock.kind,
+      dist,
+      accuracy,
     });
     return true;
   }
@@ -804,13 +1106,39 @@ export class VehicleSystem {
   }
 
   /**
-   * Soft lock under reticle: bots first, then building aim point, else ground.
-   * @returns {{ x:number, y:number, z:number, kind:string, target?:object }|null}
+   * Soft lock: enemy helis, bots, then building/ground under reticle.
+   * @param {object} selfHeli skip self for A2A
    */
-  _acquireRocketLock(eye, look, targets, cfg) {
-    const range = cfg.rocketLockRange ?? 260;
-    const cone = ((cfg.rocketLockConeDeg ?? 14) * Math.PI) / 180;
+  _acquireRocketLock(eye, look, targets, cfg, selfHeli = null) {
+    const range = cfg.rocketMaxRange ?? 220;
+    const cone = (14 * Math.PI) / 180;
     const cosCone = Math.cos(cone);
+
+    // Air-to-air: other helicopters
+    let bestHeli = null;
+    let bestHeliScore = -Infinity;
+    for (const h of this.vehicles) {
+      if (h.type !== 'helicopter' || h === selfHeli || h.wrecked) continue;
+      const tx = h.x - eye.x;
+      const ty = (h.y + 1.2) - eye.y;
+      const tz = h.z - eye.z;
+      const dist = Math.hypot(tx, ty, tz);
+      if (dist < 12 || dist > range) continue;
+      const inv = 1 / dist;
+      const dot = look.x * tx * inv + look.y * ty * inv + look.z * tz * inv;
+      if (dot < cosCone) continue;
+      const score = dot * 2.2 - dist / range;
+      if (score > bestHeliScore) {
+        bestHeliScore = score;
+        bestHeli = h;
+      }
+    }
+    if (bestHeli) {
+      return {
+        x: bestHeli.x, y: bestHeli.y + 1.2, z: bestHeli.z,
+        kind: 'heli', target: bestHeli, id: bestHeli.id,
+      };
+    }
 
     let bestBot = null;
     let bestBotScore = -Infinity;
@@ -825,7 +1153,6 @@ export class VehicleSystem {
         const inv = 1 / dist;
         const dot = look.x * tx * inv + look.y * ty * inv + look.z * tz * inv;
         if (dot < cosCone) continue;
-        // Prefer near-center + closer targets
         const score = dot * 2 - dist / range;
         if (score > bestBotScore) {
           bestBotScore = score;
@@ -835,15 +1162,11 @@ export class VehicleSystem {
     }
     if (bestBot) {
       return {
-        x: bestBot.x,
-        y: bestBot.y + 1.1,
-        z: bestBot.z,
-        kind: 'bot',
-        target: bestBot,
+        x: bestBot.x, y: bestBot.y + 1.1, z: bestBot.z,
+        kind: 'bot', target: bestBot, id: bestBot.id,
       };
     }
 
-    // Ray march toward look for building / ground aim point
     const step = 4;
     const maxSteps = Math.ceil(range / step);
     for (let i = 1; i <= maxSteps; i++) {
@@ -856,23 +1179,18 @@ export class VehicleSystem {
         return { x: px, y: gY + 0.3, z: pz, kind: 'ground' };
       }
       if (this._pointInBuilding(px, py, pz)) {
-        // Prefer building center-ish at impact height for a solid hit
         const b = this._buildingAt(px, pz);
         if (b) {
-          const cx = b.x + b.w * 0.5;
-          const cz = b.z + b.d * 0.5;
-          // Keep the hit height, pull slightly toward facade under aim
           return {
-            x: lerp(px, cx, 0.15),
+            x: lerp(px, b.x + b.w * 0.5, 0.15),
             y: py,
-            z: lerp(pz, cz, 0.15),
+            z: lerp(pz, b.z + b.d * 0.5, 0.15),
             kind: 'building',
           };
         }
         return { x: px, y: py, z: pz, kind: 'building' };
       }
     }
-    // Far point along look
     return {
       x: eye.x + look.x * range,
       y: eye.y + look.y * range,
@@ -894,23 +1212,41 @@ export class VehicleSystem {
       r.life -= dt;
       r.age = (r.age ?? 0) + dt;
 
-      // --- Guidance: steer velocity toward lock point ---
-      if (r.guided && r.age >= (r.guideDelay ?? 0.08)) {
+      // Straight boost from tubes, then guide onto target
+      if (r.phase === 'boost') {
+        r.boostT = (r.boostT ?? 0.42) - dt;
+        if (r.boostT <= 0) r.phase = 'guide';
+        // slight gravity during boost
+        r.vy -= 2 * dt;
+      } else if (r.guided && r.phase === 'guide') {
+        // ECM spoof: if flare cloud near missile, retarget toward flare
+        let spoofed = false;
+        for (const c of this._flareClouds) {
+          if (Math.hypot(r.x - c.x, r.y - c.y, r.z - c.z) < (c.r ?? 28)) {
+            r.lock = { x: c.x, y: c.y + 2, z: c.z, kind: 'flare' };
+            r.lockTarget = null;
+            r.lockHeli = null;
+            spoofed = true;
+            break;
+          }
+        }
+
         let tx = r.lock?.x;
         let ty = r.lock?.y;
         let tz = r.lock?.z;
-        // Track live bot if still alive
         const lt = r.lockTarget;
-        if (lt && !lt.dead) {
+        if (!spoofed && lt && !lt.dead) {
           tx = lt.x;
-          ty = lt.y + 1.1;
+          ty = (lt.y ?? 0) + (r.lock?.kind === 'heli' ? 1.2 : 1.1);
           tz = lt.z;
-          if (r.lock) {
-            r.lock.x = tx;
-            r.lock.y = ty;
-            r.lock.z = tz;
-          }
+          if (r.lock) { r.lock.x = tx; r.lock.y = ty; r.lock.z = tz; }
         }
+        const lh = r.lockHeli;
+        if (!spoofed && lh && !lh.wrecked) {
+          tx = lh.x; ty = lh.y + 1.2; tz = lh.z;
+          if (r.lock) { r.lock.x = tx; r.lock.y = ty; r.lock.z = tz; }
+        }
+
         if (Number.isFinite(tx + ty + tz)) {
           const dx = tx - r.x;
           const dy = ty - r.y;
@@ -919,34 +1255,26 @@ export class VehicleSystem {
           const wantX = dx / dist;
           const wantY = dy / dist;
           const wantZ = dz / dist;
-          const sp = Math.hypot(r.vx, r.vy, r.vz) || (r.speed ?? 88);
+          const sp = Math.hypot(r.vx, r.vy, r.vz) || (r.speed ?? 92);
           const curX = r.vx / sp;
           const curY = r.vy / sp;
           const curZ = r.vz / sp;
-          // Max turn this frame
-          const maxTurn = (r.turnRate ?? 3.4) * dt;
-          const dot = THREE.MathUtils.clamp(
-            curX * wantX + curY * wantY + curZ * wantZ,
-            -1, 1
-          );
+          const maxTurn = (r.turnRate ?? 3.8) * dt;
+          const dot = THREE.MathUtils.clamp(curX * wantX + curY * wantY + curZ * wantZ, -1, 1);
           const ang = Math.acos(dot);
           if (ang > 1e-4) {
             const t = Math.min(1, maxTurn / ang);
-            // Slerp-ish blend on direction
             let nx = curX + (wantX - curX) * t;
             let ny = curY + (wantY - curY) * t;
             let nz = curZ + (wantZ - curZ) * t;
             const nl = Math.hypot(nx, ny, nz) || 1;
             nx /= nl; ny /= nl; nz /= nl;
-            // Hold speed (slight boost toward target)
-            const hold = Math.min((r.speed ?? 88) * 1.05, sp + 8 * dt);
+            const hold = Math.min((r.speed ?? 92) * 1.06, sp + 10 * dt);
             r.vx = nx * hold;
             r.vy = ny * hold;
             r.vz = nz * hold;
           }
         }
-      } else {
-        r.vy -= 4 * dt; // mild drop before guide kicks in
       }
 
       const steps = Math.max(1, Math.ceil(Math.hypot(r.vx, r.vy, r.vz) * dt / 1.5));
@@ -987,6 +1315,24 @@ export class VehicleSystem {
           hit = true;
           break;
         }
+        // Air-to-air proximity on helicopters
+        for (const h of this.vehicles) {
+          if (h.type !== 'helicopter' || h === r.owner || h.wrecked) continue;
+          const hd = Math.hypot(h.x - nx, (h.y + 1) - ny, h.z - nz);
+          if (hd < 2.8) {
+            this._explodeRocket(r, nx, ny, nz);
+            // Damage airframe
+            h.health = Math.max(0, (h.health ?? 100) - (r.damage ?? 95) * 0.65);
+            if (h.health <= 0 && !h.crashing) {
+              h.crashing = true;
+              h.crashT = 0;
+              h.vy = Math.min(h.vy, -4);
+            }
+            hit = true;
+            break;
+          }
+        }
+        if (hit) break;
         if (r.targets?.length) {
           for (const t of r.targets) {
             if (t.dead) continue;
@@ -1290,8 +1636,16 @@ export class VehicleSystem {
   prompt(px, py, pz) {
     if (this.active) {
       if (this.active.type === 'helicopter') {
-        const volleys = Math.min(this.active.rocketsLeft ?? 0, this.active.rocketsRight ?? 0);
-        return `E · Bail · Guided rockets ${volleys}/8 (LMB aim)`;
+        const v = this.active;
+        const volleys = Math.min(v.rocketsLeft ?? 0, v.rocketsRight ?? 0);
+        const seat = this.localSeat === 'gunner' ? 'GUNNER' : 'PILOT';
+        const ecm = v.ecmAuto ? 'ECM AUTO' : 'ECM MAN';
+        const tgt = v.mapTarget ? ` · TGT ${v.mapTarget.kind}` : '';
+        const rearm = v.onPad ? ` · REARM ${(v.rearmT / (VEHICLES.HELICOPTER.rearmHoverTime || 2.2) * 100) | 0}%` : '';
+        if (this.localSeat === 'gunner') {
+          return `${seat} · M target · LMB fire ${volleys}/8 · G flares (${v.flares}) · X ${ecm} · V pilot · E bail${tgt}${rearm}`;
+        }
+        return `${seat} · fly WASD Space/C · V gunner · E bail · rkt ${volleys}/8${rearm}`;
       }
       return 'E · Exit motorcycle';
     }
@@ -1305,20 +1659,24 @@ export class VehicleSystem {
     return 'E · Ride motorcycle';
   }
 
-  /** Soft lock info for HUD while piloting (optional). */
-  getRocketLockHint(targets, aim) {
-    const v = this.active;
-    if (!v || v.type !== 'helicopter' || !aim) return null;
-    const cfg = VEHICLES.HELICOPTER;
-    const eye = {
-      x: v.x,
-      y: v.y + (cfg.seatY ?? 1.1) + 0.4,
-      z: v.z,
-    };
-    const look = this._lookDir(aim.yaw, aim.pitch);
-    const lock = this._acquireRocketLock(eye, look, targets, cfg);
-    if (!lock) return null;
-    return lock.kind;
+  /** List map-targetable entities for gunner (bots + helis). */
+  getMapTargets(bots = []) {
+    const list = [];
+    for (const t of bots) {
+      if (t.dead) continue;
+      list.push({
+        kind: 'bot', id: t.id, x: t.x, y: t.y + 1.1, z: t.z,
+        label: `Squad ${t.teamId ?? '?'}`, target: t,
+      });
+    }
+    for (const h of this.vehicles) {
+      if (h.type !== 'helicopter' || h === this.active || h.wrecked) continue;
+      list.push({
+        kind: 'heli', id: h.id ?? list.length, x: h.x, y: h.y + 1.2, z: h.z,
+        label: 'Helicopter', target: h,
+      });
+    }
+    return list;
   }
 
   get riding() {

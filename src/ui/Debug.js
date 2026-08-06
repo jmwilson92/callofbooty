@@ -104,18 +104,17 @@ export function createHud() {
       <tr><td>Shift+E</td><td>elevator / rappel express to TOP</td></tr>
       <tr><td>Rappel (gold)</td><td>W/S floor-by-floor · Shift+E or Shift+W express roof</td></tr>
       <tr><td>Zipline (blue)</td><td>E · ride between rooftops</td></tr>
-      <tr><td>Moto / Heli</td><td>WASD · Space up / C down · LMB guided rockets · E bail (heli crashes unless remounted)</td></tr>
-      <tr><td>RMB (sniper)</td><td>scope zoom + reticle</td></tr>
-      <tr><td>LMB</td><td>fire</td></tr>
-      <tr><td>RMB</td><td>ADS</td></tr>
-      <tr><td>R</td><td>reload</td></tr>
-      <tr><td>1 / 2 / Q</td><td>weapon slots / quick-swap</td></tr>
-      <tr><td>P</td><td>test range (static targets)</td></tr>
-      <tr><td>—</td><td>practice bots wander downtown (shootable)</td></tr>
-      <tr><td>Sprint + C</td><td>slide (jump to cancel and keep your speed)</td></tr>
-      <tr><td>M</td><td>tactical map (your location)</td></tr>
-      <tr><td>F3</td><td>performance overlay</td></tr>
-      <tr><td>Esc</td><td>release pointer / close map</td></tr>
+      <tr><td>Heli pilot</td><td>WASD · Space up / C down · E bail (heli crashes)</td></tr>
+      <tr><td>Heli gunner</td><td>V swap seat · M click target · LMB fire · G flares · X ECM auto/man</td></tr>
+      <tr><td>Missiles</td><td>straight from tubes → turn onto map lock · closer = more accurate · A2A helis</td></tr>
+      <tr><td>Rearm</td><td>land on Coronado NAS or MCRD gold pad (missiles + flares; fuel unlimited)</td></tr>
+      <tr><td>Friends</td><td>top-left Host/Join room · npm run party on host machine</td></tr>
+      <tr><td>LMB / RMB</td><td>fire / ADS (on foot)</td></tr>
+      <tr><td>R · 1/2/Q</td><td>reload · weapon slots / swap</td></tr>
+      <tr><td>P</td><td>test range</td></tr>
+      <tr><td>Bots</td><td>squads of 4–5, smarter flanks (fair TTK)</td></tr>
+      <tr><td>Sprint + C</td><td>slide</td></tr>
+      <tr><td>M · F3 · Esc</td><td>map · perf · unlock</td></tr>
     </table>
     <p class="err"></p>`;
   document.body.appendChild(hint);

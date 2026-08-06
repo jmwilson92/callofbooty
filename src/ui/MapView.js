@@ -32,10 +32,30 @@ export class MapView {
     this.panZ = 0;
     this._drag = null;
 
+    // Gunner targeting: click map to assign missile target
+    this.gunnerMode = false;
+    this._mapTargets = [];
+    this._selectedTarget = null;
+    this.onTargetSelect = null; // (target) => void
+
     this._buildDom();
     this._layoutFullMap();
     this._bindMapInput();
     window.addEventListener('resize', () => this._layoutFullMap());
+  }
+
+  setGunnerMode(on, targets = []) {
+    this.gunnerMode = !!on;
+    this._mapTargets = targets || [];
+    if (this.fullWrap) {
+      this.fullWrap.classList.toggle('gunner-mode', this.gunnerMode);
+      const hint = this.fullWrap.querySelector('.fullmap-hint');
+      if (hint) {
+        hint.textContent = this.gunnerMode
+          ? 'GUNNER · Click bot/heli/ground to lock missile target · LMB fires'
+          : 'Scroll / +− zoom · Drag pan · M / Esc close';
+      }
+    }
   }
 
   _buildDom() {
@@ -122,11 +142,17 @@ export class MapView {
       if (!this.open) return;
       e.preventDefault();
       canvas.setPointerCapture(e.pointerId);
-      this._drag = { x: e.clientX, y: e.clientY, panX: this.panX, panZ: this.panZ };
+      this._drag = {
+        x: e.clientX, y: e.clientY,
+        panX: this.panX, panZ: this.panZ,
+        moved: false,
+      };
       canvas.style.cursor = 'grabbing';
     });
     canvas.addEventListener('pointermove', (e) => {
       if (!this._drag || !this.open) return;
+      const dist = Math.hypot(e.clientX - this._drag.x, e.clientY - this._drag.y);
+      if (dist > 4) this._drag.moved = true;
       const rect = canvas.getBoundingClientRect();
       const scale = this._viewWorldSize() / Math.max(1, rect.width);
       const dx = (e.clientX - this._drag.x) * scale;
@@ -135,13 +161,26 @@ export class MapView {
       this.panZ = this._drag.panZ - dy;
       this._clampPan();
     });
-    const endDrag = () => {
+    const endDrag = (e) => {
+      // Gunner click (not a drag) → pick missile target
+      if (this.open && this.gunnerMode && this._drag && !this._drag.moved && e) {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const world = this._canvasToWorld(mx, my);
+        this._pickGunnerTarget(world.x, world.z);
+      }
       this._drag = null;
-      canvas.style.cursor = 'grab';
+      canvas.style.cursor = this.gunnerMode ? 'crosshair' : 'grab';
     };
     canvas.addEventListener('pointerup', endDrag);
-    canvas.addEventListener('pointercancel', endDrag);
-    canvas.addEventListener('pointerleave', endDrag);
+    canvas.addEventListener('pointercancel', () => { this._drag = null; canvas.style.cursor = 'grab'; });
+    canvas.addEventListener('pointerleave', () => {
+      if (this._drag?.moved) {
+        this._drag = null;
+        canvas.style.cursor = this.gunnerMode ? 'crosshair' : 'grab';
+      }
+    });
 
     // +/- buttons
     wrap.querySelector('[data-zoom-in]')?.addEventListener('click', (e) => {
@@ -342,12 +381,46 @@ export class MapView {
    * @param {{ x:number, y:number, z:number }} pos
    * @param {number} yaw
    * @param {Array<{type:string,x:number,z:number,yaw?:number}>|null} vehicles
+   * @param {Array|null} gunnerTargets optional bots/helis for map lock icons
    */
-  update(pos, yaw, vehicles = null) {
+  update(pos, yaw, vehicles = null, gunnerTargets = null) {
     this._lastPos = pos;
     this._vehicles = vehicles;
+    if (gunnerTargets) this._mapTargets = gunnerTargets;
     this._drawMinimap(pos, yaw);
     if (this.open) this._drawFullMap(pos, yaw);
+  }
+
+  _pickGunnerTarget(wx, wz) {
+    // Prefer nearest bot/heli within click radius (world metres)
+    const pickR = 28 / Math.max(1, Math.sqrt(this.zoom));
+    let best = null;
+    let bestD = pickR;
+    for (const t of this._mapTargets) {
+      const d = Math.hypot(t.x - wx, t.z - wz);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    let target;
+    if (best) {
+      target = {
+        kind: best.kind,
+        id: best.id,
+        x: best.x,
+        y: best.y ?? 2,
+        z: best.z,
+        label: best.label,
+        target: best.target,
+      };
+    } else {
+      // Ground / building aim point
+      const y = this.terrain.heightAt(wx, wz) + 0.4;
+      target = { kind: 'ground', x: wx, y, z: wz, label: 'Map pin' };
+    }
+    this._selectedTarget = target;
+    if (typeof this.onTargetSelect === 'function') this.onTargetSelect(target);
   }
 
   _drawMinimap(pos, yaw) {
@@ -408,6 +481,50 @@ export class MapView {
     this._drawVehicles(ctx, toPx, Math.max(5, 6 * dpr * Math.min(1.8, Math.sqrt(this.zoom))), true);
     this._drawPois(ctx, toPx, Math.max(3, 4.5 * dpr * Math.min(2, Math.sqrt(this.zoom))), true);
 
+    // Gunner target icons
+    if (this.gunnerMode && this._mapTargets?.length) {
+      for (const t of this._mapTargets) {
+        const { px, py } = toPx(t.x, t.z);
+        if (px < -10 || py < -10 || px > side + 10 || py > side + 10) continue;
+        ctx.fillStyle = t.kind === 'heli' ? 'rgba(255,80,80,0.95)' : 'rgba(255,180,40,0.9)';
+        ctx.beginPath();
+        ctx.arc(px, py, 4 * dpr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.lineWidth = 1 * dpr;
+        ctx.stroke();
+      }
+    }
+    if (this._selectedTarget) {
+      const { px, py } = toPx(this._selectedTarget.x, this._selectedTarget.z);
+      ctx.strokeStyle = '#ff4040';
+      ctx.lineWidth = 2 * dpr;
+      ctx.beginPath();
+      ctx.arc(px, py, 10 * dpr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px - 14 * dpr, py);
+      ctx.lineTo(px + 14 * dpr, py);
+      ctx.moveTo(px, py - 14 * dpr);
+      ctx.lineTo(px, py + 14 * dpr);
+      ctx.stroke();
+    }
+
+    // Rearm pads
+    for (const pad of (this._rearmPads || [])) {
+      const { px, py } = toPx(pad.x, pad.z);
+      ctx.strokeStyle = 'rgba(200,180,40,0.85)';
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(6, (pad.r / this._viewWorldSize()) * side * 0.5), 0, Math.PI * 2);
+      ctx.stroke();
+      if (this.zoom >= 1.5) {
+        ctx.fillStyle = 'rgba(230,200,80,0.9)';
+        ctx.font = `${Math.round(10 * dpr)}px sans-serif`;
+        ctx.fillText(pad.name || 'REARM', px + 6 * dpr, py - 4 * dpr);
+      }
+    }
+
     const p = toPx(pos.x, pos.z);
     this._drawPlayer(ctx, p.px, p.py, yaw, 8 * dpr * Math.min(1.6, Math.sqrt(this.zoom)));
 
@@ -417,7 +534,15 @@ export class MapView {
 
     this.fullCoords.textContent =
       `${pos.x.toFixed(0)}, ${pos.z.toFixed(0)}  ·  ${this._headingLabel(yaw)}  ·  ×${this.zoom.toFixed(1)}`;
-    this.fullNearest.textContent = this.nearestPoi(pos.x, pos.z);
+    let nearest = this.nearestPoi(pos.x, pos.z);
+    if (this.gunnerMode && this._selectedTarget) {
+      nearest = `LOCK: ${this._selectedTarget.kind} · ${this._selectedTarget.label || ''}`;
+    }
+    this.fullNearest.textContent = nearest;
+  }
+
+  setRearmPads(pads) {
+    this._rearmPads = pads || [];
   }
 
   /**

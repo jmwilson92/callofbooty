@@ -27,6 +27,8 @@ import { BotSystem } from './combat/Bots.js';
 import { loadWeaponLibrary } from './combat/WeaponAssets.js';
 import { LootSystem } from './loot/LootSystem.js';
 import { CombatHud } from './ui/CombatHud.js';
+import { PartyClient } from './net/Party.js';
+import { VEHICLES } from './config.js';
 
 // Bootstrap and system wiring. Systems receive their dependencies here and
 // otherwise talk through the event bus.
@@ -145,6 +147,16 @@ async function start() {
   // Roof rappel lines (after buildings exist)
   const rappels = new RappelSystem(scene, terrain);
   const rappelCount = rappels.spawn();
+  // Friends multiplayer lobby UI
+  const party = new PartyClient(bus);
+  party.mountUi();
+  // Map: rearm pads + gunner targeting
+  mapView.setRearmPads(VEHICLES.HELICOPTER?.rearmPads ?? []);
+  mapView.onTargetSelect = (t) => {
+    vehicles.setMapTarget(t);
+    hud.setError?.(`Missile lock: ${t.kind}${t.label ? ` · ${t.label}` : ''}`);
+    setTimeout(() => hud.setError?.(''), 1800);
+  };
   // Imagine → Blender viewmodels (async; falls back to procedural until loaded)
   const weaponLib = await loadWeaponLibrary();
   weapons.setWeaponModels(weaponLib.byClass);
@@ -229,6 +241,11 @@ async function start() {
         if (input.actionPressed('quickSwap')) weapons.quickSwap();
         if (input.actionPressed('reload')) weapons.startReload();
 
+        // Seat swap (solo pilot ↔ gunner)
+        if (vehicles.riding && input.actionPressed('seatSwap')) {
+          vehicles.swapSeat();
+        }
+
         // E = vehicle → rappel/zipline → loot → elevator → door
         if (input.actionPressed('interact')) {
           const usedVeh = vehicles.tryUse(controller);
@@ -269,6 +286,12 @@ async function start() {
         }
         elevators.update(dt, vehicles.riding || rappels.riding ? null : controller);
 
+        // Gunner map mode
+        mapView.setGunnerMode(
+          vehicles.isGunner,
+          vehicles.isGunner ? vehicles.getMapTargets(bots.getLiveTargets()) : []
+        );
+
         // Combat: bots move/engage first so bullets test current hitboxes
         const moving = controller.speed > 0.6;
         bots.update(dt, controller.pos, weapons);
@@ -280,14 +303,21 @@ async function start() {
           for (let i = 0; i < tr.length; i++) combatTargets.push(tr[i]);
         }
         const fireDown = input.buttons.has(0);
-        if (vehicles.rideType === 'helicopter') {
-          // Heli guided rockets (aim with look; locks bots / buildings / ground)
-          if (fireDown && !prevFire) {
-            vehicles.tryFireRockets(combatTargets, {
+        if (vehicles.rideType === 'helicopter' && vehicles.isGunner) {
+          // Gunner only: map-targeted missiles (straight from tubes, then seek)
+          if (fireDown && !prevFire && !mapView.open) {
+            const ok = vehicles.tryFireRockets(combatTargets, {
               yaw: playerCam.yaw,
               pitch: playerCam.pitch,
             });
+            if (!ok && !vehicles.active?.mapTarget) {
+              hud.setError?.('Gunner: open M, click a target, then LMB');
+              setTimeout(() => hud.setError?.(''), 2000);
+            }
           }
+          prevFire = fireDown;
+        } else if (vehicles.rideType === 'helicopter') {
+          // Pilot: no guns — just fly
           prevFire = fireDown;
         } else if (!vehicles.riding) {
           if (fireDown && !prevFire) {
@@ -326,6 +356,17 @@ async function start() {
       strafe,
       vehicles.active // third-person chase when riding
     );
+
+    // Friends party state fan-out
+    party.update(clock.frameDelta, {
+      x: controller.pos.x,
+      y: controller.pos.y,
+      z: controller.pos.z,
+      yaw: playerCam.yaw,
+      seat: vehicles.riding ? vehicles.localSeat : null,
+      heliId: vehicles.active?.id ?? null,
+      health: weapons.health,
+    });
 
     // Hide FPS gun completely while in any vehicle (overlay uses .root not .group)
     if (weaponOverlay?.root) weaponOverlay.root.visible = !vehicles.riding;
@@ -378,7 +419,12 @@ async function start() {
     renderer.render(scene, playerCam.camera);
     // Gun overlay only on foot (hidden while riding)
     if (input.locked && !vehicles.riding) weaponOverlay.render();
-    mapView.update(controller.pos, playerCam.yaw, vehicles.vehicles);
+    mapView.update(
+      controller.pos,
+      playerCam.yaw,
+      vehicles.vehicles,
+      vehicles.isGunner ? vehicles.getMapTargets(bots.getLiveTargets()) : null
+    );
     debug.update(clock.frameDelta, controller, stats);
   }
 
