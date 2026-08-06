@@ -1,9 +1,11 @@
 import * as THREE from 'three';
-import { WEAPONS, RARITY, LOOT, AMMO, POIS, WORLD } from '../config.js';
+import { WEAPONS, RARITY, LOOT, AMMO, POIS, WORLD, CASES } from '../config.js';
 import { mulberry32 } from '../core/Noise.js';
+import { worldBuildings } from '../world/BuildingRegistry.js';
+import { classToModelKey } from '../combat/WeaponAssets.js';
 
-// Ground loot: weapons + ammo piles. Pickup with E; 2-weapon inventory handled
-// by WeaponSystem.pickupWeapon.
+// Ground loot + interior pelican cases.
+// Outdoor free loot is sparse; most gear comes from opening cases in buildings.
 
 function weightedPick(rng, weights) {
   let total = 0;
@@ -22,6 +24,16 @@ function rollRarity(rng) {
   ));
 }
 
+function mat(hex, opts = {}) {
+  return new THREE.MeshStandardMaterial({
+    color: hex,
+    roughness: opts.rough ?? 0.55,
+    metalness: opts.metal ?? 0.25,
+    emissive: new THREE.Color(hex).multiplyScalar(opts.em ?? 0),
+    emissiveIntensity: 1,
+  });
+}
+
 export class LootSystem {
   constructor(scene, terrain, bus) {
     this.scene = scene;
@@ -31,7 +43,14 @@ export class LootSystem {
     this.group.name = 'loot';
     scene.add(this.group);
     this.items = [];
+    this.cases = [];
     this._id = 0;
+    /** @type {Record<string, THREE.Object3D>} optional weapon class GLBs for ground look */
+    this.weaponModels = {};
+  }
+
+  setWeaponModels(byClass = {}) {
+    this.weaponModels = byClass || {};
   }
 
   clear() {
@@ -40,77 +59,182 @@ export class LootSystem {
       this.group.remove(c);
       c.traverse((o) => {
         if (o.geometry) o.geometry.dispose();
-        if (o.material) o.material.dispose();
+        if (o.material) {
+          if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+          else o.material.dispose();
+        }
       });
     }
     this.items.length = 0;
+    this.cases.length = 0;
   }
+
+  // ── meshes ──────────────────────────────────────────────────────────────
 
   _meshFor(item) {
     const g = new THREE.Group();
     if (item.kind === 'weapon') {
       const def = WEAPONS[item.weaponId];
       const rar = RARITY[item.rarity] || RARITY.common;
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 0.1, def?.viewModel?.len ?? 0.5),
-        new THREE.MeshStandardMaterial({ color: def?.color ?? 0x666666, roughness: 0.5, metalness: 0.4 })
-      );
-      body.position.y = 0.08;
-      body.castShadow = true;
-      g.add(body);
-      // Rarity glow bar
+      const key = classToModelKey(def?.class || 'ar');
+      const tpl = this.weaponModels[key];
+      if (tpl) {
+        const m = tpl.clone(true);
+        m.scale.setScalar(0.55);
+        m.rotation.x = -0.15;
+        m.rotation.y = Math.PI * 0.15;
+        m.position.y = 0.06;
+        m.traverse((o) => {
+          if (o.isMesh) {
+            o.castShadow = true;
+            o.frustumCulled = true;
+          }
+        });
+        g.add(m);
+      } else {
+        // Procedural mini-gun silhouette
+        const bodyCol = def?.color ?? 0x555555;
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.08, def?.viewModel?.len ?? 0.45),
+          mat(bodyCol, { metal: 0.4, rough: 0.45 })
+        );
+        body.position.y = 0.08;
+        body.castShadow = true;
+        g.add(body);
+        const barrel = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.015, 0.015, 0.2, 8),
+          mat(0x999aaa, { metal: 0.8, rough: 0.3 })
+        );
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0, 0.08, -(def?.viewModel?.len ?? 0.45) * 0.45);
+        g.add(barrel);
+      }
       const bar = new THREE.Mesh(
-        new THREE.BoxGeometry(0.2, 0.03, 0.03),
-        new THREE.MeshStandardMaterial({
-          color: rar.color, emissive: rar.color, emissiveIntensity: 0.45,
-        })
+        new THREE.BoxGeometry(0.18, 0.025, 0.025),
+        mat(rar.color, { em: 0.35, metal: 0.1, rough: 0.4 })
       );
-      bar.position.set(0, 0.18, 0);
+      bar.position.set(0, 0.2, 0);
       g.add(bar);
     } else if (item.kind === 'ammo') {
-      const box = new THREE.Mesh(
-        new THREE.BoxGeometry(0.22, 0.12, 0.16),
-        new THREE.MeshStandardMaterial({ color: 0xc4a030, roughness: 0.6 })
-      );
+      const c = { light: 0xc8b050, heavy: 0x6a8a4a, long: 0x4a6a9a, shell: 0x9a5a3a }[item.ammoType] || 0xc4a030;
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.16), mat(c, { rough: 0.6 }));
       box.position.y = 0.08;
+      box.castShadow = true;
       g.add(box);
+      // Lid stripe
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.02, 0.14), mat(0x2a2a2a, { metal: 0.5 }));
+      lid.position.y = 0.16;
+      g.add(lid);
     } else if (item.kind === 'armor') {
-      const box = new THREE.Mesh(
-        new THREE.BoxGeometry(0.28, 0.1, 0.22),
-        new THREE.MeshStandardMaterial({ color: 0x4a6a8a, metalness: 0.5, roughness: 0.4 })
+      const plate = new THREE.Mesh(
+        new THREE.BoxGeometry(0.28, 0.08, 0.22),
+        mat(0x3a5a7a, { metal: 0.55, rough: 0.4 })
       );
-      box.position.y = 0.08;
+      plate.position.y = 0.06;
+      plate.castShadow = true;
+      g.add(plate);
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.04, 0.18), mat(0x1a1a1e));
+      pad.position.y = 0.12;
+      g.add(pad);
+    } else if (item.kind === 'heal') {
+      const col = item.healType === 'medkit' ? 0xe0e0e8 : item.healType === 'stim' ? 0x40c8a0 : 0xf0f0f0;
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.16), mat(col, { rough: 0.5 }));
+      box.position.y = 0.07;
       g.add(box);
+      const cross = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.03), mat(0xcc2020, { em: 0.2 }));
+      cross.position.y = 0.13;
+      g.add(cross);
+      const cross2 = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.1), mat(0xcc2020, { em: 0.2 }));
+      cross2.position.y = 0.13;
+      g.add(cross2);
     } else {
-      const box = new THREE.Mesh(
-        new THREE.BoxGeometry(0.18, 0.12, 0.18),
-        new THREE.MeshStandardMaterial({ color: 0xe0e0e0, roughness: 0.5 })
-      );
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.18), mat(0xb0b0b0));
       box.position.y = 0.08;
       g.add(box);
     }
     return g;
   }
 
-  spawnItem(item, x, z) {
-    const y = this.terrain.heightAt(x, z);
-    if (y < 2.5) return null;
+  /** Hard pelican / rifle case — olive body, black latches, hinged lid. */
+  _buildCaseMesh() {
+    const g = new THREE.Group();
+    const bodyMat = mat(0x3a4a2e, { rough: 0.65, metal: 0.15 });
+    const black = mat(0x1a1a1c, { rough: 0.4, metal: 0.5 });
+    const yellow = mat(0xd4a020, { rough: 0.45, metal: 0.2, em: 0.08 });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.38, 0.62), bodyMat);
+    body.position.y = 0.2;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    g.add(body);
+
+    // Lid (pivots on +Z rear edge)
+    const lidPivot = new THREE.Group();
+    lidPivot.position.set(0, 0.39, -0.28);
+    lidPivot.name = 'lidPivot';
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.08, 0.58), bodyMat);
+    lid.position.set(0, 0.04, 0.28);
+    lid.castShadow = true;
+    lidPivot.add(lid);
+    // Foam interior visible when open
+    const foam = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.04, 0.5), mat(0x2a2a32, { rough: 0.9 }));
+    foam.position.set(0, -0.01, 0.28);
+    lidPivot.add(foam);
+    g.add(lidPivot);
+
+    // Latches
+    for (const lx of [-0.35, 0.0, 0.35]) {
+      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.06), black);
+      latch.position.set(lx, 0.4, 0.32);
+      g.add(latch);
+    }
+    // Handle
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.015, 6, 12, Math.PI), black);
+    handle.rotation.x = Math.PI / 2;
+    handle.position.set(0, 0.28, 0.35);
+    g.add(handle);
+    // Corner protectors
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const c = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.08), yellow);
+        c.position.set(sx * 0.54, 0.12, sz * 0.28);
+        g.add(c);
+      }
+    }
+    // Rarity / loot glow stripe on top when closed
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9, 0.015, 0.06),
+      mat(0x7fd4ff, { em: 0.25, metal: 0.1 })
+    );
+    stripe.position.set(0, 0.44, 0);
+    stripe.name = 'caseStripe';
+    g.add(stripe);
+
+    g.userData.lidPivot = lidPivot;
+    g.userData.stripe = stripe;
+    return g;
+  }
+
+  // ── spawn ───────────────────────────────────────────────────────────────
+
+  spawnItem(item, x, y, z) {
     const mesh = this._meshFor(item);
     mesh.position.set(x, y, z);
     this.group.add(mesh);
-    const rec = {
-      id: ++this._id,
-      ...item,
-      x, y, z,
-      mesh,
-    };
+    const rec = { id: ++this._id, ...item, x, y, z, mesh, bob: true };
     this.items.push(rec);
     return rec;
   }
 
+  spawnItemAtGround(item, x, z) {
+    const y = this.terrain.heightAt(x, z);
+    if (y < 2.0) return null;
+    return this.spawnItem(item, x, y, z);
+  }
+
   spawnWeaponDrop(inst, x, z) {
     if (!inst) return null;
-    return this.spawnItem({
+    return this.spawnItemAtGround({
       kind: 'weapon',
       weaponId: inst.weaponId,
       rarity: inst.rarity,
@@ -118,56 +242,151 @@ export class LootSystem {
     }, x, z);
   }
 
-  /** Scatter loot across POIs + downtown + general map. */
-  populate(seed = 42) {
-    this.clear();
-    const rng = mulberry32(seed ^ 0x1007);
-    // POI denser piles
-    for (const p of POIS) {
-      const n = LOOT.PER_POI + (p.id === 'downtown' ? LOOT.DOWNTOWN_EXTRA : 0);
-      for (let i = 0; i < n; i++) {
-        if (rng() > LOOT.SPAWN_CHANCE) continue;
-        const ang = rng() * Math.PI * 2;
-        const r = 8 + rng() * 55;
-        const x = p.x + Math.cos(ang) * r;
-        const z = p.z + Math.sin(ang) * r;
-        this._rollAndSpawn(rng, x, z);
-      }
-    }
-    // Map scatter
-    const half = WORLD.SIZE / 2 - 80;
-    for (let i = 0; i < LOOT.SCATTER; i++) {
-      if (rng() > LOOT.SPAWN_CHANCE) continue;
-      const x = (rng() * 2 - 1) * half;
-      const z = (rng() * 2 - 1) * half;
-      if (this.terrain.heightAt(x, z) < 3) continue;
-      this._rollAndSpawn(rng, x, z);
-    }
-    return this.items.length;
-  }
-
-  _rollAndSpawn(rng, x, z) {
+  _rollItem(rng) {
     const cls = weightedPick(rng, LOOT.CLASS_WEIGHTS);
     if (cls === 'weapon') {
       const wid = weightedPick(rng, LOOT.WEAPON_SPAWN_WEIGHTS);
-      const rar = rollRarity(rng);
-      this.spawnItem({ kind: 'weapon', weaponId: wid, rarity: rar }, x, z);
-    } else if (cls === 'ammo') {
-      const type = weightedPick(rng, { light: 30, heavy: 35, long: 10, shell: 15 });
-      const amt = LOOT.AMMO_PICKUPS[type]?.amount ?? 20;
-      this.spawnItem({ kind: 'ammo', ammoType: type, amount: amt }, x, z);
-    } else if (cls === 'armor') {
-      const level = rng() > 0.7 ? (rng() > 0.5 ? 3 : 2) : 1;
-      this.spawnItem({ kind: 'armor', level, plates: 1 }, x, z);
-    } else if (cls === 'heal') {
-      const t = weightedPick(rng, { bandage: 50, medkit: 30, stim: 20 });
-      this.spawnItem({ kind: 'heal', healType: t }, x, z);
-    } else {
-      this.spawnItem({ kind: 'ammo', ammoType: 'heavy', amount: 24 }, x, z);
+      return { kind: 'weapon', weaponId: wid, rarity: rollRarity(rng) };
     }
+    if (cls === 'ammo') {
+      const type = weightedPick(rng, { light: 30, heavy: 35, long: 14, shell: 15 });
+      return { kind: 'ammo', ammoType: type, amount: LOOT.AMMO_PICKUPS[type]?.amount ?? 20 };
+    }
+    if (cls === 'armor') {
+      const level = rng() > 0.7 ? (rng() > 0.5 ? 3 : 2) : 1;
+      return { kind: 'armor', level, plates: 1 };
+    }
+    if (cls === 'heal') {
+      return { kind: 'heal', healType: weightedPick(rng, { bandage: 50, medkit: 30, stim: 20 }) };
+    }
+    return { kind: 'ammo', ammoType: 'heavy', amount: 24 };
   }
 
-  nearest(px, pz, maxDist = 2.8) {
+  _spawnCase(x, y, z, yaw, rng) {
+    const mesh = this._buildCaseMesh();
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = yaw;
+    this.group.add(mesh);
+    const n = CASES.MIN_ITEMS + Math.floor(rng() * (CASES.MAX_ITEMS - CASES.MIN_ITEMS + 1));
+    const contents = [];
+    for (let i = 0; i < n; i++) contents.push(this._rollItem(rng));
+    // Bias at least one weapon often
+    if (!contents.some((c) => c.kind === 'weapon') && rng() > 0.35) {
+      contents[0] = {
+        kind: 'weapon',
+        weaponId: weightedPick(rng, LOOT.WEAPON_SPAWN_WEIGHTS),
+        rarity: rollRarity(rng),
+      };
+    }
+    this.cases.push({
+      id: ++this._id,
+      x, y, z, yaw,
+      mesh,
+      open: false,
+      openT: 0,
+      contents,
+    });
+  }
+
+  /** Scatter sparse outdoor loot + pelican cases inside buildings. */
+  populate(seed = 42) {
+    this.clear();
+    const rng = mulberry32(seed ^ 0x1007);
+
+    // Sparse outdoor only (roadsides / POI edges — not carpeted streets)
+    for (const p of POIS) {
+      const n = LOOT.OUTDOOR_PER_POI + (p.id === 'downtown' ? LOOT.OUTDOOR_DOWNTOWN_EXTRA : 0);
+      for (let i = 0; i < n; i++) {
+        if (rng() > LOOT.OUTDOOR_SPAWN_CHANCE) continue;
+        const ang = rng() * Math.PI * 2;
+        const r = 20 + rng() * 70;
+        const x = p.x + Math.cos(ang) * r;
+        const z = p.z + Math.sin(ang) * r;
+        this._rollAndSpawnOutdoor(rng, x, z);
+      }
+    }
+    const half = WORLD.SIZE / 2 - 100;
+    for (let i = 0; i < LOOT.OUTDOOR_SCATTER; i++) {
+      if (rng() > LOOT.OUTDOOR_SPAWN_CHANCE) continue;
+      const x = (rng() * 2 - 1) * half;
+      const z = (rng() * 2 - 1) * half;
+      if (this.terrain.heightAt(x, z) < 3) continue;
+      this._rollAndSpawnOutdoor(rng, x, z);
+    }
+
+    // Pelican cases — every building floor (random chance)
+    let caseCount = 0;
+    for (const b of worldBuildings) {
+      const margin = 1.4;
+      if (b.w < 6 || b.d < 6) continue;
+      for (let f = 0; f < b.floors; f++) {
+        if (rng() > CASES.PER_FLOOR_CHANCE) continue;
+        // 1–2 cases per selected floor
+        const n = rng() > 0.55 ? 2 : 1;
+        for (let k = 0; k < n; k++) {
+          const lx = margin + rng() * (b.w - margin * 2);
+          const lz = margin + rng() * (b.d - margin * 2);
+          // Avoid stair core (roughly +X/+Z corner)
+          if (lx > b.w * 0.55 && lz > b.d * 0.55 && rng() > 0.4) continue;
+          const x = b.x + lx;
+          const z = b.z + lz;
+          const y = b.floorYs?.[f] ?? (b.baseY + 0.1 + f * 3.2);
+          const yaw = rng() * Math.PI * 2;
+          this._spawnCase(x, y, z, yaw, rng);
+          caseCount++;
+        }
+      }
+    }
+
+    return { items: this.items.length, cases: caseCount };
+  }
+
+  _rollAndSpawnOutdoor(rng, x, z) {
+    // Outdoor: mostly ammo/heal, rare weapons
+    const outdoorWeights = { weapon: 12, ammo: 50, armor: 12, heal: 26 };
+    const cls = weightedPick(rng, outdoorWeights);
+    let item;
+    if (cls === 'weapon') {
+      item = {
+        kind: 'weapon',
+        weaponId: weightedPick(rng, LOOT.WEAPON_SPAWN_WEIGHTS),
+        rarity: rollRarity(rng),
+      };
+    } else if (cls === 'ammo') {
+      const type = weightedPick(rng, { light: 30, heavy: 35, long: 10, shell: 15 });
+      item = { kind: 'ammo', ammoType: type, amount: LOOT.AMMO_PICKUPS[type]?.amount ?? 20 };
+    } else if (cls === 'armor') {
+      item = { kind: 'armor', level: 1, plates: 1 };
+    } else {
+      item = { kind: 'heal', healType: weightedPick(rng, { bandage: 60, medkit: 20, stim: 20 }) };
+    }
+    this.spawnItemAtGround(item, x, z);
+  }
+
+  nearest(px, py, pz, maxDist = 2.8) {
+    let best = null;
+    let bestD = maxDist;
+    for (const it of this.items) {
+      const d = Math.hypot(it.x - px, it.z - pz);
+      const dy = Math.abs((it.y ?? 0) - (py ?? it.y ?? 0));
+      if (d < bestD && dy < 2.5) {
+        bestD = d;
+        best = { type: 'item', ref: it };
+      }
+    }
+    for (const c of this.cases) {
+      if (c.open && c.openT >= 1) continue; // already emptied
+      const d = Math.hypot(c.x - px, c.z - pz);
+      const dy = Math.abs(c.y - (py ?? c.y));
+      if (d < bestD && dy < 2.2) {
+        bestD = d;
+        best = { type: 'case', ref: c };
+      }
+    }
+    return best;
+  }
+
+  nearestItem(px, pz, maxDist = 2.8) {
     let best = null;
     let bestD = maxDist;
     for (const it of this.items) {
@@ -180,20 +399,20 @@ export class LootSystem {
     return best;
   }
 
-  /** Try pickup into weaponSystem. Returns prompt text if near but not picked. */
   tryPickup(weaponSystem, px, py, pz) {
-    const it = this.nearest(px, pz);
-    if (!it) return false;
+    const hit = this.nearest(px, py, pz);
+    if (!hit) return false;
 
+    if (hit.type === 'case') {
+      return this._tryOpenCase(hit.ref, px, pz);
+    }
+
+    const it = hit.ref;
     if (it.kind === 'weapon') {
       const { ok, dropped } = weaponSystem.pickupWeapon(it.weaponId, it.rarity);
       if (!ok) return false;
-      // Remove from ground
       this._remove(it);
-      // Drop previous weapon at feet
-      if (dropped) {
-        this.spawnWeaponDrop(dropped, px + 0.6, pz + 0.4);
-      }
+      if (dropped) this.spawnWeaponDrop(dropped, px + 0.6, pz + 0.4);
       this.bus.emit('loot:pickup', { kind: 'weapon', id: it.weaponId });
       return true;
     }
@@ -210,7 +429,6 @@ export class LootSystem {
       return true;
     }
     if (it.kind === 'armor') {
-      // Simple: equip level if higher, grant plate restore
       if (it.level > weaponSystem.armorLevel) {
         weaponSystem.armorLevel = it.level;
         weaponSystem.armor = Math.max(weaponSystem.armor, it.level * 50);
@@ -224,18 +442,36 @@ export class LootSystem {
       return true;
     }
     if (it.kind === 'heal') {
-      // Instant partial for now (full use-time later)
-      if (it.healType === 'bandage') {
-        weaponSystem.health = Math.min(75, weaponSystem.health + 25);
-      } else if (it.healType === 'medkit') {
-        weaponSystem.health = 100;
-      } else {
-        weaponSystem.health = Math.min(100, weaponSystem.health + 20);
-      }
+      if (it.healType === 'bandage') weaponSystem.health = Math.min(75, weaponSystem.health + 25);
+      else if (it.healType === 'medkit') weaponSystem.health = 100;
+      else weaponSystem.health = Math.min(100, weaponSystem.health + 20);
       this._remove(it);
       return true;
     }
     return false;
+  }
+
+  _tryOpenCase(c) {
+    if (c.open) return false;
+    c.open = true;
+    c.openT = 0;
+    if (c.mesh.userData.stripe) c.mesh.userData.stripe.visible = false;
+    // Spit items in an arc in front of the case
+    const cos = Math.cos(c.yaw);
+    const sin = Math.sin(c.yaw);
+    c.contents.forEach((item, i) => {
+      const side = (i - (c.contents.length - 1) * 0.5) * 0.35;
+      const forward = 0.55 + i * 0.08;
+      const lx = side;
+      const lz = forward;
+      // local → world (yaw)
+      const wx = c.x + lx * cos - lz * sin;
+      const wz = c.z + lx * sin + lz * cos;
+      this.spawnItem(item, wx, c.y + 0.05, wz);
+    });
+    c.contents = [];
+    this.bus.emit('loot:case', { id: c.id });
+    return true;
   }
 
   _remove(it) {
@@ -245,14 +481,21 @@ export class LootSystem {
       this.group.remove(it.mesh);
       it.mesh.traverse((o) => {
         if (o.geometry) o.geometry.dispose();
-        if (o.material) o.material.dispose();
+        if (o.material) {
+          if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+          else o.material.dispose();
+        }
       });
     }
   }
 
-  prompt(px, pz) {
-    const it = this.nearest(px, pz);
-    if (!it) return null;
+  prompt(px, py, pz) {
+    const hit = this.nearest(px, py ?? 0, pz);
+    if (!hit) return null;
+    if (hit.type === 'case') {
+      return hit.ref.open ? null : 'E · Open supply case';
+    }
+    const it = hit.ref;
     if (it.kind === 'weapon') {
       const n = WEAPONS[it.weaponId]?.name ?? it.weaponId;
       const r = RARITY[it.rarity]?.label ?? '';
@@ -265,12 +508,22 @@ export class LootSystem {
   }
 
   update(dt) {
-    // Gentle bob for visibility
     const t = performance.now() * 0.002;
     for (const it of this.items) {
-      if (!it.mesh) continue;
-      it.mesh.position.y = it.y + 0.05 + Math.sin(t + it.id) * 0.04;
-      it.mesh.rotation.y += dt * 0.8;
+      if (!it.mesh || it.bob === false) continue;
+      it.mesh.position.y = it.y + 0.04 + Math.sin(t + it.id) * 0.03;
+      it.mesh.rotation.y += dt * 0.7;
+    }
+    // Case lid open animation
+    for (const c of this.cases) {
+      if (!c.open) continue;
+      c.openT = Math.min(1, c.openT + dt * 2.2);
+      const pivot = c.mesh.userData.lidPivot;
+      if (pivot) {
+        // Open ~100°
+        const e = c.openT * c.openT * (3 - 2 * c.openT);
+        pivot.rotation.x = -e * 1.75;
+      }
     }
   }
 }

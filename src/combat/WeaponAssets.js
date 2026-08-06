@@ -14,13 +14,14 @@ const loader = new GLTFLoader();
  * Offsets are in view space (camera looks −Z): keep Z ≤ 0 so the gun stays in front.
  */
 export const VM_POSE = {
-  ar:      { scale: 1.15, offset: new THREE.Vector3(0.02, -0.02, -0.02) },
-  smg:     { scale: 1.2,  offset: new THREE.Vector3(0.02, -0.02, -0.02) },
-  lmg:     { scale: 1.05, offset: new THREE.Vector3(0.02, -0.02, -0.02) },
-  sniper:  { scale: 1.05, offset: new THREE.Vector3(0.02, -0.03, -0.02) },
-  dmr:     { scale: 1.12, offset: new THREE.Vector3(0.02, -0.02, -0.02) },
-  shotgun: { scale: 1.15, offset: new THREE.Vector3(0.02, -0.02, -0.02) },
-  pistol:  { scale: 1.35, offset: new THREE.Vector3(0.03, -0.01, -0.01) },
+  // After Sight→origin: slight down so body hangs under crosshair at hip
+  ar:      { scale: 1.0,  offset: new THREE.Vector3(0.0, -0.01, 0.0) },
+  smg:     { scale: 1.05, offset: new THREE.Vector3(0.0, -0.01, 0.0) },
+  lmg:     { scale: 0.95, offset: new THREE.Vector3(0.0, -0.01, 0.0) },
+  sniper:  { scale: 0.95, offset: new THREE.Vector3(0.0, -0.02, 0.0) },
+  dmr:     { scale: 1.0,  offset: new THREE.Vector3(0.0, -0.01, 0.0) },
+  shotgun: { scale: 1.0,  offset: new THREE.Vector3(0.0, -0.01, 0.0) },
+  pistol:  { scale: 1.2,  offset: new THREE.Vector3(0.0, 0.0, 0.0) },
 };
 
 /**

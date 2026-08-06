@@ -23,68 +23,89 @@ function buildFromGlb(def, template) {
   root.name = `vm_${def.id}_glb`;
   root.frustumCulled = false;
 
+  // Hold model in a pivot so we can center Sight without shearing
+  const pivot = new THREE.Group();
+  pivot.name = 'glbPivot';
+  root.add(pivot);
+
   const model = template.clone(true);
   model.name = 'glbWeapon';
-  root.add(model);
+  // Drop camera/lights if Blender left any
+  const strip = [];
+  model.traverse((o) => {
+    if (o.isLight || o.isCamera) strip.push(o);
+  });
+  for (const o of strip) o.parent?.remove(o);
+
+  pivot.add(model);
 
   let magObj = null;
   let muzzleObj = null;
   let sightObj = null;
   model.traverse((o) => {
     const n = (o.name || '').toLowerCase();
-    // Prefer mesh named Mag over Empty Mag
-    if (n === 'mag' || n === 'magazine') {
-      if (!magObj || o.isMesh) magObj = o;
-    }
+    if ((n === 'mag' || n === 'magazine') && o.isMesh) magObj = o;
     if (n === 'muzzle') muzzleObj = o;
     if (n === 'sight') sightObj = o;
     if (o.isMesh) {
       o.frustumCulled = false;
       o.renderOrder = 999;
+      // Normalize materials — avoid blown-out photo UV stretch
+      const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+      for (const m of mats) {
+        if (!m) continue;
+        if (m.map) {
+          // Dim map influence for cleaner FPS look
+          m.color?.multiplyScalar?.(0.85);
+        }
+        m.depthTest = true;
+        m.depthWrite = true;
+        m.needsUpdate = true;
+      }
     }
   });
 
   root.updateMatrixWorld(true);
 
-  // Shift so Sight sits at root origin (ADS crosshair)
-  if (sightObj) {
-    const s = localPos(root, sightObj);
-    model.position.sub(s);
-  }
-
-  // Sanity: barrel (Muzzle) must be on −Z (in front of camera). If the GLB
-  // faces the wrong way, spin 180° around up so hip fire isn't behind the eye.
-  if (muzzleObj) {
-    root.updateMatrixWorld(true);
+  // 1) Barrel must face −Z (camera forward)
+  if (muzzleObj && sightObj) {
     const m = localPos(root, muzzleObj);
-    if (m.z > 0.05) {
-      model.rotation.y += Math.PI;
+    const s = localPos(root, sightObj);
+    const dx = m.x - s.x;
+    const dz = m.z - s.z;
+    // Desired direction is (0, 0, -1)
+    const yaw = Math.atan2(dx, -dz); // angle from −Z
+    if (Math.abs(yaw) > 0.05) {
+      pivot.rotation.y -= yaw;
       root.updateMatrixWorld(true);
-      // Re-center Sight after flip
-      if (sightObj) {
-        const s2 = localPos(root, sightObj);
-        model.position.sub(s2);
-      }
+    }
+  } else if (muzzleObj) {
+    const m = localPos(root, muzzleObj);
+    if (m.z > 0.02) {
+      pivot.rotation.y += Math.PI;
+      root.updateMatrixWorld(true);
     }
   }
 
+  // 2) Sight → origin for ADS
+  if (sightObj) {
+    root.updateMatrixWorld(true);
+    const s = localPos(root, sightObj);
+    pivot.position.sub(s);
+    root.updateMatrixWorld(true);
+  }
+
   const pose = VM_POSE[classToModelKey(def.class)] || VM_POSE.ar;
-  model.scale.setScalar(pose.scale);
-  model.position.add(pose.offset);
+  pivot.scale.setScalar(pose.scale);
+  pivot.position.add(pose.offset);
   root.updateMatrixWorld(true);
 
-  // Mag group for reload yank (reparent mesh under anim group)
+  // Mag group — offset the whole Mag mesh parent during reload (no reparent mess)
   const magGroup = new THREE.Group();
   magGroup.name = 'mag';
-  if (magObj && magObj.isMesh) {
-    const wp = localPos(root, magObj);
-    magGroup.position.copy(wp);
-    const parent = magObj.parent;
-    if (parent) parent.remove(magObj);
-    magObj.position.set(0, 0, 0);
-    magObj.rotation.set(0, 0, 0);
-    magObj.scale.set(1, 1, 1);
-    magGroup.add(magObj);
+  if (magObj) {
+    // Keep mag in place; store ref for visibility toggles
+    magGroup.userData.magMesh = magObj;
   }
   root.add(magGroup);
 
@@ -97,18 +118,11 @@ function buildFromGlb(def, template) {
   }
   root.add(muzzle);
 
-  root.traverse((o) => {
-    if (o.isMesh) {
-      o.frustumCulled = false;
-      o.renderOrder = 999;
-    }
-  });
-
   return {
     root,
     mag: magGroup,
     muzzle,
-    hasScope: def.class === 'sniper' || def.class === 'dmr',
+    hasScope: !!(def.scopeOverlay || def.class === 'sniper' || def.class === 'dmr'),
     source: 'glb',
   };
 }

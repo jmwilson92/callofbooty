@@ -627,6 +627,8 @@ export const WEAPONS = {
     spreadHip: 4.0, spreadAds: 0.02, spreadMove: 2.5, spreadMax: 5.0, spreadPerShot: 0.5,
     recoilPattern: [[0, 2.8], [0.15, 2.6], [-0.12, 2.5], [0.2, 2.4], [-0.15, 2.3]],
     color: 0x2a3a4a, viewModel: { len: 0.72, thick: 0.05 },
+    // True optic zoom + scope overlay when ADS
+    scopeZoomFov: 14, scopeOverlay: true, hideViewOnAds: true,
   },
   marksman: {
     id: 'marksman', name: 'Marksman DM', class: 'dmr', fireMode: 'semi',
@@ -636,6 +638,7 @@ export const WEAPONS = {
     falloffStart: 90, falloffEnd: 150, falloffMinMult: 0.8,
     muzzleVelocity: null, pellets: 1,
     spreadHip: 2.2, spreadAds: 0.08, spreadMove: 1.2, spreadMax: 3.0, spreadPerShot: 0.25,
+    scopeZoomFov: 32, scopeOverlay: true, hideViewOnAds: false,
     recoilPattern: [
       [0, 1.1], [0.08, 1.05], [-0.1, 1.0], [0.12, 0.95], [-0.08, 0.92],
       [0.15, 0.9], [-0.12, 0.88], [0.1, 0.85], [-0.15, 0.86], [0.08, 0.84],
@@ -672,29 +675,35 @@ export const WEAPONS = {
 };
 
 export const LOOT = {
-  SPAWN_CHANCE: 0.6,
-  // Relative class weights when an item spawns
+  // Relative class weights when an item spawns (cases + outdoor)
   CLASS_WEIGHTS: {
-    weapon: 35,
-    ammo: 40,
-    armor: 10,
-    heal: 12,
-    throwable: 3,
+    weapon: 38,
+    ammo: 36,
+    armor: 12,
+    heal: 14,
   },
   WEAPON_SPAWN_WEIGHTS: {
-    vector7: 14, kestrel: 12, pike: 16, warden: 6,
-    longshot: 4, marksman: 8, breaker: 10, sidearm: 20,
+    vector7: 12, kestrel: 11, pike: 14, warden: 6,
+    longshot: 10, marksman: 10, breaker: 10, sidearm: 18,
   },
   AMMO_PICKUPS: {
     light: { amount: 30 },
     heavy: { amount: 24 },
-    long:  { amount: 5 },
+    long:  { amount: 6 },
     shell: { amount: 8 },
   },
-  // Spawns per major POI / downtown density
-  PER_POI: 28,
-  DOWNTOWN_EXTRA: 80,
-  SCATTER: 120,
+  // Outdoor free loot is intentionally sparse — cases are the main source
+  OUTDOOR_SPAWN_CHANCE: 0.35,
+  OUTDOOR_PER_POI: 6,
+  OUTDOOR_DOWNTOWN_EXTRA: 8,
+  OUTDOOR_SCATTER: 28,
+};
+
+/** Pelican / hard cases inside buildings — open for 3–4 random items. */
+export const CASES = {
+  PER_FLOOR_CHANCE: 0.55,
+  MIN_ITEMS: 3,
+  MAX_ITEMS: 4,
 };
 
 // Minimap (always-on square, top-left) + full map (toggle with M).

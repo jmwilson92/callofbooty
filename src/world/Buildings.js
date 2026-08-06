@@ -6,6 +6,7 @@ import { claimRoadCorridors, placeParkingLotDetails } from './Roads.js';
 import { worldLadders } from './Ladders.js';
 import { worldDoors } from './Doors.js';
 import { worldElevators } from './Elevators.js';
+import { clearBuildingRegistry } from './BuildingRegistry.js';
 
 // San Diego POIs — anchors only; buildings seat on natural terrain.
 
@@ -16,6 +17,7 @@ export const worldOcc = new Occupancy(10);
 export function resetOccupancy() {
   worldOcc.rects.length = 0;
   worldOcc.buckets.clear();
+  clearBuildingRegistry();
 }
 
 function poi(id) {

@@ -1,4 +1,5 @@
 import { BUILDINGS } from '../config.js';
+import { registerBuilding } from './BuildingRegistry.js';
 
 // Parametric building assembly from a primitive kit: slabs, walls with
 // openings, stairs, parapets. Every building this produces satisfies the
@@ -232,6 +233,16 @@ export function makeBuilding(sink, opts) {
   sink.addSpan(x, roofY, z + d - T * 1.5, x + w, roofY + ph, z + d, color);
   sink.addSpan(x, roofY, z, x + T * 1.5, roofY + ph, z + d, color);
   sink.addSpan(x + w - T * 1.5, roofY, z, x + w, roofY + ph, z + d, color);
+
+  // Interior loot anchors (every floor, absolute Y of walkable slab top)
+  const floorYs = [];
+  for (let f = 0; f < floors; f++) {
+    floorYs.push(baseY + ys[f] + BUILDINGS.GROUND_SLAB_LIFT * (f === 0 ? 1 : 0) + (f === 0 ? 0.02 : 0.02));
+    // Upper floors: slab top is baseY + ys[f]
+    if (f > 0) floorYs[f] = baseY + ys[f] + 0.02;
+    else floorYs[0] = baseY + BUILDINGS.GROUND_SLAB_LIFT + 0.02;
+  }
+  registerBuilding({ x, z, w, d, floors, baseY, floorYs, roofY });
 
   return { roofY, height: ys[floors] };
 }

@@ -139,7 +139,9 @@ async function start() {
   weapons.setWeaponModels(weaponLib.byClass);
   weapons.giveWeapon('vector7', 'common'); // starter AR for testing
   const loot = new LootSystem(scene, terrain, bus);
-  const lootCount = loot.populate(WORLD.SEED ^ 0x1007);
+  loot.setWeaponModels(weaponLib.byClass); // ground loot uses same GLB silhouettes
+  const lootStats = loot.populate(WORLD.SEED ^ 0x1007);
+  const lootCount = lootStats.items ?? lootStats;
   const testRange = new TargetRange(scene, terrain);
   const bots = new BotSystem(scene, terrain, hash, bus);
   const botCount = bots.spawn();
@@ -178,7 +180,8 @@ async function start() {
     `[world] generated in ${genMs.toFixed(0)}ms · ${sink.total} boxes · ` +
     `${hash.count} collision AABBs · ${propStats.placed}/${propStats.attempts} box-props · ` +
     `${assetPropStats.placed} glb-props · doors ${doorCount} · elevators ${elevCount} · ` +
-    `loot ${lootCount} · bots ${botCount} · road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
+    `loot ${lootStats.items ?? 0} items + ${lootStats.cases ?? 0} cases · bots ${botCount} · ` +
+    `road segs ${roadPieces} · structures ${JSON.stringify(structureStats)}`
   );
 
   const loading = document.getElementById('loading');
@@ -212,10 +215,13 @@ async function start() {
         if (input.actionPressed('quickSwap')) weapons.quickSwap();
         if (input.actionPressed('reload')) weapons.startReload();
 
-        // E = loot → elevator → door
+        // E = loot/case → elevator → door
         if (input.actionPressed('interact')) {
           const gotLoot = loot.tryPickup(
-            weapons, controller.pos.x, controller.pos.y, controller.pos.z
+            weapons,
+            controller.pos.x,
+            controller.pos.y + controller.height * 0.35,
+            controller.pos.z
           );
           if (!gotLoot) {
             const usedElev = elevators.tryUse(controller);
@@ -265,17 +271,18 @@ async function start() {
       : 0;
     playerCam.update(clock.frameDelta, controller, clock.alpha, strafe);
 
-    // ADS FOV (tighter zoom so sights dominate, not the whole gun)
+    // ADS FOV — sniper/DMR use real optic zoom
     {
       const hipFov = playerCam.fov;
-      const adsFov = THREE.MathUtils.lerp(hipFov, 48, weapons.ads);
-      const worldFov = THREE.MathUtils.lerp(hipFov, adsFov, 1);
-      if (Math.abs(playerCam.camera.fov - worldFov) > 0.05) {
-        playerCam.camera.fov = worldFov;
+      const def = weapons.def;
+      const zoomTarget = def?.scopeZoomFov ?? 48;
+      const adsFov = THREE.MathUtils.lerp(hipFov, zoomTarget, weapons.ads);
+      if (Math.abs(playerCam.camera.fov - adsFov) > 0.05) {
+        playerCam.camera.fov = adsFov;
         playerCam.camera.updateProjectionMatrix();
       }
-      // Overlay FOV: hip slightly tighter so gun fills lower-right; ADS zooms optic
-      const wFov = THREE.MathUtils.lerp(52, 40, weapons.ads);
+      // Weapon overlay: normal gun FOV; sniper hides mesh so FOV less critical
+      const wFov = THREE.MathUtils.lerp(50, def?.scopeOverlay ? 38 : 42, weapons.ads);
       if (Math.abs(weaponOverlay.camera.fov - wFov) > 0.1) {
         weaponOverlay.camera.fov = wFov;
         weaponOverlay.camera.updateProjectionMatrix();
@@ -295,7 +302,7 @@ async function start() {
       const py = controller.pos.y + controller.height * 0.5;
       const pz = controller.pos.z;
       hud.setPrompt(
-        loot.prompt(px, pz)
+        loot.prompt(px, py, pz)
         || elevators.prompt(px, py, pz)
         || doors.prompt(px, py, pz)
       );

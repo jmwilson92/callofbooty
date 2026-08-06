@@ -402,22 +402,46 @@ export class WeaponSystem {
       this._muzzleLight.intensity = Math.max(0, this._muzzleLight.intensity - dt * 28);
     }
     // Camera looks −Z: gun MUST sit at negative Z (in front).
-    // Hip  = classic FPS lower-right — big, always visible.
+    // Hip  = classic FPS lower-right — always visible.
     // ADS  = center so optic/irons hit the crosshair.
-    const kickZ = this._kick * 0.04;
-    const kickX = this._kick * 0.008;
+    const kickZ = this._kick * 0.035;
+    const kickX = this._kick * 0.007;
     this.viewGroup.position.set(
-      THREE.MathUtils.lerp(0.2, 0.0, adsT) + kickX,
-      THREE.MathUtils.lerp(-0.18, -0.01, adsT) - this._kick * 0.012,
-      THREE.MathUtils.lerp(-0.42, -0.32, adsT) + kickZ
+      THREE.MathUtils.lerp(0.18, 0.0, adsT) + kickX,
+      THREE.MathUtils.lerp(-0.16, -0.005, adsT) - this._kick * 0.01,
+      THREE.MathUtils.lerp(-0.4, -0.3, adsT) + kickZ
     );
     this.viewGroup.rotation.set(
-      THREE.MathUtils.lerp(0.04, 0.0, adsT) - this._kick * 0.06,
-      THREE.MathUtils.lerp(0.22, 0.0, adsT),
-      THREE.MathUtils.lerp(0.05, 0.0, adsT)
+      THREE.MathUtils.lerp(0.05, 0.0, adsT) - this._kick * 0.055,
+      THREE.MathUtils.lerp(0.2, 0.0, adsT),
+      THREE.MathUtils.lerp(0.04, 0.0, adsT)
     );
-    // Tiny idle sway (only when hip; ADS stays rock solid for aiming)
-    if (this._vmRoot && !this.reloading) {
+
+    // Sniper: fade viewmodel out when fully scoped (overlay takes over)
+    const hideOnAds = !!(def?.hideViewOnAds);
+    if (this._vmRoot) {
+      if (hideOnAds) {
+        const vis = 1 - Math.max(0, (adsT - 0.55) / 0.45);
+        this._vmRoot.visible = vis > 0.05;
+        this._vmRoot.traverse((o) => {
+          if (o.isMesh && o.material) {
+            const mats = Array.isArray(o.material) ? o.material : [o.material];
+            for (const m of mats) {
+              if (m.transparent || vis < 0.99) {
+                m.transparent = true;
+                m.opacity = Math.max(0.02, vis);
+                m.depthWrite = vis > 0.5;
+              }
+            }
+          }
+        });
+      } else {
+        this._vmRoot.visible = true;
+      }
+    }
+
+    // Tiny idle sway (hip only)
+    if (this._vmRoot && !this.reloading && this._vmRoot.visible) {
       const t = performance.now() * 0.001;
       const sway = 1 - adsT;
       this._vmRoot.position.y = Math.sin(t * 1.5) * 0.003 * sway;
@@ -426,24 +450,34 @@ export class WeaponSystem {
 
     // Magazine yank during reload
     if (this._vmMag) {
+      const magMesh = this._vmMag.userData?.magMesh;
       if (this.reloading) {
         const t = 1 - this.reloadT / Math.max(1e-4, this.reloadDur);
         let my = 0;
         let mx = 0;
         if (t < 0.35) {
-          const u = t / 0.35;
-          my = -u * 0.22;
-          mx = u * 0.05;
+          my = -(t / 0.35) * 0.18;
+          mx = (t / 0.35) * 0.04;
         } else if (t < 0.7) {
-          my = -0.22;
-          mx = 0.05;
+          my = -0.18;
+          mx = 0.04;
         } else {
           const u = (t - 0.7) / 0.3;
-          my = -0.22 * (1 - u);
-          mx = 0.05 * (1 - u);
+          my = -0.18 * (1 - u);
+          mx = 0.04 * (1 - u);
         }
-        this._vmMag.position.set(mx, my, 0);
-        this._vmMag.visible = t < 0.4 || t > 0.65;
+        if (magMesh) {
+          if (magMesh.userData._baseY == null) magMesh.userData._baseY = magMesh.position.y;
+          magMesh.position.y = magMesh.userData._baseY + my;
+          magMesh.visible = t < 0.4 || t > 0.65;
+        } else {
+          // Procedural viewmodel: mag is a child group we can move
+          this._vmMag.position.set(mx, my, 0);
+          this._vmMag.visible = t < 0.4 || t > 0.65;
+        }
+      } else if (magMesh) {
+        if (magMesh.userData._baseY != null) magMesh.position.y = magMesh.userData._baseY;
+        magMesh.visible = true;
       } else {
         this._vmMag.position.set(0, 0, 0);
         this._vmMag.visible = true;
@@ -521,6 +555,8 @@ export class WeaponSystem {
       reloading: this.reloading,
       reloadFrac: this.reloading ? 1 - this.reloadT / Math.max(1e-4, this.reloadDur) : 0,
       ads: this.ads,
+      scopeOverlay: !!(def?.scopeOverlay),
+      scopeZoomFov: def?.scopeZoomFov ?? null,
       slot: this.active,
       slot0: this.slots[0] ? WEAPONS[this.slots[0].weaponId]?.name : null,
       slot1: this.slots[1] ? WEAPONS[this.slots[1].weaponId]?.name : null,

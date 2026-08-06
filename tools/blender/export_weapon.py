@@ -55,13 +55,14 @@ def make_mat(name, color, metal=0.35, rough=0.45, image_path=None, emit=0.0):
         bsdf.inputs["Emission Strength"].default_value = emit
         if emit > 0 and "Emission Color" in bsdf.inputs:
             bsdf.inputs["Emission Color"].default_value = (*color[:3], 1.0)
+    # Light ref tint only — heavy UV map made viewmodels look "funky"
     if image_path and Path(image_path).is_file():
         img = bpy.data.images.load(str(Path(image_path).resolve()))
         tex = nodes.new("ShaderNodeTexImage")
         tex.image = img
         mix = nodes.new("ShaderNodeMix")
         mix.data_type = "RGBA"
-        mix.inputs["Factor"].default_value = 0.45
+        mix.inputs["Factor"].default_value = 0.18
         mix.inputs["A"].default_value = (*color[:3], 1.0)
         links.new(tex.outputs["Color"], mix.inputs["B"])
         links.new(mix.outputs["Result"], bsdf.inputs["Base Color"])
