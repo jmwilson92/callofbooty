@@ -9,26 +9,26 @@ export class WeaponOverlay {
   constructor(renderer) {
     this.renderer = renderer;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.01, 5);
+    this.camera = new THREE.PerspectiveCamera(62, 1, 0.01, 5);
     this.camera.position.set(0, 0, 0);
 
-    // Bright local lighting so guns always read
-    const key = new THREE.DirectionalLight(0xfff2e0, 2.2);
-    key.position.set(0.4, 0.8, 0.6);
+    // Soft key/fill so slim barrels and thin sights still catch light
+    const key = new THREE.DirectionalLight(0xfff4e8, 2.6);
+    key.position.set(0.5, 1.0, 0.7);
     this.scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xa0c8ff, 0.9);
-    fill.position.set(-0.6, 0.2, 0.4);
+    const fill = new THREE.DirectionalLight(0x90b8e8, 1.0);
+    fill.position.set(-0.7, 0.3, 0.5);
     this.scene.add(fill);
 
-    const rim = new THREE.DirectionalLight(0xffffff, 0.6);
-    rim.position.set(0.2, -0.3, -0.8);
+    const rim = new THREE.DirectionalLight(0xffffff, 0.85);
+    rim.position.set(0.15, -0.2, -1.0);
     this.scene.add(rim);
 
-    const ambient = new THREE.AmbientLight(0x8899aa, 0.55);
+    const ambient = new THREE.AmbientLight(0x9aa8b8, 0.6);
     this.scene.add(ambient);
 
-    const hemi = new THREE.HemisphereLight(0xd0e8ff, 0x3a2a18, 0.45);
+    const hemi = new THREE.HemisphereLight(0xd8ecff, 0x3a2a18, 0.5);
     this.scene.add(hemi);
 
     this.root = new THREE.Group();

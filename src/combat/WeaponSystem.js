@@ -384,18 +384,19 @@ export class WeaponSystem {
     if (this._muzzleLight) {
       this._muzzleLight.intensity = Math.max(0, this._muzzleLight.intensity - dt * 28);
     }
-    const kickZ = this._kick * 0.035;
-    const kickX = this._kick * 0.008;
-    // Hip far down-right; ADS zeros so sights hit screen center
+    const kickZ = this._kick * 0.03;
+    const kickX = this._kick * 0.006;
+    // Hip: deep lower-right, fully clear of crosshair.
+    // ADS: sight axis → screen center (only optic/irons on aim point).
     this.viewGroup.position.set(
-      THREE.MathUtils.lerp(0.28, 0.0, adsT) + kickX,
-      THREE.MathUtils.lerp(-0.32, 0.0, adsT) - this._kick * 0.012,
-      THREE.MathUtils.lerp(0.12, 0.02, adsT) + kickZ
+      THREE.MathUtils.lerp(0.34, 0.0, adsT) + kickX,
+      THREE.MathUtils.lerp(-0.38, -0.01, adsT) - this._kick * 0.01,
+      THREE.MathUtils.lerp(0.18, 0.08, adsT) + kickZ
     );
     this.viewGroup.rotation.set(
-      THREE.MathUtils.lerp(0.18, 0.0, adsT) - this._kick * 0.07,
-      THREE.MathUtils.lerp(0.42, 0.0, adsT),
-      THREE.MathUtils.lerp(0.1, 0.0, adsT)
+      THREE.MathUtils.lerp(0.22, 0.0, adsT) - this._kick * 0.06,
+      THREE.MathUtils.lerp(0.55, 0.0, adsT),
+      THREE.MathUtils.lerp(0.14, 0.0, adsT)
     );
     // Tiny idle sway (only when hip; ADS stays rock solid for aiming)
     if (this._vmRoot && !this.reloading) {
