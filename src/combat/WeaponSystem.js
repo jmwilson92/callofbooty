@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WEAPONS, RARITY, COMBAT, AMMO } from '../config.js';
 import { castHitscan, falloffMult, partMult } from './Hitscan.js';
+import { buildViewModel } from './ViewModels.js';
 
 const DEG = Math.PI / 180;
 
@@ -46,8 +47,15 @@ export class WeaponSystem {
     this.viewGroup = new THREE.Group();
     this.viewGroup.name = 'viewWeapon';
     this.camera.camera.add(this.viewGroup);
-    this._viewMesh = null;
+    // Local fill light so the gun is never black against dark maps
+    const fill = new THREE.PointLight(0xfff0e0, 0.85, 2.5, 1.5);
+    fill.position.set(0.1, 0.05, 0.1);
+    this.camera.camera.add(fill);
+    this._vmRoot = null;
+    this._vmMag = null;
     this._muzzle = new THREE.Object3D();
+    this._kick = 0; // visual gun kick on fire
+    this._muzzleFlash = null;
 
     // Give starter sidearm so player can shoot before finding loot
     this.giveWeapon('sidearm', 'common');
@@ -184,30 +192,31 @@ export class WeaponSystem {
     while (this.viewGroup.children.length) {
       const c = this.viewGroup.children[0];
       this.viewGroup.remove(c);
-      if (c.geometry) c.geometry.dispose();
+      c.traverse?.((o) => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+          if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+          else o.material.dispose();
+        }
+      });
     }
+    this._vmRoot = null;
+    this._vmMag = null;
     const def = this.def;
     if (!def) return;
-    const vm = def.viewModel;
-    const mat = new THREE.MeshStandardMaterial({
-      color: def.color, roughness: 0.55, metalness: 0.35,
-    });
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(vm.thick, vm.thick * 0.9, vm.len),
-      mat
+    const vm = buildViewModel(def);
+    this._vmRoot = vm.root;
+    this._vmMag = vm.mag;
+    this._muzzle = vm.muzzle;
+    this.viewGroup.add(vm.root);
+    // Muzzle flash sprite
+    const flash = new THREE.Mesh(
+      new THREE.SphereGeometry(0.04, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffe080, transparent: true, opacity: 0 })
     );
-    body.position.set(0.18, -0.16, -0.35);
-    this.viewGroup.add(body);
-    // Magazine
-    const mag = new THREE.Mesh(
-      new THREE.BoxGeometry(vm.thick * 0.6, vm.thick * 1.2, vm.thick * 0.8),
-      mat
-    );
-    mag.position.set(0.18, -0.22, -0.28);
-    this.viewGroup.add(mag);
-    // Barrel tip as muzzle
-    this._muzzle.position.set(0.18, -0.14, -0.35 - vm.len * 0.5);
-    this.viewGroup.add(this._muzzle);
+    flash.position.copy(vm.muzzle.position);
+    vm.root.add(flash);
+    this._muzzleFlash = flash;
   }
 
   /**
@@ -305,6 +314,11 @@ export class WeaponSystem {
     this.shotCooldown = 60 / def.rpm;
     this.lastShotAge = 0;
     this.boltReady = def.fireMode !== 'bolt';
+    this._kick = Math.min(1, this._kick + 0.55);
+    if (this._muzzleFlash) {
+      this._muzzleFlash.material.opacity = 1;
+      this._muzzleFlash.scale.setScalar(1.4 + Math.random() * 0.8);
+    }
 
     // Recoil pattern (first shot deterministic)
     const pat = def.recoilPattern;
@@ -336,13 +350,51 @@ export class WeaponSystem {
     if (this.wantAds && !this.reloading) this.ads = Math.min(1, this.ads + adsSpeed * dt);
     else this.ads = Math.max(0, this.ads - adsSpeed * 1.4 * dt);
 
-    // Viewmodel ADS pose
+    // Viewmodel ADS pose + fire kick + reload mag motion
     const adsT = this.ads;
+    this._kick = Math.max(0, this._kick - dt * 6);
+    if (this._muzzleFlash && this._muzzleFlash.material.opacity > 0) {
+      this._muzzleFlash.material.opacity = Math.max(0, this._muzzleFlash.material.opacity - dt * 18);
+    }
+    const kickZ = this._kick * 0.04;
+    const kickX = this._kick * 0.01;
     this.viewGroup.position.set(
-      THREE.MathUtils.lerp(0, -0.12, adsT),
-      THREE.MathUtils.lerp(0, 0.06, adsT),
-      THREE.MathUtils.lerp(0, 0.08, adsT)
+      THREE.MathUtils.lerp(0.02, -0.14, adsT) + kickX,
+      THREE.MathUtils.lerp(-0.02, 0.05, adsT) - this._kick * 0.015,
+      THREE.MathUtils.lerp(0.02, 0.1, adsT) + kickZ
     );
+    this.viewGroup.rotation.set(
+      THREE.MathUtils.lerp(0.02, -0.02, adsT) - this._kick * 0.08,
+      THREE.MathUtils.lerp(0.08, 0, adsT),
+      THREE.MathUtils.lerp(0.03, 0, adsT)
+    );
+
+    // Magazine yank during reload
+    if (this._vmMag) {
+      if (this.reloading) {
+        const t = 1 - this.reloadT / Math.max(1e-4, this.reloadDur);
+        // 0–0.35 drop out, 0.35–0.7 hold, 0.7–1 insert
+        let my = 0;
+        let mx = 0;
+        if (t < 0.35) {
+          const u = t / 0.35;
+          my = -u * 0.35;
+          mx = u * 0.08;
+        } else if (t < 0.7) {
+          my = -0.35;
+          mx = 0.08;
+        } else {
+          const u = (t - 0.7) / 0.3;
+          my = -0.35 * (1 - u);
+          mx = 0.08 * (1 - u);
+        }
+        this._vmMag.position.set(mx, my, 0);
+        this._vmMag.visible = t < 0.38 || t > 0.68;
+      } else {
+        this._vmMag.position.set(0, 0, 0);
+        this._vmMag.visible = true;
+      }
+    }
 
     // Visual recoil recover
     this.camera.recoilPitch *= Math.exp(-12 * dt);
