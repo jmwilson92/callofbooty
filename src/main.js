@@ -247,13 +247,21 @@ async function start() {
           const tr = testRange.getLiveTargets();
           for (let i = 0; i < tr.length; i++) combatTargets.push(tr[i]);
         }
+        // Move bots first so in-flight bullets test current hitboxes (wall-hugs, lead)
+        bots.update(dt);
+        combatTargets.length = 0;
+        const liveBots2 = bots.getLiveTargets();
+        for (let i = 0; i < liveBots2.length; i++) combatTargets.push(liveBots2[i]);
+        if (testRange.active) {
+          const tr2 = testRange.getLiveTargets();
+          for (let i = 0; i < tr2.length; i++) combatTargets.push(tr2[i]);
+        }
         const fireDown = input.buttons.has(0);
         if (fireDown && !prevFire) {
           weapons.firePressed(combatTargets, testRange.active ? testRange : null, combatRng, moving);
         }
         prevFire = fireDown;
         weapons.tick(dt, input, combatTargets, testRange.active ? testRange : null, combatRng, moving);
-        bots.update(dt);
       } else {
         // Keep gravity and collision alive so the player settles while unlocked / on map.
         controller.tick(dt, IDLE_INPUT, playerCam.yaw);

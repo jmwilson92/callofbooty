@@ -543,17 +543,20 @@ export const HEALING = {
 
 /**
  * Weapons are data. One generic WeaponSystem reads these entries.
- * recoilPattern: array of [hDeg, vDeg] per shot index (cycles).
- * falloff: damage mult = 1 until falloffStart, lerp to falloffMinMult at falloffEnd.
+ * recoilPattern: [hDeg, vDeg] per shot.
+ * muzzleVelocity (m/s) + dropScale → ballistics (lead + drop).
+ * falloff: damage mult by path distance (caliber / class).
+ * TTK design: SMG wins CQC; AR wins mid; sniper/DMR win long.
  */
 export const WEAPONS = {
   vector7: {
     id: 'vector7', name: 'Vector-7', class: 'ar', fireMode: 'auto',
     ammo: 'heavy', rpm: 680, magSize: 30,
     reloadTime: 2.3, reloadTimeEmpty: 2.9, adsTime: 0.28, swapTime: 0.45,
-    damage: 26, headMult: 1.6, limbMult: 0.9,
-    falloffStart: 55, falloffEnd: 90, falloffMinMult: 0.68,
-    muzzleVelocity: null, pellets: 1,
+    // Mid-range king — slightly lower CQC DPS than SMG
+    damage: 24, headMult: 1.55, limbMult: 0.9,
+    falloffStart: 35, falloffEnd: 95, falloffMinMult: 0.72,
+    muzzleVelocity: 720, dropScale: 0.55, pellets: 1,
     spreadHip: 1.8, spreadAds: 0.12, spreadMove: 0.9, spreadMax: 3.5, spreadPerShot: 0.18,
     recoilPattern: [
       [0, 0.55], [0.02, 0.58], [-0.02, 0.6], [0.03, 0.62], [-0.03, 0.64],
@@ -569,9 +572,9 @@ export const WEAPONS = {
     id: 'kestrel', name: 'Kestrel', class: 'ar', fireMode: 'auto',
     ammo: 'heavy', rpm: 780, magSize: 25,
     reloadTime: 2.1, reloadTimeEmpty: 2.7, adsTime: 0.26, swapTime: 0.42,
-    damage: 22, headMult: 1.55, limbMult: 0.9,
-    falloffStart: 45, falloffEnd: 80, falloffMinMult: 0.65,
-    muzzleVelocity: null, pellets: 1,
+    damage: 21, headMult: 1.5, limbMult: 0.9,
+    falloffStart: 30, falloffEnd: 85, falloffMinMult: 0.7,
+    muzzleVelocity: 700, dropScale: 0.58, pellets: 1,
     spreadHip: 2.0, spreadAds: 0.14, spreadMove: 1.0, spreadMax: 3.8, spreadPerShot: 0.2,
     recoilPattern: [
       [0, 0.48], [0.05, 0.5], [-0.04, 0.52], [0.08, 0.5], [-0.1, 0.48],
@@ -584,11 +587,12 @@ export const WEAPONS = {
   },
   pike: {
     id: 'pike', name: 'Pike SMG', class: 'smg', fireMode: 'auto',
-    ammo: 'light', rpm: 900, magSize: 32,
+    ammo: 'light', rpm: 920, magSize: 32,
     reloadTime: 1.9, reloadTimeEmpty: 2.4, adsTime: 0.2, swapTime: 0.35,
-    damage: 18, headMult: 1.4, limbMult: 0.95,
-    falloffStart: 20, falloffEnd: 45, falloffMinMult: 0.5,
-    muzzleVelocity: null, pellets: 1,
+    // Best TTK up close; melts past ~25 m
+    damage: 20, headMult: 1.35, limbMult: 0.95,
+    falloffStart: 12, falloffEnd: 40, falloffMinMult: 0.32,
+    muzzleVelocity: 380, dropScale: 1.15, pellets: 1,
     spreadHip: 2.4, spreadAds: 0.22, spreadMove: 0.7, spreadMax: 4.2, spreadPerShot: 0.22,
     recoilPattern: [
       [0, 0.38], [0.08, 0.4], [-0.1, 0.42], [0.14, 0.4], [-0.16, 0.38],
@@ -605,9 +609,9 @@ export const WEAPONS = {
     id: 'warden', name: 'Warden', class: 'lmg', fireMode: 'auto',
     ammo: 'heavy', rpm: 620, magSize: 75,
     reloadTime: 4.2, reloadTimeEmpty: 5.0, adsTime: 0.4, swapTime: 0.65,
-    damage: 28, headMult: 1.4, limbMult: 0.9,
-    falloffStart: 70, falloffEnd: 120, falloffMinMult: 0.75,
-    muzzleVelocity: null, pellets: 1,
+    damage: 27, headMult: 1.4, limbMult: 0.9,
+    falloffStart: 45, falloffEnd: 120, falloffMinMult: 0.7,
+    muzzleVelocity: 680, dropScale: 0.7, pellets: 1,
     spreadHip: 2.6, spreadAds: 0.2, spreadMove: 1.4, spreadMax: 4.5, spreadPerShot: 0.15,
     recoilPattern: [
       [0, 0.7], [0.04, 0.72], [-0.05, 0.74], [0.08, 0.7], [-0.1, 0.68],
@@ -621,9 +625,10 @@ export const WEAPONS = {
     id: 'longshot', name: 'Longshot', class: 'sniper', fireMode: 'bolt',
     ammo: 'long', rpm: 45, magSize: 5,
     reloadTime: 3.1, reloadTimeEmpty: 3.6, adsTime: 0.45, swapTime: 0.7,
-    damage: 95, headMult: 2.2, limbMult: 0.75,
-    falloffStart: 999, falloffEnd: 1000, falloffMinMult: 1.0,
-    muzzleVelocity: null, pellets: 1,
+    // Long-range: high velocity still needs lead + drop on far movers
+    damage: 100, headMult: 2.15, limbMult: 0.75,
+    falloffStart: 200, falloffEnd: 400, falloffMinMult: 0.88,
+    muzzleVelocity: 860, dropScale: 0.85, pellets: 1,
     spreadHip: 4.0, spreadAds: 0.02, spreadMove: 2.5, spreadMax: 5.0, spreadPerShot: 0.5,
     recoilPattern: [[0, 2.8], [0.15, 2.6], [-0.12, 2.5], [0.2, 2.4], [-0.15, 2.3]],
     color: 0x2a3a4a, viewModel: { len: 0.72, thick: 0.05 },
@@ -634,9 +639,9 @@ export const WEAPONS = {
     id: 'marksman', name: 'Marksman DM', class: 'dmr', fireMode: 'semi',
     ammo: 'heavy', rpm: 300, magSize: 15,
     reloadTime: 2.5, reloadTimeEmpty: 3.0, adsTime: 0.32, swapTime: 0.5,
-    damage: 45, headMult: 1.9, limbMult: 0.85,
-    falloffStart: 90, falloffEnd: 150, falloffMinMult: 0.8,
-    muzzleVelocity: null, pellets: 1,
+    damage: 48, headMult: 1.9, limbMult: 0.85,
+    falloffStart: 80, falloffEnd: 180, falloffMinMult: 0.78,
+    muzzleVelocity: 780, dropScale: 0.65, pellets: 1,
     spreadHip: 2.2, spreadAds: 0.08, spreadMove: 1.2, spreadMax: 3.0, spreadPerShot: 0.25,
     // Hide viewmodel on ADS so you look *through* the glass, not at the tube
     scopeZoomFov: 28, scopeOverlay: true, hideViewOnAds: true,
@@ -651,9 +656,10 @@ export const WEAPONS = {
     id: 'breaker', name: 'Breaker', class: 'shotgun', fireMode: 'pump',
     ammo: 'shell', rpm: 70, magSize: 6,
     reloadTime: 0.5, reloadTimeEmpty: 0.5, adsTime: 0.3, swapTime: 0.5,
-    damage: 11, headMult: 1.5, limbMult: 1.0,
-    falloffStart: 8, falloffEnd: 20, falloffMinMult: 0.25,
-    muzzleVelocity: null, pellets: 9,
+    // Devastating CQC; useless long range
+    damage: 12, headMult: 1.4, limbMult: 1.0,
+    falloffStart: 6, falloffEnd: 22, falloffMinMult: 0.12,
+    muzzleVelocity: 340, dropScale: 1.4, pellets: 9,
     spreadHip: 4.5, spreadAds: 3.2, spreadMove: 1.0, spreadMax: 6.0, spreadPerShot: 0.4,
     recoilPattern: [[0, 3.5], [0.3, 3.2], [-0.25, 3.0], [0.2, 2.9], [-0.3, 2.8], [0.15, 2.7]],
     color: 0x5a4030, viewModel: { len: 0.48, thick: 0.07 },
@@ -662,9 +668,9 @@ export const WEAPONS = {
     id: 'sidearm', name: 'Sidearm P9', class: 'pistol', fireMode: 'semi',
     ammo: 'light', rpm: 400, magSize: 15,
     reloadTime: 1.6, reloadTimeEmpty: 2.0, adsTime: 0.18, swapTime: 0.3,
-    damage: 20, headMult: 1.7, limbMult: 0.9,
-    falloffStart: 25, falloffEnd: 50, falloffMinMult: 0.55,
-    muzzleVelocity: null, pellets: 1,
+    damage: 22, headMult: 1.7, limbMult: 0.9,
+    falloffStart: 14, falloffEnd: 45, falloffMinMult: 0.35,
+    muzzleVelocity: 360, dropScale: 1.2, pellets: 1,
     spreadHip: 1.5, spreadAds: 0.15, spreadMove: 0.8, spreadMax: 2.8, spreadPerShot: 0.2,
     recoilPattern: [
       [0, 0.9], [0.1, 0.85], [-0.12, 0.8], [0.15, 0.78], [-0.1, 0.75],

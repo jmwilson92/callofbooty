@@ -34,12 +34,11 @@ export function makeHumanoidParts(x, feetY, z) {
  * Covers plate carrier + limbs regardless of facing.
  */
 export function makeBotParts(x, feetY, z) {
+  // Extra-fat AABBs so bots against walls still register (yaw-agnostic)
   return [
-    boxPart('head', x, feetY + 1.72, z, 0.45, 0.42, 0.45),
-    // Full torso volume (wide in XZ so side-on shots still hit)
-    boxPart('chest', x, feetY + 1.22, z, 0.75, 0.75, 0.75),
-    // Legs as one lower mass
-    boxPart('leg', x, feetY + 0.45, z, 0.6, 0.95, 0.6),
+    boxPart('head', x, feetY + 1.72, z, 0.5, 0.45, 0.5),
+    boxPart('chest', x, feetY + 1.2, z, 0.85, 0.8, 0.85),
+    boxPart('leg', x, feetY + 0.45, z, 0.7, 0.95, 0.7),
   ];
 }
 

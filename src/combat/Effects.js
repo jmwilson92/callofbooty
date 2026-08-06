@@ -45,7 +45,20 @@ export class CombatEffects {
     });
   }
 
-  /** Thin short tracer — not a fat laser. */
+  /** Short in-flight ballistic segment (moving bullets). */
+  spawnBallisticTrace(from, to) {
+    if (!from || !to) return;
+    if (from.distanceToSquared(to) < 1e-4) return;
+    const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);
+    const mat = this._lineMat.clone();
+    mat.opacity = 0.35;
+    mat.color = new THREE.Color(0xfff0c0);
+    const line = new THREE.Line(geo, mat);
+    this.group.add(line);
+    this.tracers.push({ line, mat, life: 0.04 });
+  }
+
+  /** Thin short tracer — muzzle flash streak. */
   spawnTracer(from, to) {
     // Only draw last ~18 m of the path so it doesn't fill the screen
     const dir = to.clone().sub(from);

@@ -1,14 +1,15 @@
 import * as THREE from 'three';
 import { WEAPONS, RARITY, COMBAT, AMMO } from '../config.js';
-import { castHitscan, falloffMult, partMult } from './Hitscan.js';
 import { buildViewModel } from './ViewModels.js';
 import { classToModelKey } from './WeaponAssets.js';
+import { Ballistics } from './Ballistics.js';
 
 const DEG = Math.PI / 180;
 
 /**
  * Data-driven weapon system. Inventory holds up to 2 weapon instances.
  * Fire, reload, swap, ADS, recoil (visual + aim offset), hip bloom.
+ * Bullets use ballistics (velocity, drop, travel time → lead required).
  */
 export class WeaponSystem {
   constructor(camera, hash, bus, effects) {
@@ -16,6 +17,7 @@ export class WeaponSystem {
     this.hash = hash;
     this.bus = bus;
     this.effects = effects;
+    this.ballistics = new Ballistics(hash, effects, bus);
 
     // slots[0], slots[1] = weapon instances or null
     this.slots = [null, null];
@@ -302,48 +304,34 @@ export class WeaponSystem {
     const c = this.current;
     if (!def || !c) return;
 
-    const hit = castHitscan(origin, dir, this.hash, targets, 500);
-    this.effects.spawnTracer(origin, hit.point);
-    this.effects.spawnImpact(hit.point, hit.tag || 'solid');
+    // Realistic bullet: speed by caliber, gravity drop, travel time (lead)
+    const speed = def.muzzleVelocity || 600;
+    this.ballistics.fire({
+      origin: origin.clone(),
+      dir: dir.clone().normalize(),
+      speed,
+      damage: def.damage,
+      def,
+      rar,
+      targetRange,
+      maxDist: 500,
+    });
 
-    // Small brass eject to the RIGHT of the gun (not into the crosshair)
+    // Instant cosmetic muzzle streak (not the damage ray)
+    const streakEnd = origin.clone().addScaledVector(dir, Math.min(18, speed * 0.025));
+    this.effects.spawnTracer(origin, streakEnd);
+
+    // Brass eject to the right
     {
       const cam = this.camera.camera;
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-      // Ejection port: slightly forward of eye, low-right of viewmodel
       const eject = origin.clone()
         .addScaledVector(right, 0.12)
         .addScaledVector(up, -0.08)
         .addScaledVector(forward, 0.2);
       this.effects.spawnCasing(eject, right, up, forward);
-    }
-
-    if (hit.target && hit.part) {
-      let dmg = def.damage * rar.dmg;
-      dmg *= partMult(hit.part, def);
-      dmg *= falloffMult(hit.dist, def);
-      dmg *= hit.damageMult;
-      let res = { killed: false, applied: dmg };
-      // Prefer target-owned handler (bots), then test range, then raw health
-      if (typeof hit.target.applyDamage === 'function') {
-        res = hit.target.applyDamage(dmg, hit.part);
-      } else if (targetRange) {
-        res = targetRange.applyDamage(hit.target, dmg, hit.part);
-      } else if (hit.target.health != null) {
-        hit.target.health -= dmg;
-        if (hit.target.health <= 0) {
-          hit.target.health = 0;
-          hit.target.dead = true;
-          res.killed = true;
-        }
-      }
-      this.effects.showHitmarker(hit.part === 'head');
-      this.effects.spawnDamageNumber(hit.point, dmg, hit.part === 'head');
-      this.bus.emit('combat:hit', {
-        damage: dmg, part: hit.part, dist: hit.dist, killed: res.killed,
-      });
     }
   }
 
@@ -406,6 +394,9 @@ export class WeaponSystem {
   }
 
   tick(dt, input, targets, targetRange, rng, moving) {
+    // Advance live bullets (drop, travel, hits)
+    this.ballistics.update(dt, targets || []);
+
     // ADS blend
     this.wantAds = input.buttons.has(2);
     const def = this.def;

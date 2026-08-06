@@ -77,6 +77,8 @@ export class BotSystem {
       z,
       yaw: hash2(id, 7) * Math.PI * 2,
       speed: BOTS.SPEED + (hash2(id, 3) - 0.5) * 2 * BOTS.SPEED_JITTER,
+      vx: 0,
+      vz: 0,
       health: BOTS.HEALTH,
       maxHealth: BOTS.HEALTH,
       armor: 0,
@@ -329,6 +331,8 @@ export class BotSystem {
 
       if (bot.pauseT > 0) {
         bot.pauseT -= dt;
+        bot.vx = 0;
+        bot.vz = 0;
         this._idleAnim(bot, dt);
         this._syncParts(bot);
         continue;
@@ -371,6 +375,8 @@ export class BotSystem {
         }
       }
 
+      bot.vx = nx * bot.speed;
+      bot.vz = nz * bot.speed;
       bot.x = nextX;
       bot.z = nextZ;
       bot.y = this.terrain.heightAt(bot.x, bot.z);
