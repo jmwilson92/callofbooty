@@ -159,23 +159,30 @@ export class ElevatorSystem {
     canvas.height = 128;
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.flipY = true;
+    // Plane default normal = +Z. Rotate so the front face looks INTO the cabin
+    // (never show the mirrored backface).
     const mat = new THREE.MeshBasicMaterial({
       map: tex,
       transparent: true,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
     });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.35), mat);
-    // Mount on the wall opposite the open door, facing into the cabin
     const inset = 0.02;
     if (face === 'S') {
+      // Door −Z → panel on +Z wall, face −Z into cabin
       mesh.position.set(0, 1.55, d * 0.42 - inset);
-    } else if (face === 'N') {
-      mesh.position.set(0, 1.55, -d * 0.42 + inset);
       mesh.rotation.y = Math.PI;
+    } else if (face === 'N') {
+      // Door +Z → panel on −Z wall, face +Z into cabin
+      mesh.position.set(0, 1.55, -d * 0.42 + inset);
+      mesh.rotation.y = 0;
     } else if (face === 'W') {
+      // Door −X → panel on +X wall, face −X into cabin
       mesh.position.set(w * 0.42 - inset, 1.55, 0);
       mesh.rotation.y = -Math.PI / 2;
     } else {
+      // Door +X → panel on −X wall, face +X into cabin
       mesh.position.set(-w * 0.42 + inset, 1.55, 0);
       mesh.rotation.y = Math.PI / 2;
     }

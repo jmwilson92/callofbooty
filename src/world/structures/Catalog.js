@@ -678,20 +678,24 @@ function addElevatorBank(sink, x, z, w, d, baseY, floors, floorH, rng = Math.ran
 
 /**
  * Interior switchback stair core — two equal-width lanes (never stacked).
- * Same lane width on every floor + roof flight. Clear walk-out onto the roof.
+ * Continuous zigzag: every floor has matching landings + a full flight so
+ * nothing is disconnected. Same 1.55 m lane width all the way to the roof.
  * Returns a hole rect to punch through floor + roof slabs.
  */
 function addInteriorStairs(sink, x, z, w, d, baseY, floors, floorH, elevHole) {
-  // Fixed geometry so every flight is the same width (capsule r=0.4 needs ≥1.3 clear)
+  // Fixed geometry — capsule r=0.4 needs ≥1.3 clear
   const LANE_W = 1.55;
-  const GAP = 0.28; // middle gap between switchback lanes
-  const EDGE = 0.14; // outer margin / rail space
+  const GAP = 0.28;
+  const EDGE = 0.12;
   const coreW = EDGE * 2 + LANE_W * 2 + GAP;
-  const landD = 1.45;
-  const flightLen = 3.1;
+  const landD = 1.55;
+  const flightLen = 3.2;
   const coreD = landD * 2 + flightLen;
+  // Match floor slab tops (Catalog / skyline use baseY + f*floorH + deck)
+  const deck = 0.16;
+  const landThick = 0.16;
 
-  // Prefer opposite corner from elevator so paths don't collide
+  // Prefer opposite corner from elevator
   let sx0 = x + 0.5;
   let sz0 = z + 0.5;
   if (elevHole) {
@@ -702,57 +706,80 @@ function addInteriorStairs(sink, x, z, w, d, baseY, floors, floorH, elevHole) {
     if (elevCZ < z + d * 0.5) sz0 = z + d - coreD - 0.5;
     else sz0 = z + 0.5;
   } else {
-    // Default NE corner
     sx0 = x + w - coreW - 0.5;
     sz0 = z + d - coreD - 0.5;
   }
-  // Clamp inside footprint
   sx0 = Math.max(x + 0.4, Math.min(sx0, x + w - coreW - 0.4));
   sz0 = Math.max(z + 0.4, Math.min(sz0, z + d - coreD - 0.4));
 
   const sx1 = sx0 + coreW;
   const sz1 = sz0 + coreD;
-  // Both lanes identical width every floor
   const laneAx0 = sx0 + EDGE;
   const laneAx1 = laneAx0 + LANE_W;
   const laneBx1 = sx1 - EDGE;
   const laneBx0 = laneBx1 - LANE_W;
 
-  // Direction from stair core toward building center (roof exit)
+  // Toward building center for floor/roof exit pads
   const scx = (sx0 + sx1) * 0.5;
   const scz = (sz0 + sz1) * 0.5;
   const bcx = x + w * 0.5;
   const bcz = z + d * 0.5;
   const toCx = bcx - scx;
   const toCz = bcz - scz;
-  const exitSouth = Math.abs(toCz) >= Math.abs(toCx) ? toCz < 0 : false;
+  const exitSouth = Math.abs(toCz) >= Math.abs(toCx) ? toCz < 0 : true;
   const exitNorth = Math.abs(toCz) >= Math.abs(toCx) ? toCz >= 0 : false;
   const exitWest = Math.abs(toCx) > Math.abs(toCz) ? toCx < 0 : false;
   const exitEast = Math.abs(toCx) > Math.abs(toCz) ? toCx >= 0 : false;
 
-  const maxF = floors; // last flight tops at roof
-  const steps = Math.max(10, Math.ceil(floorH / 0.32));
-  const treadH = 0.12;
+  // Landings at every story 0..floors-1 plus roof deck
   const roofY = baseY + floors * floorH;
-  const roofDeckY = roofY + 0.16;
+  const roofDeckY = roofY + deck;
+  const floorDeckY = (f) => (f >= floors ? roofDeckY : baseY + f * floorH + deck);
 
-  for (let f = 0; f <= maxF; f++) {
-    const y = f < maxF ? baseY + f * floorH : roofDeckY;
-    // Full-width landings (same size every story)
-    sink.addSpan(sx0, y, sz0, sx1, y + 0.14, sz0 + landD, C.concrete);
-    sink.addSpan(sx0, y, sz1 - landD, sx1, y + 0.14, sz1, C.concrete);
+  const steps = Math.max(11, Math.ceil(floorH / 0.30));
+  const treadH = 0.14;
+  // Overlap flights into landings so steps never leave a gap
+  const zSouthLand = sz0 + landD;
+  const zNorthLand = sz1 - landD;
+  const overlap = 0.28;
 
-    if (f >= maxF) break;
+  // --- Landings at every floor + roof (ends only — keep the well open for flights) ---
+  for (let f = 0; f <= floors; f++) {
+    const top = floorDeckY(f);
+    const bot = top - landThick;
+    // Full-width end landings so you can transfer between switchback lanes
+    sink.addSpan(sx0, bot, sz0, sx1, top, zSouthLand, C.concrete);
+    sink.addSpan(sx0, bot, zNorthLand, sx1, top, sz1, C.concrete);
 
+    // Exit pad onto the floor deck every story (and roof) — bridges the
+    // punched stair hole to the solid floor so no story is stranded.
+    const exitLen = 1.7;
+    if (exitSouth || (!exitNorth && !exitEast && !exitWest)) {
+      sink.addSpan(sx0 - 0.15, bot, sz0 - exitLen, sx1 + 0.15, top, sz0 + 0.08, C.concrete);
+    }
+    if (exitNorth) {
+      sink.addSpan(sx0 - 0.15, bot, sz1 - 0.08, sx1 + 0.15, top, sz1 + exitLen, C.concrete);
+    }
+    if (exitWest) {
+      sink.addSpan(sx0 - exitLen, bot, sz0 - 0.1, sx0 + 0.08, top, sz1 + 0.1, C.concrete);
+    }
+    if (exitEast) {
+      sink.addSpan(sx1 - 0.08, bot, sz0 - 0.1, sx1 + exitLen, top, sz1 + 0.1, C.concrete);
+    }
+  }
+
+  // --- Flights: floor f → floor f+1 (incl. roof), alternating lanes ---
+  for (let f = 0; f < floors; f++) {
     const useA = f % 2 === 0;
     const x0 = useA ? laneAx0 : laneBx0;
     const x1 = useA ? laneAx1 : laneBx1;
-    const yBot = baseY + f * floorH;
-    const yTop = f === maxF - 1 ? roofDeckY : yBot + floorH;
+    const yBot = floorDeckY(f);
+    const yTop = floorDeckY(f + 1);
     const flightRise = yTop - yBot;
     const stepRise = flightRise / steps;
-    const zStart = useA ? sz0 + landD - 0.02 : sz1 - landD + 0.02;
-    const zEnd = useA ? sz1 - landD + 0.02 : sz0 + landD - 0.02;
+    // Even: climb +Z (south landing → north). Odd: climb −Z (north → south).
+    const zStart = useA ? zSouthLand - overlap : zNorthLand + overlap;
+    const zEnd = useA ? zNorthLand + overlap : zSouthLand - overlap;
     const stepRun = (zEnd - zStart) / steps;
     for (let k = 0; k < steps; k++) {
       const top = yBot + (k + 1) * stepRise;
@@ -760,37 +787,30 @@ function addInteriorStairs(sink, x, z, w, d, baseY, floors, floorH, elevHole) {
       const zz1 = zStart + (k + 1) * stepRun;
       const za = Math.min(zz0, zz1);
       const zb = Math.max(zz0, zz1);
-      sink.addSpan(x0, top - treadH, za, x1, top, zb, C.concrete);
+      // Slight lengthen so consecutive treads overlap and never leave a hole
+      const pad = 0.03;
+      sink.addSpan(x0, top - treadH, za - pad, x1, top, zb + pad, C.concrete);
     }
   }
 
-  // Thin outer rails only (stop below roof so exit is open)
-  sink.addSpan(sx0, baseY + 0.14, sz0, sx0 + 0.04, roofY - 0.25, sz1, C.metal, 'thin');
-  sink.addSpan(sx1 - 0.04, baseY + 0.14, sz0, sx1, roofY - 0.25, sz1, C.metal, 'thin');
+  // Thin side rails (open ends for walk-out)
+  sink.addSpan(sx0, baseY + deck, sz0, sx0 + 0.04, roofY - 0.2, sz1, C.metal, 'thin');
+  sink.addSpan(sx1 - 0.04, baseY + deck, sz0, sx1, roofY - 0.2, sz1, C.metal, 'thin');
 
-  // Roof exit pad
-  const exitLen = 2.0;
-  if (exitSouth || (!exitNorth && !exitEast && !exitWest)) {
-    sink.addSpan(sx0 - 0.2, roofDeckY, sz0 - exitLen, sx1 + 0.2, roofDeckY + 0.12, sz0 + 0.1, C.concrete);
-  }
-  if (exitNorth) {
-    sink.addSpan(sx0 - 0.2, roofDeckY, sz1 - 0.1, sx1 + 0.2, roofDeckY + 0.12, sz1 + exitLen, C.concrete);
-  }
-  if (exitWest) {
-    sink.addSpan(sx0 - exitLen, roofDeckY, sz0 - 0.2, sx0 + 0.1, roofDeckY + 0.12, sz1 + 0.2, C.concrete);
-  }
-  if (exitEast) {
-    sink.addSpan(sx1 - 0.1, roofDeckY, sz0 - 0.2, sx1 + exitLen, roofDeckY + 0.12, sz1 + 0.2, C.concrete);
-  }
-
-  // Corner posts only (no sealed bulkhead)
+  // Roof hatch markers
   const bh = 1.0;
   post(sink, sx0, roofDeckY, sz0, bh, 0.12, C.metalLite);
   post(sink, sx1 - 0.12, roofDeckY, sz0, bh, 0.12, C.metalLite);
   post(sink, sx0, roofDeckY, sz1 - 0.12, bh, 0.12, C.metalLite);
   post(sink, sx1 - 0.12, roofDeckY, sz1 - 0.12, bh, 0.12, C.metalLite);
 
-  return { x0: sx0 - 0.1, z0: sz0 - 0.1, x1: sx1 + 0.1, z1: sz1 + 0.1 };
+  // Hole: stair well only (exit pads sit on the solid floor outside)
+  return {
+    x0: sx0 - 0.06,
+    z0: sz0 - 0.06,
+    x1: sx1 + 0.06,
+    z1: sz1 + 0.06,
+  };
 }
 
 /**
