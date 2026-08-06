@@ -483,7 +483,8 @@ export const INPUT = {
     right: ['KeyD'],
     jump: ['Space'],
     sprint: ['ShiftLeft', 'ShiftRight'],
-    crouch: ['KeyC', 'ControlLeft'],
+    // C is primary; Ctrl also descends the heli. Right-Ctrl included for laptops.
+    crouch: ['KeyC', 'ControlLeft', 'ControlRight'],
     interact: ['KeyE'], // doors, loot, vehicles, elevators
     reload: ['KeyR'],
     weapon1: ['Digit1'],

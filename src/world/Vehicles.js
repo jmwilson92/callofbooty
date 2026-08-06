@@ -385,16 +385,20 @@ export class VehicleSystem {
 
   /**
    * AABB overlap with building volumes (blocks heli from clipping through).
+   * Skids may rest slightly above a roof; the body may not bury into floors.
    */
   _heliHitsBuilding(x, y, z) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return true;
     const cfg = VEHICLES.HELICOPTER;
     const hw = cfg.halfW ?? 3.6;
     const hh = cfg.halfH ?? 1.6;
     const hd = cfg.halfD ?? 4.2;
     const y0 = y;
     const y1 = y + hh * 2;
+    const roofClear = 0.45; // skids/pad clearance above roof slab
 
     for (const b of worldBuildings || []) {
+      if (!Number.isFinite(b?.w) || !Number.isFinite(b?.d)) continue;
       // Expand footprint slightly for rotors
       const bx0 = b.x - 0.4;
       const bx1 = b.x + b.w + 0.4;
@@ -403,28 +407,84 @@ export class VehicleSystem {
       if (x + hw < bx0 || x - hw > bx1) continue;
       if (z + hd < bz0 || z - hd > bz1) continue;
       const bot = (b.baseY ?? 0) - 0.2;
-      const top = (b.roofY ?? (b.baseY + (b.floors || 1) * 3.5)) + 0.15;
-      // Allow sitting just above roof (pad clearance)
-      if (y0 < top - 0.05 && y1 > bot) {
-        // If mostly above roof top with skids, not a hit
-        if (y0 >= top - 0.35) continue;
-        return true;
-      }
+      const top = (b.roofY ?? ((b.baseY ?? 0) + (b.floors || 1) * 3.5)) + 0.15;
+      if (!Number.isFinite(bot) || !Number.isFinite(top)) continue;
+      // Above the roof deck → free air (pad / hover)
+      if (y0 >= top - roofClear) continue;
+      // Overlap building mass
+      if (y0 < top - 0.05 && y1 > bot) return true;
     }
     return false;
+  }
+
+  /** Push heli out of the nearest building AABB if deeply embedded. */
+  _ejectHeliFromBuilding(v) {
+    const cfg = VEHICLES.HELICOPTER;
+    const hw = cfg.halfW ?? 3.6;
+    const hd = cfg.halfD ?? 4.2;
+    let best = null;
+    let bestPen = Infinity;
+    for (const b of worldBuildings || []) {
+      if (!Number.isFinite(b?.w) || !Number.isFinite(b?.d)) continue;
+      const bx0 = b.x - 0.4;
+      const bx1 = b.x + b.w + 0.4;
+      const bz0 = b.z - 0.4;
+      const bz1 = b.z + b.d + 0.4;
+      if (v.x + hw < bx0 || v.x - hw > bx1) continue;
+      if (v.z + hd < bz0 || v.z - hd > bz1) continue;
+      const top = (b.roofY ?? ((b.baseY ?? 0) + (b.floors || 1) * 3.5)) + 0.15;
+      if (v.y >= top - 0.45) continue;
+      // Penetration depth on each axis (how far to clear horizontally)
+      const left = (v.x + hw) - bx0;
+      const right = bx1 - (v.x - hw);
+      const south = (v.z + hd) - bz0;
+      const north = bz1 - (v.z - hd);
+      const up = top + 0.5 - v.y;
+      const opts = [
+        { pen: left, dx: -left - 0.2, dy: 0, dz: 0 },
+        { pen: right, dx: right + 0.2, dy: 0, dz: 0 },
+        { pen: south, dx: 0, dy: 0, dz: -south - 0.2 },
+        { pen: north, dx: 0, dy: 0, dz: north + 0.2 },
+        { pen: up + 2, dx: 0, dy: Math.min(up + 0.6, 6), dz: 0 },
+      ];
+      for (const o of opts) {
+        if (o.pen < bestPen) {
+          bestPen = o.pen;
+          best = o;
+        }
+      }
+    }
+    if (!best) {
+      // No building claim — lift slightly and kill vertical speed
+      v.y += 0.5;
+      v.vy = Math.max(0, v.vy);
+      return;
+    }
+    v.x += best.dx;
+    v.y += best.dy;
+    v.z += best.dz;
+    v.vx *= 0.2;
+    v.vz *= 0.2;
+    if (best.dy > 0) v.vy = Math.max(0, v.vy);
+    else v.vy *= 0.2;
   }
 
   /**
    * @returns {boolean} true if riding
    */
   update(dt, controller, input, yaw) {
-    // Rockets always tick
-    this._updateRockets(dt);
+    try {
+      // Rockets always tick
+      this._updateRockets(dt);
+    } catch (err) {
+      console.warn('[vehicles] rocket update failed', err);
+      this._rockets.length = 0;
+    }
 
     for (const v of this.vehicles) {
       if (v.type !== 'helicopter') continue;
-      const rotor = v.root.userData.rotor;
-      const tail = v.root.userData.tailRotor;
+      const rotor = v.root?.userData?.rotor;
+      const tail = v.root?.userData?.tailRotor;
       const spin = this.active === v ? 28 : 0.4;
       if (rotor) rotor.rotation.y += spin * dt;
       if (tail) tail.rotation.x += spin * 1.6 * dt;
@@ -433,9 +493,37 @@ export class VehicleSystem {
 
     if (!this.active || !controller) return false;
     const v = this.active;
-    if (v.type === 'motorcycle') this._driveMoto(dt, v, controller, input, yaw);
-    else this._driveHeli(dt, v, controller, input, yaw);
+    try {
+      if (v.type === 'motorcycle') this._driveMoto(dt, v, controller, input, yaw);
+      else this._driveHeli(dt, v, controller, input, yaw);
+    } catch (err) {
+      // Never let a vehicle glitch freeze the whole game loop
+      console.warn('[vehicles] drive failed — recovering', err);
+      this._sanitizeVehicle(v);
+      if (v.root) v.root.position.set(v.x, v.y, v.z);
+      const cfg = v.type === 'helicopter' ? VEHICLES.HELICOPTER : VEHICLES.MOTORCYCLE;
+      controller.pos.set(v.x, v.y + (cfg.seatY ?? 1), v.z);
+      controller.vel.set(0, 0, 0);
+      controller.prevPos?.copy?.(controller.pos);
+    }
     return true;
+  }
+
+  _sanitizeVehicle(v) {
+    const lim = WORLD.SIZE * 0.48;
+    if (!Number.isFinite(v.x)) v.x = 0;
+    if (!Number.isFinite(v.y)) v.y = 20;
+    if (!Number.isFinite(v.z)) v.z = 0;
+    if (!Number.isFinite(v.vx)) v.vx = 0;
+    if (!Number.isFinite(v.vy)) v.vy = 0;
+    if (!Number.isFinite(v.vz)) v.vz = 0;
+    if (!Number.isFinite(v.yaw)) v.yaw = 0;
+    if (!Number.isFinite(v.speed)) v.speed = 0;
+    v.x = THREE.MathUtils.clamp(v.x, -lim, lim);
+    v.z = THREE.MathUtils.clamp(v.z, -lim, lim);
+    const ground = this.terrain.heightAt(v.x, v.z);
+    if (!Number.isFinite(v.y) || v.y < ground + 1) v.y = ground + 3;
+    if (v.y > (VEHICLES.HELICOPTER?.maxY ?? 220)) v.y = VEHICLES.HELICOPTER.maxY;
   }
 
   /**
@@ -578,12 +666,22 @@ export class VehicleSystem {
         this._rockets.splice(i, 1);
         continue;
       }
+      if (!Number.isFinite(r.x + r.y + r.z)) {
+        this.group.remove(r.mesh);
+        r.mesh.geometry?.dispose?.();
+        this._rockets.splice(i, 1);
+        continue;
+      }
       r.mesh.position.set(r.x, r.y, r.z);
       const sp = Math.hypot(r.vx, r.vy, r.vz) || 1;
-      r.mesh.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        new THREE.Vector3(r.vx / sp, r.vy / sp, r.vz / sp)
-      );
+      const dir = new THREE.Vector3(r.vx / sp, r.vy / sp, r.vz / sp);
+      if (dir.lengthSq() > 1e-8) {
+        try {
+          r.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+        } catch {
+          /* ignore degenerate rocket orientation */
+        }
+      }
       // Trail
       if ((r._trailAcc = (r._trailAcc || 0) + dt) > 0.04) {
         r._trailAcc = 0;
@@ -721,10 +819,17 @@ export class VehicleSystem {
     const maxSp = cfg.speed ?? 38;
     const accel = cfg.accel ?? 18;
     const climb = cfg.climb ?? 14;
+    // Hover clearance above terrain/roofs. Keep modest so Ctrl/C descend feels responsive.
     const minAGL = cfg.minAGL ?? 2.5;
     const maxY = cfg.maxY ?? 220;
+    const lim = WORLD.SIZE * 0.48;
 
-    let dyaw = yaw - v.yaw;
+    // Guard bad state from a previous glitch before integrating
+    if (!Number.isFinite(v.x + v.y + v.z + v.vx + v.vy + v.vz + v.yaw)) {
+      this._sanitizeVehicle(v);
+    }
+
+    let dyaw = (Number.isFinite(yaw) ? yaw : v.yaw) - v.yaw;
     while (dyaw > Math.PI) dyaw -= Math.PI * 2;
     while (dyaw < -Math.PI) dyaw += Math.PI * 2;
     v.yaw += THREE.MathUtils.clamp(dyaw, -2.8 * dt, 2.8 * dt);
@@ -734,10 +839,10 @@ export class VehicleSystem {
 
     let wishX = 0;
     let wishZ = 0;
-    if (input.action('forward')) { wishX += f.x; wishZ += f.z; }
-    if (input.action('back')) { wishX -= f.x; wishZ -= f.z; }
-    if (input.action('left')) { wishX -= r.x; wishZ -= r.z; }
-    if (input.action('right')) { wishX += r.x; wishZ += r.z; }
+    if (input?.action?.('forward')) { wishX += f.x; wishZ += f.z; }
+    if (input?.action?.('back')) { wishX -= f.x; wishZ -= f.z; }
+    if (input?.action?.('left')) { wishX -= r.x; wishZ -= r.z; }
+    if (input?.action?.('right')) { wishX += r.x; wishZ += r.z; }
     const wlen = Math.hypot(wishX, wishZ);
     if (wlen > 1e-4) {
       wishX /= wlen;
@@ -754,19 +859,21 @@ export class VehicleSystem {
       v.vz *= maxSp / hsp;
     }
 
+    // Space = climb, C / Ctrl = descend (crouch binding)
     let climbWish = 0;
-    if (input.action('jump')) climbWish += 1;
-    if (input.action('crouch')) climbWish -= 1;
+    if (input?.action?.('jump')) climbWish += 1;
+    if (input?.action?.('crouch')) climbWish -= 1;
     v.vy += climbWish * climb * dt;
     if (climbWish === 0) v.vy *= Math.exp(-2.2 * dt);
     v.vy = THREE.MathUtils.clamp(v.vy, -climb * 1.1, climb);
 
-    // Integrate with collision — try full step, then axis slides
+    // Integrate with collision — full step, then axis slides, then eject (no thrash)
     const tryPos = (nx, ny, nz) => {
-      const lim = WORLD.SIZE * 0.48;
+      if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(nz)) return null;
       nx = THREE.MathUtils.clamp(nx, -lim, lim);
       nz = THREE.MathUtils.clamp(nz, -lim, lim);
-      const support = this._supportY(nx, ny + 2, nz);
+      let support = this._supportY(nx, ny + 2, nz);
+      if (!Number.isFinite(support)) support = this.terrain.heightAt(nx, nz) || 0;
       const minY = support + minAGL;
       if (ny < minY) {
         ny = minY;
@@ -785,44 +892,54 @@ export class VehicleSystem {
     const nz = v.z + v.vz * dt;
     let ok = tryPos(nx, ny, nz);
     if (!ok) {
-      // Slide: try horizontal only, vertical only, or stop into surface
+      // Prefer sliding along the hit surface over violent bounce
       ok = tryPos(nx, v.y, nz);
       if (ok) {
-        v.vy *= 0.2;
+        v.vy *= 0.15;
       } else {
         ok = tryPos(v.x, ny, v.z);
         if (ok) {
-          v.vx *= 0.15;
-          v.vz *= 0.15;
+          v.vx *= 0.12;
+          v.vz *= 0.12;
         } else {
-          // Push out of building if embedded
-          v.vx *= -0.3;
-          v.vz *= -0.3;
-          v.vy = Math.max(v.vy, 2);
-          ok = tryPos(v.x + v.vx * dt, v.y + 0.4, v.z + v.vz * dt)
-            || { x: v.x, y: v.y + 0.5, z: v.z };
+          // Fully blocked / embedded: stop motion and eject once (stable)
+          v.vx = 0;
+          v.vz = 0;
+          v.vy = 0;
+          this._ejectHeliFromBuilding(v);
+          ok = tryPos(v.x, v.y, v.z) || { x: v.x, y: v.y, z: v.z };
         }
       }
     }
     v.x = ok.x;
     v.y = ok.y;
     v.z = ok.z;
+    this._sanitizeVehicle(v);
 
-    v.root.position.set(v.x, v.y, v.z);
-    v.root.rotation.y = v.yaw;
-    const pitch = THREE.MathUtils.clamp(
-      -v.vy * 0.02 - (input.action('forward') ? 0.12 : 0) + (input.action('back') ? 0.08 : 0),
-      -0.25, 0.2
-    );
-    const bank = THREE.MathUtils.clamp((input.action('right') ? 1 : 0) - (input.action('left') ? 1 : 0), -1, 1) * 0.2;
-    v.root.rotation.x = THREE.MathUtils.lerp(v.root.rotation.x || 0, pitch, 1 - Math.exp(-5 * dt));
-    v.root.rotation.z = THREE.MathUtils.lerp(v.root.rotation.z || 0, -bank, 1 - Math.exp(-5 * dt));
+    if (v.root) {
+      v.root.position.set(v.x, v.y, v.z);
+      v.root.rotation.y = v.yaw;
+      const pitch = THREE.MathUtils.clamp(
+        -v.vy * 0.02
+          - (input?.action?.('forward') ? 0.12 : 0)
+          + (input?.action?.('back') ? 0.08 : 0),
+        -0.25, 0.2
+      );
+      const bank = THREE.MathUtils.clamp(
+        (input?.action?.('right') ? 1 : 0) - (input?.action?.('left') ? 1 : 0),
+        -1, 1
+      ) * 0.2;
+      const rx = Number.isFinite(v.root.rotation.x) ? v.root.rotation.x : 0;
+      const rz = Number.isFinite(v.root.rotation.z) ? v.root.rotation.z : 0;
+      v.root.rotation.x = THREE.MathUtils.lerp(rx, pitch, 1 - Math.exp(-5 * dt));
+      v.root.rotation.z = THREE.MathUtils.lerp(rz, -bank, 1 - Math.exp(-5 * dt));
+    }
 
     controller.pos.set(v.x, v.y + (cfg.seatY ?? 1.1), v.z);
     controller.vel.set(v.vx, v.vy, v.vz);
     controller.grounded = false;
     controller.speed = Math.hypot(v.vx, v.vz);
-    controller.prevPos.copy(controller.pos);
+    if (controller.prevPos) controller.prevPos.copy(controller.pos);
   }
 
   prompt(px, py, pz) {

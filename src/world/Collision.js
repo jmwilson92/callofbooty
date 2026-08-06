@@ -45,10 +45,33 @@ export class SpatialHash {
   // Fills `out` with unique candidate boxes overlapping the query AABB.
   query(minX, minZ, maxX, maxZ, out) {
     out.length = 0;
-    const x0 = Math.floor(minX / this.cellSize);
-    const x1 = Math.floor(maxX / this.cellSize);
-    const z0 = Math.floor(minZ / this.cellSize);
-    const z1 = Math.floor(maxZ / this.cellSize);
+    // Invalid / infinite ranges used to spin forever and freeze the tab.
+    if (
+      !Number.isFinite(minX) || !Number.isFinite(minZ)
+      || !Number.isFinite(maxX) || !Number.isFinite(maxZ)
+    ) {
+      return out;
+    }
+    let x0 = Math.floor(minX / this.cellSize);
+    let x1 = Math.floor(maxX / this.cellSize);
+    let z0 = Math.floor(minZ / this.cellSize);
+    let z1 = Math.floor(maxZ / this.cellSize);
+    if (x0 > x1) { const t = x0; x0 = x1; x1 = t; }
+    if (z0 > z1) { const t = z0; z0 = z1; z1 = t; }
+
+    // Cap cell span so a huge rocket/LOS box cannot freeze the main thread.
+    // ~80×80 cells ≈ 640 m @ 8 m cells — plenty for combat rays on this map.
+    const MAX_SPAN = 80;
+    if (x1 - x0 > MAX_SPAN) {
+      const mid = (x0 + x1) >> 1;
+      x0 = mid - (MAX_SPAN >> 1);
+      x1 = x0 + MAX_SPAN;
+    }
+    if (z1 - z0 > MAX_SPAN) {
+      const mid = (z0 + z1) >> 1;
+      z0 = mid - (MAX_SPAN >> 1);
+      z1 = z0 + MAX_SPAN;
+    }
 
     this._stamp = (this._stamp || 0) + 1;
     const stamp = this._stamp;

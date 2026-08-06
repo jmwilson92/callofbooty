@@ -23,9 +23,20 @@ export class Input {
       if (e.repeat) return;
       this.keys.add(e.code);
       this.pressed.add(e.code);
-      // Stop space from scrolling, F3 from browser search, M from finding.
-      if (e.code === 'Space' || e.code === 'F3' || e.code === 'KeyM' || e.code === 'Tab') {
-        e.preventDefault();
+      // Stop browser chrome from eating gameplay keys while pointer is locked
+      // (Space scroll, F3 search, M find, Ctrl shortcuts, Tab focus).
+      if (
+        e.code === 'Space'
+        || e.code === 'F3'
+        || e.code === 'KeyM'
+        || e.code === 'Tab'
+        || e.code === 'ControlLeft'
+        || e.code === 'ControlRight'
+        || e.code === 'KeyC'
+      ) {
+        if (this.locked || e.code === 'Space' || e.code === 'Tab' || e.code === 'F3') {
+          e.preventDefault();
+        }
       }
     });
 
@@ -35,6 +46,7 @@ export class Input {
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.buttons.clear();
+      this.pressed.clear();
     });
 
     // Listen on `window`, not on the canvas. The menu overlay covers the whole
