@@ -54,18 +54,28 @@ export async function loadWeaponLibrary(catalogUrl = '/assets/weapons_catalog.js
           o.renderOrder = 999;
           o.castShadow = false;
           o.receiveShadow = false;
-          // Boost metal/rough if missing
+          const n = (o.name || '').toLowerCase();
+          // Hide solid optic_body leftovers; force glass panes nearly invisible
+          if (n.includes('optic_body') || n === 'opticbody') {
+            o.visible = false;
+          }
           if (o.material) {
             const mats = Array.isArray(o.material) ? o.material : [o.material];
             for (const m of mats) {
               if (m.isMeshStandardMaterial) {
                 m.envMapIntensity = 0.8;
+                if (n.includes('glass') || n.includes('optic_glass')) {
+                  m.transparent = true;
+                  m.opacity = 0.08;
+                  m.depthWrite = false;
+                  m.metalness = 0.05;
+                  m.roughness = 0.1;
+                }
                 m.needsUpdate = true;
               }
             }
           }
         }
-        // Empties stay as Object3D
         o.frustumCulled = false;
       });
       byClass[cls] = root;

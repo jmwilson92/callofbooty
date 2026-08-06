@@ -168,16 +168,16 @@ function ironSights(root, glow, black, frontZ, rearZ, y = 0.02) {
   box(root, 0.018, 0.0025, 0.0035, black, 0, y, rearZ);
 }
 
-/** Red-dot: solid housing under a open glass window + center reticle. */
+/** Open micro red-dot — thin frame only; center clear for aiming. */
 function redDot(root, dark, glass, glow, z = -0.04, y = 0.03) {
-  box(root, 0.04, 0.018, 0.055, dark, 0, y - 0.01, z); // base
-  // Window frame
-  box(root, 0.038, 0.004, 0.004, dark, 0, y + 0.016, z + 0.014);
-  box(root, 0.004, 0.032, 0.004, dark, -0.017, y + 0.0, z + 0.014);
-  box(root, 0.004, 0.032, 0.004, dark, 0.017, y + 0.0, z + 0.014);
-  box(root, 0.038, 0.004, 0.004, dark, 0, y - 0.016, z + 0.014);
-  box(root, 0.03, 0.03, 0.006, glass, 0, y, z + 0.012);
-  box(root, 0.007, 0.007, 0.004, glow, 0, y, z + 0.01); // reticle
+  box(root, 0.032, 0.012, 0.04, dark, 0, y - 0.012, z); // low mount under optic
+  // Thin window frame only (no filled glass block / tube)
+  box(root, 0.03, 0.0025, 0.0025, dark, 0, y + 0.014, z + 0.01);
+  box(root, 0.03, 0.0025, 0.0025, dark, 0, y - 0.014, z + 0.01);
+  box(root, 0.0025, 0.028, 0.0025, dark, -0.014, y, z + 0.01);
+  box(root, 0.0025, 0.028, 0.0025, dark, 0.014, y, z + 0.01);
+  // Tiny reticle — only solid thing on the aim line
+  box(root, 0.004, 0.004, 0.003, glow, 0, y, z + 0.008);
 }
 
 /** Sniper scope tube on the sight axis. */

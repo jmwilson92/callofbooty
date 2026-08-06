@@ -39,7 +39,7 @@ def clear_scene():
             coll.remove(block)
 
 
-def make_mat(name, color, metal=0.35, rough=0.45, image_path=None, emit=0.0):
+def make_mat(name, color, metal=0.35, rough=0.45, image_path=None, emit=0.0, alpha=1.0):
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
     nodes = mat.node_tree.nodes
@@ -51,12 +51,22 @@ def make_mat(name, color, metal=0.35, rough=0.45, image_path=None, emit=0.0):
     bsdf.inputs["Base Color"].default_value = (*color[:3], 1.0)
     bsdf.inputs["Metallic"].default_value = metal
     bsdf.inputs["Roughness"].default_value = rough
+    if alpha < 0.999:
+        mat.blend_method = "BLEND"
+        if hasattr(mat, "shadow_method"):
+            mat.shadow_method = "NONE"
+        if "Alpha" in bsdf.inputs:
+            bsdf.inputs["Alpha"].default_value = alpha
+        if "Transmission Weight" in bsdf.inputs:
+            bsdf.inputs["Transmission Weight"].default_value = max(0.0, 1.0 - alpha)
+        elif "Transmission" in bsdf.inputs:
+            bsdf.inputs["Transmission"].default_value = max(0.0, 1.0 - alpha)
     if "Emission Strength" in bsdf.inputs:
         bsdf.inputs["Emission Strength"].default_value = emit
         if emit > 0 and "Emission Color" in bsdf.inputs:
             bsdf.inputs["Emission Color"].default_value = (*color[:3], 1.0)
     # Light ref tint only — heavy UV map made viewmodels look "funky"
-    if image_path and Path(image_path).is_file():
+    if image_path and Path(image_path).is_file() and alpha >= 0.999:
         img = bpy.data.images.load(str(Path(image_path).resolve()))
         tex = nodes.new("ShaderNodeTexImage")
         tex.image = img
@@ -67,6 +77,28 @@ def make_mat(name, color, metal=0.35, rough=0.45, image_path=None, emit=0.0):
         links.new(tex.outputs["Color"], mix.inputs["B"])
         links.new(mix.outputs["Result"], bsdf.inputs["Base Color"])
     return mat
+
+
+def red_dot_optic(dark, glass, glow, y=0.04, z_along=0.02):
+    """Open micro red-dot: thin frame only — center must stay empty for ADS."""
+    # Low mount under the optic (not on aim line)
+    box(0.028, 0.04, 0.01, (0, z_along, y - 0.014), mat=dark, name="optic_mount", bevel_w=0.002)
+    # Thin rectangular window frame (no solid tube)
+    t = 0.003  # frame thickness
+    s = 0.028  # outer half-ish size
+    h = 0.026  # frame height
+    # Front ring pieces (looking down +Y)
+    box(s, t, t, (0, z_along + 0.012, y + h * 0.5), mat=dark, name="od_top", do_bevel=False)
+    box(s, t, t, (0, z_along + 0.012, y - h * 0.5), mat=dark, name="od_bot", do_bevel=False)
+    box(t, t, h, (-s * 0.5, z_along + 0.012, y), mat=dark, name="od_l", do_bevel=False)
+    box(t, t, h, (s * 0.5, z_along + 0.012, y), mat=dark, name="od_r", do_bevel=False)
+    # Side walls (thin, don't fill the hole)
+    box(t, 0.02, h * 0.9, (-s * 0.48, z_along, y), mat=dark, name="od_sl", do_bevel=False)
+    box(t, 0.02, h * 0.9, (s * 0.48, z_along, y), mat=dark, name="od_sr", do_bevel=False)
+    # Tiny reticle only (what you aim with)
+    box(0.004, 0.003, 0.004, (0, z_along + 0.008, y), mat=glow, name="reticle", do_bevel=False)
+    # Optional ultra-thin glass (almost invisible)
+    box(0.022, 0.002, 0.022, (0, z_along + 0.01, y), mat=glass, name="optic_glass", do_bevel=False)
 
 
 def _apply_rot_loc(obj, loc, rot):
@@ -194,10 +226,8 @@ def build_ar(mats):
             mat=steel, name="prong", do_bevel=False)
     # Top picatinny
     box(0.022, 0.22, 0.009, (0, 0.08, 0.02), mat=dark, name="rail", bevel_w=0.001)
-    # Micro red-dot (cylindrical housing)
-    cyl(0.016, 0.04, (0, 0.02, 0.04), RX90, 14, dark, "optic_body")
-    box(0.028, 0.012, 0.028, (0, 0.04, 0.04), mat=glass, name="optic_glass", do_bevel=False)
-    box(0.006, 0.005, 0.006, (0, 0.035, 0.04), mat=glow, name="reticle", do_bevel=False)
+    # Open red-dot (NOT a solid tube on the aim line)
+    red_dot_optic(dark, glass, glow, y=0.04, z_along=0.02)
     # Grip with finger ridges (beveled)
     box(0.034, 0.042, 0.095, (0, -0.01, -0.1), rot=(math.radians(20), 0, 0),
         mat=dark, name="grip", bevel_w=0.006)
@@ -205,7 +235,7 @@ def build_ar(mats):
     # Mag baseplate
     box(0.038, 0.048, 0.012, (0, 0.02, -0.19), mat=dark, name="mag_base", bevel_w=0.002)
     _hands(skin, (0.018, -0.01, -0.115), (0.0, 0.22, -0.05))
-    empty("Sight", (0, 0.03, 0.04))
+    empty("Sight", (0, 0.02, 0.04))
     empty("Muzzle", (0, 0.56, -0.003))
     empty("Mag", (0, 0.02, -0.125))
 
@@ -447,8 +477,9 @@ def main():
     dark = make_mat("dark", (0.07, 0.08, 0.09), 0.55, 0.38, ref)
     steel = make_mat("steel", (0.58, 0.6, 0.64), 0.88, 0.25, ref)
     body = make_mat("body", base, 0.28, 0.48, ref)
-    glass = make_mat("glass", (0.3, 0.5, 0.6), 0.1, 0.12, None, emit=0.2)
-    glow = make_mat("glow", (1.0, 0.18, 0.12), 0.05, 0.25, None, emit=1.4)
+    # Nearly invisible glass — never a solid blue tube on the optic
+    glass = make_mat("glass", (0.55, 0.7, 0.8), 0.05, 0.08, None, emit=0.05, alpha=0.12)
+    glow = make_mat("glow", (1.0, 0.12, 0.1), 0.05, 0.25, None, emit=1.6)
     skin = make_mat("skin", (0.76, 0.58, 0.42), 0.02, 0.88)
 
     BUILDERS[args.name]((dark, steel, body, glass, glow, skin))

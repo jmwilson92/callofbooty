@@ -155,63 +155,122 @@ export class LootSystem {
     return g;
   }
 
-  /** Hard pelican / rifle case — olive body, black latches, hinged lid. */
+  /**
+   * Realistic hard-shell pelican / rifle case (not a CoD loot crate).
+   * Layout (local): +Z = front (latches + handle), −Z = hinge.
+   * Lid pivots on rear hinge and flips open over −Z; loot ejects toward +Z.
+   */
   _buildCaseMesh() {
     const g = new THREE.Group();
-    const bodyMat = mat(0x3d5230, { rough: 0.62, metal: 0.12 });
-    const black = mat(0x1a1a1c, { rough: 0.4, metal: 0.5 });
-    const yellow = mat(0xe8b020, { rough: 0.4, metal: 0.2, em: 0.15 });
+    // Classic pelican OD / desert-tan polymer
+    const shell = mat(0x4a4f3a, { rough: 0.72, metal: 0.08 });
+    const shellDark = mat(0x35382c, { rough: 0.75, metal: 0.06 });
+    const black = mat(0x1c1c1e, { rough: 0.45, metal: 0.55 });
+    const steel = mat(0x8a8e94, { rough: 0.35, metal: 0.7 });
+    const foamMat = mat(0x2a2e38, { rough: 0.95, metal: 0.0 });
+    const pad = mat(0x1a1a1c, { rough: 0.8, metal: 0.05 });
 
-    // Slightly larger + taller so they read in dim interiors
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.42, 0.72), bodyMat);
-    body.position.y = 0.22;
+    const W = 1.28; // length (X)
+    const D = 0.78; // depth (Z)
+    const H = 0.38; // body height
+    const halfD = D * 0.5;
+
+    // Bottom tub
+    const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), shell);
+    body.position.y = H * 0.5;
     body.castShadow = true;
     body.receiveShadow = true;
     g.add(body);
+    // Slight under-cut base pad
+    const base = new THREE.Mesh(new THREE.BoxGeometry(W * 0.96, 0.04, D * 0.96), shellDark);
+    base.position.y = 0.02;
+    g.add(base);
 
-    // Beveled top edge lip
-    const lip = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.04, 0.74), bodyMat);
-    lip.position.y = 0.42;
-    g.add(lip);
-
+    // Ribbed lid (stacked ridges = classic pelican look)
     const lidPivot = new THREE.Group();
-    lidPivot.position.set(0, 0.44, -0.32);
     lidPivot.name = 'lidPivot';
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.09, 0.68), bodyMat);
-    lid.position.set(0, 0.05, 0.32);
-    lid.castShadow = true;
+    // Hinge on rear edge (−Z)
+    lidPivot.position.set(0, H, -halfD);
+    const lidH = 0.11;
+    const lid = new THREE.Group();
+    lid.position.set(0, lidH * 0.5, halfD); // rest closed over body
+    const lidMain = new THREE.Mesh(new THREE.BoxGeometry(W * 0.98, lidH, D * 0.98), shell);
+    lidMain.castShadow = true;
+    lid.add(lidMain);
+    // Raised ribs on lid top
+    for (let i = -2; i <= 2; i++) {
+      const rib = new THREE.Mesh(
+        new THREE.BoxGeometry(W * 0.9, 0.025, 0.07),
+        shellDark
+      );
+      rib.position.set(0, lidH * 0.5 + 0.01, i * 0.12);
+      lid.add(rib);
+    }
+    // Interior egg-crate foam on lid underside
+    const lidFoam = new THREE.Mesh(new THREE.BoxGeometry(W * 0.88, 0.035, D * 0.88), foamMat);
+    lidFoam.position.set(0, -lidH * 0.35, 0);
+    lid.add(lidFoam);
     lidPivot.add(lid);
-    const foam = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.05, 0.58), mat(0x1e1e28, { rough: 0.92 }));
-    foam.position.set(0, -0.01, 0.32);
-    lidPivot.add(foam);
     g.add(lidPivot);
 
-    for (const lx of [-0.4, 0.0, 0.4]) {
-      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.07), black);
-      latch.position.set(lx, 0.45, 0.38);
+    // Foam bed inside tub (visible when open)
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(W * 0.9, 0.06, D * 0.88), foamMat);
+    bed.position.set(0, H - 0.05, 0.02);
+    g.add(bed);
+    // Cutout trays in foam
+    for (const ox of [-0.28, 0.28]) {
+      const cut = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.04, 0.5), pad);
+      cut.position.set(ox, H - 0.02, 0.02);
+      g.add(cut);
+    }
+
+    // Butterfly latches on FRONT (+Z)
+    for (const lx of [-0.38, 0, 0.38]) {
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.04), steel);
+      plate.position.set(lx, H - 0.02, halfD + 0.01);
+      g.add(plate);
+      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.05), black);
+      latch.position.set(lx, H + 0.02, halfD + 0.03);
       g.add(latch);
     }
-    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.018, 6, 14, Math.PI), black);
+
+    // Folding handle on front
+    const handleBase = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.05), black);
+    handleBase.position.set(0, H * 0.45, halfD + 0.04);
+    g.add(handleBase);
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.016, 6, 16, Math.PI), black);
     handle.rotation.x = Math.PI / 2;
-    handle.position.set(0, 0.3, 0.4);
+    handle.position.set(0, H * 0.45, halfD + 0.09);
     g.add(handle);
+
+    // Corner protectors (dark grey polymer, not neon gold “loot”)
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const c = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.1), yellow);
-        c.position.set(sx * 0.64, 0.14, sz * 0.32);
+        const c = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.09), shellDark);
+        c.position.set(sx * (W * 0.5 - 0.04), 0.1, sz * (halfD - 0.04));
         g.add(c);
       }
     }
-    // Warm emissive beacon only — NO PointLights (hundreds washed the map blue)
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(1.05, 0.03, 0.08),
-      mat(0xffc040, { em: 0.45, metal: 0.05, rough: 0.35 })
+
+    // Pressure-equalization valve (detail)
+    const valve = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.03, 10), black);
+    valve.rotation.z = Math.PI / 2;
+    valve.position.set(W * 0.45, H * 0.55, halfD * 0.2);
+    g.add(valve);
+
+    // Subtle status sticker (small, not a CoD glow bar)
+    const sticker = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.02, 0.08),
+      mat(0xc8a030, { em: 0.2, rough: 0.5, metal: 0.1 })
     );
-    stripe.position.set(0, 0.5, 0);
-    stripe.name = 'caseStripe';
-    g.add(stripe);
+    sticker.position.set(-0.35, H + lidH + 0.02, 0.05);
+    sticker.name = 'caseStripe';
+    g.add(sticker);
+
+    // Open direction in local space: front = +Z (away from hinge)
     g.userData.lidPivot = lidPivot;
-    g.userData.stripe = stripe;
+    g.userData.stripe = sticker;
+    g.userData.openDir = new THREE.Vector3(0, 0, 1);
     return g;
   }
 
@@ -478,15 +537,19 @@ export class LootSystem {
     c.open = true;
     c.openT = 0;
     if (c.mesh.userData.stripe) c.mesh.userData.stripe.visible = false;
-    // Spit items in a tight arc in front of the case
-    const cos = Math.cos(c.yaw);
-    const sin = Math.sin(c.yaw);
+
+    // Eject toward case FRONT (+local Z = latches), not the hinge side.
+    // Use the mesh quaternion so yaw/orientation always match.
+    c.mesh.updateMatrixWorld(true);
+    const front = new THREE.Vector3(0, 0, 1).applyQuaternion(c.mesh.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(c.mesh.quaternion);
     c.contents.forEach((item, i) => {
-      const side = (i - (c.contents.length - 1) * 0.5) * 0.38;
-      const forward = 0.7 + i * 0.1;
-      const wx = c.x + side * cos - forward * sin;
-      const wz = c.z + side * sin + forward * cos;
-      this.spawnItem(item, wx, c.y + 0.05, wz);
+      const n = c.contents.length;
+      const side = (i - (n - 1) * 0.5) * 0.42;
+      const ahead = 0.85 + (i % 2) * 0.12;
+      const wx = c.x + right.x * side + front.x * ahead;
+      const wz = c.z + right.z * side + front.z * ahead;
+      this.spawnItem(item, wx, c.y + 0.06, wz);
     });
     c.contents = [];
     this.bus.emit('loot:case', { id: c.id });
