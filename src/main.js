@@ -233,8 +233,10 @@ async function start() {
         if (input.actionPressed('interact')) {
           const usedVeh = vehicles.tryUse(controller);
           if (!usedVeh) {
-            // Direction chosen by height (base → roof express; roof → down)
-            const usedRappel = rappels.tryUse(controller);
+            // E = one floor; Shift+E = express to roof (or down if near top)
+            const usedRappel = rappels.tryUse(controller, {
+              express: input.action('sprint'),
+            });
             if (!usedRappel) {
               const gotLoot = loot.tryPickup(
                 weapons,

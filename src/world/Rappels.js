@@ -1,11 +1,13 @@
 import * as THREE from 'three';
-import { RAPPEL, WORLD } from '../config.js';
+import { RAPPEL, WORLD, BUILDINGS } from '../config.js';
 import { worldBuildings } from './BuildingRegistry.js';
 
 /**
- * Express rappel / zipline system.
- * - Vertical: grab rope → rides straight to the roof (no floor stops), then scoots onto the deck.
- * - Horizontal: a few building-to-building cables for side-to-side travel.
+ * Rappel / zipline system.
+ * Vertical (gold):
+ *   - Floor-by-floor: grab rope, W/S (or E) steps one level at a time.
+ *   - Express: Shift+E / Shift+W rides straight to the roof, then scoots onto the deck.
+ * Horizontal (blue): building-to-building rooftop ziplines.
  */
 
 function mulberry(seed) {
@@ -22,6 +24,10 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+function ease(u) {
+  return u * u * (3 - 2 * u);
+}
+
 export class RappelSystem {
   /**
    * @param {THREE.Scene} scene
@@ -35,8 +41,10 @@ export class RappelSystem {
     this.scene.add(this.group);
     /** @type {Array<object>} */
     this.lines = [];
-    /** @type {object|null} active express ride */
+    /** @type {object|null} animated ride segment */
     this.ride = null;
+    /** @type {object|null} hanging on a vertical rope between steps */
+    this.hang = null;
 
     this._ropeMat = new THREE.MeshStandardMaterial({
       color: 0xc4a050,
@@ -86,12 +94,12 @@ export class RappelSystem {
       const top = roofY + 0.15;
       if (top - bot < 12) continue;
 
-      // Landing point: scoot well onto the roof deck (inside footprint)
       const landX = THREE.MathUtils.clamp(x, b.x + 1.5, b.x + b.w - 1.5);
       const landZ = b.z + Math.min(3.2, Math.max(2.0, b.d * 0.28));
       const landY = roofY + 0.15;
+      const stops = this._buildStops(b, bot, top);
 
-      this._addVertical(x, bot, z, top, landX, landY, landZ);
+      this._addVertical(x, bot, z, top, landX, landY, landZ, stops);
       n++;
     }
 
@@ -119,7 +127,6 @@ export class RappelSystem {
         if (d < minDist || d > maxDist) continue;
         const key = `${Math.min(a.x, b.x)}_${Math.min(a.z, b.z)}_${Math.max(a.x, b.x)}`;
         if (usedPairs.has(key)) continue;
-        // Prefer similar heights
         const ra = a.roofY ?? a.baseY + a.floors * 3.5;
         const rb = b.roofY ?? b.baseY + b.floors * 3.5;
         if (Math.abs(ra - rb) > 14) continue;
@@ -132,20 +139,16 @@ export class RappelSystem {
       const b = best;
       usedPairs.add(`${Math.min(a.x, b.x)}_${Math.min(a.z, b.z)}_${Math.max(a.x, b.x)}`);
 
-      // Connect near-facing edges at roof height
       const ra = (a.roofY ?? a.baseY + a.floors * 3.5) + 0.4;
       const rb = (b.roofY ?? b.baseY + b.floors * 3.5) + 0.4;
-      // Pick closest facade points
       const acx = a.x + a.w * 0.5;
       const acz = a.z + a.d * 0.5;
       const bcx = b.x + b.w * 0.5;
       const bcz = b.z + b.d * 0.5;
       const dx = bcx - acx;
       const dz = bcz - acz;
-      // Start on edge of A toward B, end on edge of B toward A
       const aEdge = this._edgePoint(a, dx, dz, 0.4);
       const bEdge = this._edgePoint(b, -dx, -dz, 0.4);
-      // Land scoots: inward from edges toward centers
       const aLand = {
         x: lerp(aEdge.x, acx, 0.35),
         y: (a.roofY ?? a.baseY + a.floors * 3.5) + 0.12,
@@ -168,6 +171,31 @@ export class RappelSystem {
     return { vertical: n, horizontal: hCount };
   }
 
+  /** Floor stop heights along a vertical rope (ground → each floor → roof). */
+  _buildStops(b, bot, top) {
+    const stops = [];
+    const push = (y) => {
+      const yy = Math.max(bot + 0.1, Math.min(top - 0.05, y));
+      if (!stops.length || Math.abs(stops[stops.length - 1] - yy) > 0.6) stops.push(yy);
+    };
+
+    push(bot + 0.15);
+    if (Array.isArray(b.floorYs) && b.floorYs.length) {
+      for (const fy of b.floorYs) {
+        if (Number.isFinite(fy)) push(fy + 0.05);
+      }
+    } else {
+      const floorH = BUILDINGS?.FLOOR_HEIGHT ?? RAPPEL.FLOOR_HEIGHT ?? 3.5;
+      const base = b.baseY ?? bot;
+      const floors = Math.max(1, b.floors | 0);
+      for (let f = 1; f < floors; f++) push(base + f * floorH + 0.05);
+    }
+    push(top - 0.05);
+    // Ensure sorted unique
+    stops.sort((a, c) => a - c);
+    return stops;
+  }
+
   /** Point on building footprint edge in direction (dx,dz). */
   _edgePoint(b, dx, dz, inset = 0.3) {
     const cx = b.x + b.w * 0.5;
@@ -175,14 +203,13 @@ export class RappelSystem {
     const len = Math.hypot(dx, dz) || 1;
     const ux = dx / len;
     const uz = dz / len;
-    // Ray from center to edge of AABB
     const tx = ux > 0 ? (b.x + b.w - inset - cx) / ux : ux < 0 ? (b.x + inset - cx) / ux : Infinity;
     const tz = uz > 0 ? (b.z + b.d - inset - cz) / uz : uz < 0 ? (b.z + inset - cz) / uz : Infinity;
     const t = Math.min(Math.abs(tx), Math.abs(tz));
     return { x: cx + ux * t, z: cz + uz * t };
   }
 
-  _addVertical(x, bot, z, top, landX, landY, landZ) {
+  _addVertical(x, bot, z, top, landX, landY, landZ, stops) {
     const h = top - bot;
     const rope = new THREE.Mesh(
       new THREE.CylinderGeometry(0.045, 0.045, h, 5),
@@ -211,15 +238,22 @@ export class RappelSystem {
     tip.position.set(x, bot + 1.15, z);
     this.group.add(tip);
 
+    // Small rung markers at floor stops (skip ground + roof)
+    for (let i = 1; i < stops.length - 1; i++) {
+      const y = stops[i];
+      const rung = new THREE.Mesh(
+        new THREE.BoxGeometry(0.35, 0.06, 0.12),
+        this._clampMat
+      );
+      rung.position.set(x, y, z + 0.08);
+      this.group.add(rung);
+    }
+
     this.lines.push({
       kind: 'vertical',
       x, z, bot, top,
-      // Express ride endpoints
-      from: { x, y: bot + 0.1, z },
-      to: { x, y: top - 0.1, z },
-      // Final land on roof deck (scooted in)
+      stops: stops.slice(),
       land: { x: landX, y: landY, z: landZ },
-      // Grab radius at base / along line
       grabR: 1.5,
     });
   }
@@ -229,14 +263,12 @@ export class RappelSystem {
     const dy = by - ay;
     const dz = bz - az;
     const len = Math.hypot(dx, dy, dz) || 1;
-    // Cable along direction
     const mid = new THREE.Vector3(ax + dx * 0.5, ay + dy * 0.5, az + dz * 0.5);
     const cable = new THREE.Mesh(
       new THREE.CylinderGeometry(0.05, 0.05, len, 5),
       this._zipMat
     );
     cable.position.copy(mid);
-    // Align Y-axis cylinder to (dx,dy,dz)
     cable.quaternion.setFromUnitVectors(
       new THREE.Vector3(0, 1, 0),
       new THREE.Vector3(dx / len, dy / len, dz / len)
@@ -244,7 +276,6 @@ export class RappelSystem {
     cable.castShadow = true;
     this.group.add(cable);
 
-    // End anchors
     for (const [px, py, pz] of [[ax, ay, az], [bx, by, bz]]) {
       const a = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.25, 0.35), this._clampMat);
       a.position.set(px, py, pz);
@@ -264,54 +295,137 @@ export class RappelSystem {
 
   clear() {
     this.ride = null;
+    this.hang = null;
     this.lines.length = 0;
     while (this.group.children.length) this.group.remove(this.group.children[0]);
   }
 
+  /** True while hanging on a rope or mid-ride (caller should skip foot control). */
   get riding() {
-    return !!this.ride;
+    return !!(this.ride || this.hang);
   }
 
   /**
-   * Start a ride if near a line and player presses interact / climb intent.
+   * Interact (E). Floor step by default; Shift+E = express to roof (or ground if near top).
    * @returns {boolean}
    */
   tryUse(controller, opts = {}) {
-    if (this.ride) return false; // already riding — let update finish
+    if (this.ride) return true; // busy
+
+    // Already hanging — E steps one floor (or express with Shift)
+    if (this.hang) {
+      const line = this.hang.line;
+      if (opts.express) {
+        const nearTop = this.hang.stopIdx >= line.stops.length - 2;
+        this._startExpress(line, controller, !nearTop);
+      } else {
+        this._stepFloor(line, controller, opts.dir ?? 1);
+      }
+      return true;
+    }
+
     const line = this._findNear(controller.pos.x, controller.pos.y, controller.pos.z);
     if (!line) return false;
-    this._startRide(line, controller, opts);
+
+    if (line.kind === 'horizontal') {
+      this._startHorizontal(line, controller);
+      return true;
+    }
+
+    // Vertical
+    const py = controller.pos.y;
+    const nearTop = py > (line.top + line.bot) * 0.72;
+    if (opts.express) {
+      this._startExpress(line, controller, !nearTop);
+      return true;
+    }
+
+    // Mount + one floor step in intended direction
+    const dir = opts.dir != null ? opts.dir : (nearTop ? -1 : 1);
+    this._mountHang(line, controller);
+    this._stepFloor(line, controller, dir);
     return true;
   }
 
   /**
-   * Auto-start vertical zip when near base and holding W (optional).
-   * @returns {boolean} true while a ride is active (caller should skip foot control)
+   * @returns {boolean} true while a ride/hang is active
    */
   update(dt, controller, input) {
     if (!controller) {
       this.ride = null;
+      this.hang = null;
       return false;
     }
 
-    // Auto-grab vertical rope at base when pressing forward
-    if (!this.ride && input) {
+    // Auto-mount vertical rope at base with W (one floor up)
+    if (!this.ride && !this.hang && input) {
       const near = this._findNear(controller.pos.x, controller.pos.y, controller.pos.z);
       if (near?.kind === 'vertical') {
         const atBase = controller.pos.y < near.bot + 3.5;
         if (atBase && (input.action('forward') || input.actionPressed('jump'))) {
-          this._startRide(near, controller, { up: true });
+          const express = input.action('sprint');
+          if (express) this._startExpress(near, controller, true);
+          else {
+            this._mountHang(near, controller);
+            this._stepFloor(near, controller, 1);
+          }
         }
       }
     }
 
-    if (!this.ride) return false;
+    // Hang: accept climb input between floors
+    if (this.hang && !this.ride && input) {
+      this._holdHang(controller);
+      const line = this.hang.line;
 
+      if (input.actionPressed('crouch')) {
+        // C dismounts mid-climb
+        this._dismount(controller, line, 'side');
+      } else if (
+        (input.actionPressed('interact') && input.action('sprint'))
+        || input.actionPressed('jump')
+        || (input.actionPressed('forward') && input.action('sprint'))
+      ) {
+        // Shift+E, Jump, or Shift+W → express to roof
+        this._startExpress(line, controller, true);
+      } else if (input.actionPressed('interact')) {
+        // E while hanging: step up, or dismount at ends
+        const idx = this.hang.stopIdx;
+        if (idx <= 0) this._dismount(controller, line, 'bot');
+        else if (idx >= line.stops.length - 1) this._dismount(controller, line, 'top');
+        else this._stepFloor(line, controller, 1);
+      } else if (input.actionPressed('forward') && !input.action('sprint')) {
+        this._stepFloor(line, controller, 1);
+      } else if (input.actionPressed('back')) {
+        this._stepFloor(line, controller, -1);
+      }
+
+      // Hold W/S to keep stepping floor-by-floor
+      if (!this.ride && this.hang) {
+        if (input.action('forward') && !input.action('back') && !input.action('sprint')) {
+          this.hang._holdUp = (this.hang._holdUp ?? 0) + dt;
+          if (this.hang._holdUp > 0.22) {
+            this.hang._holdUp = 0;
+            this._stepFloor(line, controller, 1);
+          }
+        } else this.hang._holdUp = 0;
+        if (input.action('back') && !input.action('forward')) {
+          this.hang._holdDown = (this.hang._holdDown ?? 0) + dt;
+          if (this.hang._holdDown > 0.22) {
+            this.hang._holdDown = 0;
+            this._stepFloor(line, controller, -1);
+          }
+        } else this.hang._holdDown = 0;
+      }
+    }
+
+    if (!this.ride) return !!this.hang;
+
+    // Animate ride
     const r = this.ride;
     r.t += dt / r.duration;
     const u = Math.min(1, r.t);
-    // Smooth ease-in-out
-    const e = u * u * (3 - 2 * u);
+    const e = ease(u);
 
     controller.pos.x = lerp(r.from.x, r.to.x, e);
     controller.pos.y = lerp(r.from.y, r.to.y, e);
@@ -324,8 +438,8 @@ export class RappelSystem {
     controller.prevPos.copy(controller.pos);
 
     if (u >= 1) {
-      // Phase 1 (zip) finished → optional phase 2 scoot onto roof deck
       if (r.phase === 'zip' && r.land) {
+        // Roof scoot after express
         const scootSpeed = RAPPEL.SCOOT_SPEED ?? 12;
         const from = { x: r.to.x, y: r.to.y, z: r.to.z };
         const to = { ...r.land };
@@ -339,67 +453,189 @@ export class RappelSystem {
             land: null,
             t: 0,
             duration: Math.max(0.22, dist / scootSpeed),
+            after: null,
           };
+          this.hang = null;
           return true;
         }
         controller.pos.set(to.x, to.y, to.z);
+        controller.vel.set(0, 0, 0);
+        controller.grounded = true;
+        controller.prevPos.copy(controller.pos);
+        this.ride = null;
+        this.hang = null;
+        return false;
       }
+
+      if (r.phase === 'scoot' || r.after === 'free') {
+        controller.pos.set(r.to.x, r.to.y, r.to.z);
+        controller.vel.set(0, 0, 0);
+        controller.grounded = true;
+        controller.prevPos.copy(controller.pos);
+        this.ride = null;
+        this.hang = null;
+        return false;
+      }
+
+      // Floor step finished → hang at stop (or free if base)
+      if (r.after === 'hang' && r.line) {
+        controller.pos.set(r.to.x, r.to.y, r.to.z);
+        controller.vel.set(0, 0, 0);
+        this.ride = null;
+        this.hang = {
+          line: r.line,
+          stopIdx: r.stopIdx ?? this._nearestStopIdx(r.line, r.to.y),
+          _holdUp: 0,
+          _holdDown: 0,
+        };
+        this._holdHang(controller);
+        return true;
+      }
+
+      controller.pos.set(r.to.x, r.to.y, r.to.z);
       controller.vel.set(0, 0, 0);
       controller.grounded = true;
       controller.prevPos.copy(controller.pos);
       this.ride = null;
+      this.hang = null;
     }
     return true;
   }
 
-  _startRide(line, controller, opts = {}) {
-    const zipSpeed = RAPPEL.ZIP_SPEED ?? 32;
+  _holdHang(controller) {
+    if (!this.hang) return;
+    const line = this.hang.line;
+    const y = line.stops[this.hang.stopIdx] ?? controller.pos.y;
+    controller.pos.x = line.x;
+    controller.pos.y = y;
+    controller.pos.z = line.z;
+    controller.vel.set(0, 0, 0);
+    controller.grounded = false;
+    controller.sliding = false;
+    controller.mantling = false;
+    controller.onLadder = true;
+    controller.prevPos.copy(controller.pos);
+  }
 
-    if (line.kind === 'vertical') {
-      const py = controller.pos.y;
-      const nearTop = py > (line.top + line.bot) * 0.55;
-      // Default: go up. From roof/top half, go down (unless forced up via W auto-grab).
-      const goUp = opts.up === true ? true : opts.up === false ? false : !nearTop;
-      if (goUp) {
-        // Express: straight to top of rope, then scoot onto roof deck
-        const from = {
-          x: line.x,
-          y: Math.max(line.bot + 0.15, Math.min(py, line.top - 1)),
-          z: line.z,
-        };
-        const to = { x: line.x, y: line.top - 0.05, z: line.z };
-        const dist = Math.abs(to.y - from.y);
-        this.ride = {
-          kind: 'vertical',
-          phase: 'zip',
-          from,
-          to,
-          land: { ...line.land },
-          t: 0,
-          duration: Math.max(0.55, dist / zipSpeed),
-        };
-      } else {
-        // Ride down to base (no roof scoot)
-        const from = { x: line.x, y: Math.min(line.top - 0.2, py), z: line.z };
-        const to = { x: line.x, y: line.bot + 0.2, z: line.z };
-        const dist = Math.abs(to.y - from.y);
-        this.ride = {
-          kind: 'vertical',
-          phase: 'zip',
-          from,
-          to,
-          land: { x: line.x, y: line.bot + 0.15, z: line.z + 0.8 },
-          t: 0,
-          duration: Math.max(0.55, dist / zipSpeed),
-        };
+  _mountHang(line, controller) {
+    const idx = this._nearestStopIdx(line, controller.pos.y);
+    controller.pos.x = line.x;
+    controller.pos.z = line.z;
+    controller.pos.y = line.stops[idx];
+    this.hang = { line, stopIdx: idx, _holdUp: 0, _holdDown: 0 };
+    this._holdHang(controller);
+  }
+
+  _nearestStopIdx(line, y) {
+    const stops = line.stops;
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < stops.length; i++) {
+      const d = Math.abs(stops[i] - y);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
       }
-      // Snap to rope column immediately
-      controller.pos.x = line.x;
-      controller.pos.z = line.z;
+    }
+    return best;
+  }
+
+  _stepFloor(line, controller, dir) {
+    if (!line?.stops?.length) return;
+    if (!this.hang || this.hang.line !== line) this._mountHang(line, controller);
+    const cur = this.hang.stopIdx;
+    const next = THREE.MathUtils.clamp(cur + (dir >= 0 ? 1 : -1), 0, line.stops.length - 1);
+    if (next === cur) {
+      // At end of rope
+      if (dir > 0 && cur >= line.stops.length - 1) {
+        // Top stop → scoot onto roof
+        this._startExpress(line, controller, true, /*alreadyAtTop*/ true);
+      } else if (dir < 0 && cur <= 0) {
+        this._dismount(controller, line, 'bot');
+      }
       return;
     }
 
-    // Horizontal: pick direction based on which end you're closer to
+    const fromY = line.stops[cur];
+    const toY = line.stops[next];
+    const dist = Math.abs(toY - fromY);
+    const speed = RAPPEL.FLOOR_SPEED ?? 14;
+    this.ride = {
+      kind: 'vertical',
+      phase: 'floor',
+      line,
+      stopIdx: next,
+      from: { x: line.x, y: fromY, z: line.z },
+      to: { x: line.x, y: toY, z: line.z },
+      land: null,
+      after: 'hang',
+      t: 0,
+      duration: Math.max(0.2, dist / speed),
+    };
+    this.hang = null;
+    controller.pos.x = line.x;
+    controller.pos.z = line.z;
+  }
+
+  _startExpress(line, controller, goUp, alreadyAtTop = false) {
+    const zipSpeed = RAPPEL.ZIP_SPEED ?? 34;
+    const py = controller.pos.y;
+
+    if (goUp) {
+      const fromY = alreadyAtTop
+        ? line.top - 0.05
+        : Math.max(line.bot + 0.15, Math.min(py, line.top - 0.2));
+      const toY = line.top - 0.05;
+      const dist = Math.abs(toY - fromY);
+      if (dist < 0.25) {
+        // Already at top — just scoot onto roof
+        this.ride = {
+          kind: 'vertical',
+          phase: 'scoot',
+          from: { x: line.x, y: toY, z: line.z },
+          to: { ...line.land },
+          land: null,
+          after: 'free',
+          t: 0,
+          duration: Math.max(
+            0.22,
+            Math.hypot(line.land.x - line.x, line.land.z - line.z) / (RAPPEL.SCOOT_SPEED ?? 14)
+          ),
+        };
+      } else {
+        this.ride = {
+          kind: 'vertical',
+          phase: 'zip',
+          from: { x: line.x, y: fromY, z: line.z },
+          to: { x: line.x, y: toY, z: line.z },
+          land: { ...line.land },
+          after: null,
+          t: 0,
+          duration: Math.max(0.45, dist / zipSpeed),
+        };
+      }
+    } else {
+      const fromY = Math.min(line.top - 0.2, py);
+      const toY = line.bot + 0.2;
+      const dist = Math.abs(toY - fromY);
+      this.ride = {
+        kind: 'vertical',
+        phase: 'zip',
+        from: { x: line.x, y: fromY, z: line.z },
+        to: { x: line.x, y: toY, z: line.z },
+        land: { x: line.x, y: line.bot + 0.15, z: line.z + 0.8 },
+        after: 'free',
+        t: 0,
+        duration: Math.max(0.45, dist / zipSpeed),
+      };
+    }
+    this.hang = null;
+    controller.pos.x = line.x;
+    controller.pos.z = line.z;
+  }
+
+  _startHorizontal(line, controller) {
+    const zipSpeed = RAPPEL.ZIP_SPEED ?? 34;
     const dA = Math.hypot(
       controller.pos.x - line.from.x,
       controller.pos.y - line.from.y,
@@ -421,10 +657,29 @@ export class RappelSystem {
       from,
       to,
       land,
+      after: null,
       t: 0,
       duration: Math.max(0.7, dist / (zipSpeed * 0.95)),
     };
+    this.hang = null;
     controller.pos.set(from.x, from.y, from.z);
+  }
+
+  _dismount(controller, line, where = 'side') {
+    this.ride = null;
+    this.hang = null;
+    if (where === 'bot') {
+      controller.pos.set(line.x, line.bot + 0.15, line.z + 0.9);
+    } else if (where === 'top') {
+      controller.pos.set(line.land.x, line.land.y, line.land.z);
+    } else {
+      // Step off slightly south of rope
+      controller.pos.set(line.x, controller.pos.y, line.z + 0.85);
+    }
+    controller.vel.set(0, 0, 0);
+    controller.grounded = true;
+    controller.onLadder = false;
+    controller.prevPos.copy(controller.pos);
   }
 
   _findNear(px, py, pz) {
@@ -440,7 +695,6 @@ export class RappelSystem {
           best = line;
         }
       } else {
-        // Distance to segment endpoints (either end is a mount point)
         const dA = Math.hypot(line.from.x - px, line.from.y - py, line.from.z - pz);
         const dB = Math.hypot(line.to.x - px, line.to.y - py, line.to.z - pz);
         const d = Math.min(dA, dB);
@@ -457,13 +711,21 @@ export class RappelSystem {
   prompt(px, py, pz) {
     if (this.ride) {
       if (this.ride.phase === 'scoot') return 'Landing on roof…';
-      return this.ride.kind === 'horizontal' ? 'Zipping…' : 'Rappelling to roof…';
+      if (this.ride.phase === 'floor') return 'Climbing…';
+      return this.ride.kind === 'horizontal' ? 'Zipping…' : 'Express to roof…';
+    }
+    if (this.hang) {
+      const line = this.hang.line;
+      const idx = this.hang.stopIdx;
+      const floor = idx + 1;
+      const max = line.stops.length;
+      return `W/S floor ${floor}/${max} · Shift+W roof · C drop`;
     }
     const line = this._findNear(px, py, pz);
     if (!line) return null;
     if (line.kind === 'horizontal') return 'E · Ride zipline';
-    const nearTop = py > (line.top + line.bot) * 0.55;
-    if (nearTop) return 'E · Rappel down';
-    return 'E / W · Zip to roof';
+    const nearTop = py > (line.top + line.bot) * 0.72;
+    if (nearTop) return 'E · Rappel down · Shift+E express ground';
+    return 'E / W · Floor climb · Shift+E express roof';
   }
 }

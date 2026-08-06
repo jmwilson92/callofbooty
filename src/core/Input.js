@@ -20,25 +20,27 @@ export class Input {
 
   _bind() {
     window.addEventListener('keydown', (e) => {
+      // While playing, kill browser shortcuts that close/reload the tab.
+      // Ctrl+W was closing the game mid-heli (looked like a crash).
+      // Note: some browsers still refuse to cancel Ctrl+W; we also unbound Ctrl from crouch.
+      if (this.locked && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       if (e.repeat) return;
       this.keys.add(e.code);
       this.pressed.add(e.code);
-      // Stop browser chrome from eating gameplay keys while pointer is locked
-      // (Space scroll, F3 search, M find, Ctrl shortcuts, Tab focus).
+      // Stop browser chrome from eating gameplay keys
+      // (Space scroll, F3 search, M find, Tab focus).
       if (
         e.code === 'Space'
         || e.code === 'F3'
         || e.code === 'KeyM'
         || e.code === 'Tab'
-        || e.code === 'ControlLeft'
-        || e.code === 'ControlRight'
-        || e.code === 'KeyC'
       ) {
-        if (this.locked || e.code === 'Space' || e.code === 'Tab' || e.code === 'F3') {
-          e.preventDefault();
-        }
+        e.preventDefault();
       }
-    });
+    }, true); // capture so we beat browser default handlers when allowed
 
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
 

@@ -74,13 +74,17 @@ export const LADDER = {
   CENTER_PULL: 6.0,
 };
 
-/** Roof rappel / zipline — express rides (no mid-floor stops). */
+/** Roof rappel / zipline — floor-by-floor climb + optional express to roof. */
 export const RAPPEL = {
   // Vertical ropes on tall facades
   MAX_COUNT: 28,
   MIN_FLOORS: 5,
   FACADE_OUT: 0.55,
-  // Express zip speed (m/s) along the cable
+  // Fallback floor spacing when building has no floorYs
+  FLOOR_HEIGHT: 3.5,
+  // Speed between floors (m/s)
+  FLOOR_SPEED: 14,
+  // Express zip speed (m/s) along the full cable
   ZIP_SPEED: 34,
   // After reaching rope top, scoot onto roof deck (m/s)
   SCOOT_SPEED: 14,
@@ -483,8 +487,8 @@ export const INPUT = {
     right: ['KeyD'],
     jump: ['Space'],
     sprint: ['ShiftLeft', 'ShiftRight'],
-    // C is primary; Ctrl also descends the heli. Right-Ctrl included for laptops.
-    crouch: ['KeyC', 'ControlLeft', 'ControlRight'],
+    // C only — do NOT bind Ctrl (Ctrl+W closes the browser tab).
+    crouch: ['KeyC'],
     interact: ['KeyE'], // doors, loot, vehicles, elevators
     reload: ['KeyR'],
     weapon1: ['Digit1'],

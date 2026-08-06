@@ -99,12 +99,12 @@ export function createHud() {
       <tr><td>WASD</td><td>move</td></tr>
       <tr><td>Shift</td><td>sprint</td></tr>
       <tr><td>Space</td><td>jump / mantle</td></tr>
-      <tr><td>C or Ctrl</td><td>crouch</td></tr>
+      <tr><td>C</td><td>crouch (not Ctrl — Ctrl+W closes the tab)</td></tr>
       <tr><td>E</td><td>vehicle / loot / door / elevator</td></tr>
-      <tr><td>Shift+E</td><td>elevator express to TOP (or GROUND)</td></tr>
-      <tr><td>Rappel (gold)</td><td>E / W · express to roof (lands on deck)</td></tr>
+      <tr><td>Shift+E</td><td>elevator / rappel express to TOP</td></tr>
+      <tr><td>Rappel (gold)</td><td>W/S floor-by-floor · Shift+E or Shift+W express roof</td></tr>
       <tr><td>Zipline (blue)</td><td>E · ride between rooftops</td></tr>
-      <tr><td>Moto / Heli</td><td>WASD · Space up / C (or Ctrl) down · LMB rockets · E exit</td></tr>
+      <tr><td>Moto / Heli</td><td>WASD · Space up / C down · LMB rockets · E exit</td></tr>
       <tr><td>RMB (sniper)</td><td>scope zoom + reticle</td></tr>
       <tr><td>LMB</td><td>fire</td></tr>
       <tr><td>RMB</td><td>ADS</td></tr>
