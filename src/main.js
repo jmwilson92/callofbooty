@@ -191,16 +191,26 @@ async function start() {
   const combatTargets = [];
 
   bus.on('pointerlock', (locked) => {
-    hud.setLocked(locked);
-    combatHud.setVisible(locked);
-    // Esc releases lock — close map only if it wasn't the map that exited lock.
-    // Opening the map intentionally calls exitPointerLock so wheel/drag work.
-    if (!locked && mapView.open && !mapView._suppressLockClose) {
-      mapView.setOpen(false);
+    if (locked) {
+      // Enter / resume play — hide start overlay until Esc
+      hud.setLocked(true);
+      combatHud.setVisible(true);
+      return;
     }
+    // Unlocked: map temporarily releases lock — do NOT show pause overlay
+    if (mapView.open || mapView._suppressLockClose) {
+      hud.setLocked(false, { keepPlaying: true });
+      combatHud.setVisible(true);
+      return;
+    }
+    // Esc (or other intentional unlock) — show pause / start overlay only
+    hud.setLocked(false, { forceMenu: true });
+    combatHud.setVisible(false);
+    hud.setGunnerMode?.(null);
+    // Close map if it was open without suppress flag
+    if (mapView.open) mapView.setOpen(false);
   });
   bus.on('pointerlock:error', () => {
-    // Chrome blocks re-locking for about a second after Esc; embeds may block entirely.
     hud.setError(
       'Pointer lock blocked — click CLICK TO PLAY again. ' +
       'If this keeps failing, open the game in a normal browser tab (not a VS Code Simple Browser).'
@@ -210,6 +220,10 @@ async function start() {
   combatHud.setVisible(false);
   // Explicit play button (pointer-events: auto) so start isn't stuck behind UI
   hud.bindPlay?.(() => input.requestLock());
+  // Closing map re-locks pointer without showing pause menu
+  mapView.onClose = () => {
+    setTimeout(() => input.requestLock(), 30);
+  };
 
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -436,6 +450,20 @@ async function start() {
       );
     } else {
       hud.setPrompt(null);
+    }
+
+    // Gunner free/map mode badge (always visible while in gunner seat)
+    if (vehicles.isGunner && vehicles.active) {
+      const v = vehicles.active;
+      const volleys = Math.min(v.rocketsLeft ?? 0, v.rocketsRight ?? 0);
+      hud.setGunnerMode?.({
+        mode: v.aimMode === 'map' ? 'map' : 'direct',
+        target: v.mapTarget,
+        volleys,
+        flares: v.flares ?? 0,
+      });
+    } else {
+      hud.setGunnerMode?.(null);
     }
 
     combatHud.update(

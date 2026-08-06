@@ -97,6 +97,7 @@ export function createHud() {
   hint.innerHTML = `
     <h1>Call of Booty <small>— Phase 1</small></h1>
     <p class="lead">Click below (or anywhere) to lock the pointer and drop in.</p>
+    <p class="lead" style="opacity:0.55;font-size:0.8rem;margin-top:-0.5rem">Esc pauses and returns here. Opening the map does not.</p>
     <button type="button" id="hint-play" class="hint-play">CLICK TO PLAY</button>
     <table>
       <tr><td>WASD</td><td>move</td></tr>
@@ -106,12 +107,34 @@ export function createHud() {
       <tr><td>E</td><td>vehicle / loot / door / elevator</td></tr>
       <tr><td>V / T</td><td>heli gunner seat · map/free aim</td></tr>
       <tr><td>M</td><td>tactical map</td></tr>
-      <tr><td>Esc</td><td>release pointer</td></tr>
+      <tr><td>Esc</td><td>pause / release pointer</td></tr>
     </table>
     <p class="err"></p>`;
   document.body.appendChild(hint);
   const err = hint.querySelector('.err');
   const playBtn = hint.querySelector('#hint-play');
+
+  // Gunner mode badge (top-center) — only while in gunner seat
+  const gunnerBadge = document.createElement('div');
+  gunnerBadge.id = 'gunner-mode-badge';
+  Object.assign(gunnerBadge.style, {
+    position: 'fixed',
+    top: '14px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: '18',
+    pointerEvents: 'none',
+    display: 'none',
+    padding: '10px 18px',
+    borderRadius: '8px',
+    font: '700 13px/1.25 ui-monospace, Menlo, Consolas, monospace',
+    letterSpacing: '0.1em',
+    textAlign: 'center',
+    textShadow: '0 1px 3px rgba(0,0,0,0.85)',
+    border: '2px solid rgba(255,255,255,0.25)',
+    boxShadow: '0 6px 24px rgba(0,0,0,0.45)',
+  });
+  document.body.appendChild(gunnerBadge);
 
   // Inline styles so the button always works even if CSS is stale
   if (playBtn) {
@@ -131,12 +154,43 @@ export function createHud() {
     });
   }
 
+  /** Once you've entered play, only Esc brings the menu back (not map unlock). */
+  let hasEnteredPlay = false;
+  let menuVisible = true;
+
   return {
-    setLocked(locked) {
-      hint.style.display = locked ? 'none' : 'flex';
-      cross.style.display = locked ? 'block' : 'none';
-      if (!locked) prompt.style.display = 'none';
-      if (locked) err.textContent = '';
+    /**
+     * @param {boolean} locked pointer currently locked
+     * @param {{ forceMenu?: boolean, keepPlaying?: boolean }} [opts]
+     *   forceMenu — Esc pause: show overlay
+     *   keepPlaying — temporary unlock (map): hide menu, stay "in game"
+     */
+    setLocked(locked, opts = {}) {
+      if (locked) {
+        hasEnteredPlay = true;
+        menuVisible = false;
+        hint.style.display = 'none';
+        cross.style.display = 'block';
+        err.textContent = '';
+        return;
+      }
+      // Unlocked
+      cross.style.display = 'none';
+      prompt.style.display = 'none';
+      if (opts.keepPlaying && hasEnteredPlay) {
+        // Map open etc. — do NOT show start/pause overlay
+        menuVisible = false;
+        hint.style.display = 'none';
+        return;
+      }
+      // First load or Esc pause
+      menuVisible = true;
+      hint.style.display = 'flex';
+      if (hasEnteredPlay) {
+        const lead = hint.querySelector('.lead');
+        if (lead) lead.textContent = 'Paused — click CLICK TO PLAY or press Enter to resume.';
+        if (playBtn) playBtn.textContent = 'RESUME';
+      }
     },
     setError(msg) {
       err.textContent = msg || '';
@@ -148,6 +202,41 @@ export function createHud() {
       }
       prompt.textContent = text;
       prompt.style.display = 'block';
+    },
+    /**
+     * Gunner aim mode HUD.
+     * @param {null|{ mode:'map'|'direct', target?: object|null, volleys?: number, flares?: number }} state
+     */
+    setGunnerMode(state) {
+      if (!state) {
+        gunnerBadge.style.display = 'none';
+        return;
+      }
+      const isMap = state.mode === 'map';
+      gunnerBadge.style.display = 'block';
+      if (isMap) {
+        gunnerBadge.style.background = 'rgba(40, 20, 8, 0.88)';
+        gunnerBadge.style.borderColor = 'rgba(255, 180, 60, 0.85)';
+        gunnerBadge.style.color = '#ffc040';
+        const tgt = state.target
+          ? ` · LOCK: ${(state.target.kind || 'target').toUpperCase()}${state.target.label ? ` ${state.target.label}` : ''}`
+          : ' · click map (M) to lock target';
+        gunnerBadge.innerHTML =
+          `<div style="font-size:15px">MAP MODE</div>` +
+          `<div style="font-size:11px;font-weight:600;opacity:0.9;margin-top:4px;letter-spacing:0.04em">Missiles hit map pin / rooftops${tgt}</div>` +
+          `<div style="font-size:10px;opacity:0.65;margin-top:5px">T · free aim · Rockets ${state.volleys ?? '—'}/8 · Flares ${state.flares ?? '—'}</div>`;
+      } else {
+        gunnerBadge.style.background = 'rgba(8, 28, 40, 0.88)';
+        gunnerBadge.style.borderColor = 'rgba(100, 210, 255, 0.85)';
+        gunnerBadge.style.color = '#7fd4ff';
+        gunnerBadge.innerHTML =
+          `<div style="font-size:15px">FREE AIM</div>` +
+          `<div style="font-size:11px;font-weight:600;opacity:0.9;margin-top:4px;letter-spacing:0.04em">Missiles strike what's ahead under reticle</div>` +
+          `<div style="font-size:10px;opacity:0.65;margin-top:5px">T · map mode · Rockets ${state.volleys ?? '—'}/8 · Flares ${state.flares ?? '—'}</div>`;
+      }
+    },
+    get menuOpen() {
+      return menuVisible;
     },
     /** Wire the CLICK TO PLAY button to Input.requestLock */
     bindPlay(requestLockFn) {
@@ -161,7 +250,7 @@ export function createHud() {
       playBtn.addEventListener('pointerup', go);
       // Keyboard when menu is up
       window.addEventListener('keydown', (e) => {
-        if (hint.style.display === 'none') return;
+        if (!menuVisible) return;
         if (e.code === 'Enter' || e.code === 'Space') {
           e.preventDefault();
           requestLockFn?.();

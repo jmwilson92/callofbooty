@@ -350,12 +350,10 @@ export class MapView {
     this.fullWrap.classList.toggle('is-open', open);
     if (open) {
       // Pointer lock steals wheel/drag — release so the map can receive input.
-      // Flag stops the lock-change handler from immediately closing the map.
+      // Keep suppress flag until map closes so Esc-menu does NOT appear.
+      this._suppressLockClose = true;
       if (typeof document !== 'undefined' && document.pointerLockElement) {
-        this._suppressLockClose = true;
         document.exitPointerLock();
-        // Clear on next tick after pointerlockchange fires
-        setTimeout(() => { this._suppressLockClose = false; }, 0);
       }
       if (this._lastPos) {
         this.panX = this._lastPos.x;
@@ -367,6 +365,8 @@ export class MapView {
       this._clampPan();
     } else {
       this._suppressLockClose = false;
+      // Resume play without showing the start overlay
+      if (typeof this.onClose === 'function') this.onClose();
     }
   }
 
