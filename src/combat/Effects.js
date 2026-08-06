@@ -150,10 +150,16 @@ export class CombatEffects {
   }
 
   update(dt) {
+    if (this._flashLightT > 0) {
+      this._flashLightT -= dt;
+      this._flashLight.intensity = Math.max(0, this._flashLight.intensity - dt * 70);
+      if (this._flashLightT <= 0) this._flashLight.intensity = 0;
+    }
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const t = this.tracers[i];
       t.life -= dt;
-      t.mat.opacity = Math.max(0, (t.life / (COMBAT.TRACER_LIFE * 0.75)) * 0.5);
+      const maxL = t.life + dt;
+      t.mat.opacity = Math.max(0, t.mat.opacity * (t.life / Math.max(1e-4, maxL)));
       if (t.life <= 0) {
         this.group.remove(t.line);
         t.line.geometry.dispose();

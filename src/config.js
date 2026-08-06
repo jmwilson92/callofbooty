@@ -628,7 +628,7 @@ export const WEAPONS = {
     // Long-range: high velocity still needs lead + drop on far movers
     damage: 100, headMult: 2.15, limbMult: 0.75,
     falloffStart: 200, falloffEnd: 400, falloffMinMult: 0.88,
-    muzzleVelocity: 860, dropScale: 0.85, pellets: 1,
+    muzzleVelocity: 820, dropScale: 2.4, pellets: 1,
     spreadHip: 4.0, spreadAds: 0.02, spreadMove: 2.5, spreadMax: 5.0, spreadPerShot: 0.5,
     recoilPattern: [[0, 2.8], [0.15, 2.6], [-0.12, 2.5], [0.2, 2.4], [-0.15, 2.3]],
     color: 0x2a3a4a, viewModel: { len: 0.72, thick: 0.05 },
@@ -641,7 +641,7 @@ export const WEAPONS = {
     reloadTime: 2.5, reloadTimeEmpty: 3.0, adsTime: 0.32, swapTime: 0.5,
     damage: 48, headMult: 1.9, limbMult: 0.85,
     falloffStart: 80, falloffEnd: 180, falloffMinMult: 0.78,
-    muzzleVelocity: 780, dropScale: 0.65, pellets: 1,
+    muzzleVelocity: 760, dropScale: 1.9, pellets: 1,
     spreadHip: 2.2, spreadAds: 0.08, spreadMove: 1.2, spreadMax: 3.0, spreadPerShot: 0.25,
     // Hide viewmodel on ADS so you look *through* the glass, not at the tube
     scopeZoomFov: 28, scopeOverlay: true, hideViewOnAds: true,

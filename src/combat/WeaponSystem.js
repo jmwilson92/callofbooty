@@ -241,7 +241,7 @@ export class WeaponSystem {
     this._muzzle = vm.muzzle;
     this.viewGroup.add(vm.root);
 
-    // No muzzle flash sphere on scoped rifles — it reads as a hacky tip blob in hip fire
+    // Soft viewmodel flash for non-scoped; sniper/DMR use world-space bloom only
     if (def.class === 'sniper' || def.class === 'dmr') {
       this._muzzleFlash = null;
     } else {
@@ -306,6 +306,7 @@ export class WeaponSystem {
 
     // Realistic bullet: speed by caliber, gravity drop, travel time (lead)
     const speed = def.muzzleVelocity || 600;
+    const longRange = def.class === 'sniper' || def.class === 'dmr';
     this.ballistics.fire({
       origin: origin.clone(),
       dir: dir.clone().normalize(),
@@ -317,9 +318,12 @@ export class WeaponSystem {
       maxDist: 500,
     });
 
-    // Instant cosmetic muzzle streak (not the damage ray)
-    const streakEnd = origin.clone().addScaledVector(dir, Math.min(18, speed * 0.025));
-    this.effects.spawnTracer(origin, streakEnd);
+    // Visible muzzle streak + world bloom (sniper/DMR get a long golden streak)
+    const streakLen = longRange ? 28 : 14;
+    const streakEnd = origin.clone().addScaledVector(dir, streakLen);
+    this.effects.spawnTracer(origin, streakEnd, { long: longRange });
+    const bloomPos = origin.clone().addScaledVector(dir, 0.35);
+    this.effects.spawnMuzzleBloom?.(bloomPos, longRange ? 1.4 : 0.9);
 
     // Brass eject to the right
     {

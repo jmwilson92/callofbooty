@@ -9,7 +9,8 @@ import { rayAABB, falloffMult, partMult } from './Hitscan.js';
 
 const _tmp = new THREE.Vector3();
 const _cand = [];
-const GRAVITY = 9.81; // m/s² downward (game-scale; sniper needs visible drop)
+// Game-readable drop (real 9.81 is almost invisible at 800+ m/s)
+const GRAVITY = 18.5;
 
 export class Ballistics {
   constructor(hash, effects, bus) {
@@ -27,46 +28,58 @@ export class Ballistics {
     origin, dir, speed, damage, def, rar, targetRange, maxDist = 450,
   }) {
     const v = dir.clone().normalize().multiplyScalar(speed);
+    const longRange = def.class === 'sniper' || def.class === 'dmr';
+    const mesh = this.effects?.createBulletMesh?.(longRange) || null;
+    if (mesh) mesh.position.copy(origin);
     this.projectiles.push({
       pos: origin.clone(),
       vel: v,
       prev: origin.clone(),
       age: 0,
       pathDist: 0,
-      maxLife: maxDist / Math.max(80, speed) + 0.5,
+      maxLife: maxDist / Math.max(80, speed) + 0.85,
       damage,
       def,
       rar,
       targetRange,
       speed,
+      longRange,
+      mesh,
+      trailAcc: 0,
     });
+  }
+
+  _killProjectile(i) {
+    const p = this.projectiles[i];
+    if (p?.mesh) this.effects?.releaseBulletMesh?.(p.mesh);
+    this.projectiles.splice(i, 1);
   }
 
   /**
    * Advance all bullets. `targets` must be current live list.
-   * Bots should have .parts, .dead, optional .vx/.vz for debug.
    */
   update(dt, targets) {
     if (dt <= 0) return;
-    // Cap step so fast bullets don't tunnel through thin walls
-    const maxStep = 0.35; // metres per substep
+    // Larger steps for long-range readability; still sub-stepped for collision
+    const maxStep = 1.2;
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.age += dt;
       if (p.age > p.maxLife) {
-        this.projectiles.splice(i, 1);
+        this._killProjectile(i);
         continue;
       }
 
-      // Gravity (bullet drop)
+      // Gravity (bullet drop) — stronger so sniper arcs are visible
       p.vel.y -= GRAVITY * (p.def.dropScale ?? 1) * dt;
 
       let remaining = dt;
       let hitSomething = false;
+      const frameStart = p.pos.clone();
       while (remaining > 1e-5 && !hitSomething) {
         const speed = p.vel.length();
         if (speed < 1) {
-          this.projectiles.splice(i, 1);
+          this._killProjectile(i);
           hitSomething = true;
           break;
         }
@@ -82,7 +95,7 @@ export class Ballistics {
         if (hit) {
           p.pathDist += hit.t;
           this._resolveHit(p, hit);
-          this.projectiles.splice(i, 1);
+          this._killProjectile(i);
           hitSomething = true;
           break;
         }
@@ -93,7 +106,24 @@ export class Ballistics {
       }
 
       if (!hitSomething) {
-        this.effects?.spawnBallisticTrace?.(p.prev, p.pos);
+        // Long glowing trail segments so you can see the arc
+        this.effects?.spawnBallisticTrace?.(frameStart, p.pos, {
+          bright: p.longRange,
+          life: p.longRange ? 0.35 : 0.12,
+        });
+        if (p.mesh) {
+          p.mesh.position.copy(p.pos);
+          // Stretch slightly along velocity for a “streak” read
+          const sp = p.vel.length();
+          if (sp > 1) {
+            p.mesh.lookAt(p.pos.clone().add(p.vel));
+            p.mesh.scale.set(
+              p.longRange ? 1.2 : 0.8,
+              p.longRange ? 1.2 : 0.8,
+              p.longRange ? 2.8 : 1.6
+            );
+          }
+        }
       }
     }
   }
