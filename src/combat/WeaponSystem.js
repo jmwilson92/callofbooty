@@ -262,14 +262,13 @@ export class WeaponSystem {
   }
 
   /**
-   * Aim direction: camera look + aim offset (recoil) + optional bloom cone sample.
+   * Aim direction: camera look + recoil aim offset + hip/ADS spread cone.
+   * Hip is intentionally inaccurate except CQC (SMG/pistol have lower hip cone).
    */
   getAimDir(out, rng) {
     const cam = this.camera.camera;
-    // Base forward from camera (includes visual recoil on camera quat)
     out.set(0, 0, -1).applyQuaternion(cam.quaternion);
 
-    // Apply aim offset as additional pitch/yaw in degrees
     const yawQ = new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0), this.aimOffsetH * DEG
     );
@@ -277,15 +276,20 @@ export class WeaponSystem {
     const pitchQ = new THREE.Quaternion().setFromAxisAngle(right, -this.aimOffsetV * DEG);
     out.applyQuaternion(yawQ).applyQuaternion(pitchQ).normalize();
 
-    // Bloom / spread cone (not applied on perfect ADS still first shot for non-shotgun)
     const def = this.def;
     if (!def) return out;
-    let cone = this.spread;
-    if (this.ads > 0.85 && this.spread < 0.05 && def.pellets === 1) {
-      cone = def.spreadAds * 0.15;
-    }
-    if (cone > 0.01 && rng) {
-      const ang = cone * DEG * (0.3 + rng() * 0.7);
+
+    // Base cone always applied: full hip → tight ADS
+    const adsT = this.ads * this.ads * (3 - 2 * this.ads);
+    let baseCone = THREE.MathUtils.lerp(def.spreadHip, def.spreadAds, adsT);
+    // Moving hip is worse
+    if (this.ads < 0.5) baseCone += (def.spreadMove || 0) * (1 - adsT * 2);
+    // Bloom stacks on top of base (recoil spray)
+    const cone = baseCone + this.spread * (1 - adsT * 0.65);
+
+    if (cone > 0.02 && rng) {
+      // Full cone sample (not 0.3–0.7) so hip feels loose
+      const ang = cone * DEG * (0.15 + rng() * 0.85);
       const theta = rng() * Math.PI * 2;
       const up = new THREE.Vector3(0, 1, 0);
       const r = new THREE.Vector3().crossVectors(out, up);
@@ -304,12 +308,13 @@ export class WeaponSystem {
     const c = this.current;
     if (!def || !c) return;
 
-    // Realistic bullet: speed by caliber, gravity drop, travel time (lead)
+    // Fire from camera center along aim — never offset sideways
     const speed = def.muzzleVelocity || 600;
     const longRange = def.class === 'sniper' || def.class === 'dmr';
+    const fireDir = dir.clone().normalize();
     this.ballistics.fire({
       origin: origin.clone(),
-      dir: dir.clone().normalize(),
+      dir: fireDir,
       speed,
       damage: def.damage,
       def,
@@ -318,23 +323,25 @@ export class WeaponSystem {
       maxDist: 500,
     });
 
-    // Visible muzzle streak + world bloom (sniper/DMR get a long golden streak)
-    const streakLen = longRange ? 28 : 14;
-    const streakEnd = origin.clone().addScaledVector(dir, streakLen);
-    this.effects.spawnTracer(origin, streakEnd, { long: longRange });
-    const bloomPos = origin.clone().addScaledVector(dir, 0.35);
-    this.effects.spawnMuzzleBloom?.(bloomPos, longRange ? 1.4 : 0.9);
+    // Tracer from same origin/direction as the bullet (no lateral nudge)
+    const streakLen = longRange ? 32 : 16;
+    const streakEnd = origin.clone().addScaledVector(fireDir, streakLen);
+    this.effects.spawnTracer(origin, streakEnd, { long: longRange, centered: true });
+    this.effects.spawnMuzzleBloom?.(
+      origin.clone().addScaledVector(fireDir, 0.4),
+      longRange ? 1.4 : 0.9
+    );
 
-    // Brass eject to the right
+    // Brass only — intentionally off to the side (not the bullet)
     {
       const cam = this.camera.camera;
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
       const eject = origin.clone()
-        .addScaledVector(right, 0.12)
-        .addScaledVector(up, -0.08)
-        .addScaledVector(forward, 0.2);
+        .addScaledVector(right, 0.14)
+        .addScaledVector(up, -0.1)
+        .addScaledVector(forward, 0.15);
       this.effects.spawnCasing(eject, right, up, forward);
     }
   }

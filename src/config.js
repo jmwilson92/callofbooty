@@ -557,7 +557,8 @@ export const WEAPONS = {
     damage: 24, headMult: 1.55, limbMult: 0.9,
     falloffStart: 35, falloffEnd: 95, falloffMinMult: 0.72,
     muzzleVelocity: 720, dropScale: 0.55, pellets: 1,
-    spreadHip: 1.8, spreadAds: 0.12, spreadMove: 0.9, spreadMax: 3.5, spreadPerShot: 0.18,
+    // Hip is loose; ADS is laser. Close range still hits via short miss distance.
+    spreadHip: 4.2, spreadAds: 0.1, spreadMove: 1.4, spreadMax: 7.5, spreadPerShot: 0.28,
     recoilPattern: [
       [0, 0.55], [0.02, 0.58], [-0.02, 0.6], [0.03, 0.62], [-0.03, 0.64],
       [-0.18, 0.58], [-0.28, 0.55], [-0.35, 0.52], [-0.32, 0.5], [-0.22, 0.48],
@@ -575,7 +576,7 @@ export const WEAPONS = {
     damage: 21, headMult: 1.5, limbMult: 0.9,
     falloffStart: 30, falloffEnd: 85, falloffMinMult: 0.7,
     muzzleVelocity: 700, dropScale: 0.58, pellets: 1,
-    spreadHip: 2.0, spreadAds: 0.14, spreadMove: 1.0, spreadMax: 3.8, spreadPerShot: 0.2,
+    spreadHip: 4.5, spreadAds: 0.12, spreadMove: 1.5, spreadMax: 8.0, spreadPerShot: 0.3,
     recoilPattern: [
       [0, 0.48], [0.05, 0.5], [-0.04, 0.52], [0.08, 0.5], [-0.1, 0.48],
       [0.15, 0.46], [0.22, 0.45], [0.18, 0.44], [-0.12, 0.46], [-0.25, 0.48],
@@ -593,7 +594,8 @@ export const WEAPONS = {
     damage: 20, headMult: 1.35, limbMult: 0.95,
     falloffStart: 12, falloffEnd: 40, falloffMinMult: 0.32,
     muzzleVelocity: 380, dropScale: 1.15, pellets: 1,
-    spreadHip: 2.4, spreadAds: 0.22, spreadMove: 0.7, spreadMax: 4.2, spreadPerShot: 0.22,
+    // SMG: hip is usable CQC only (low cone + short range)
+    spreadHip: 2.6, spreadAds: 0.2, spreadMove: 0.8, spreadMax: 5.5, spreadPerShot: 0.2,
     recoilPattern: [
       [0, 0.38], [0.08, 0.4], [-0.1, 0.42], [0.14, 0.4], [-0.16, 0.38],
       [0.2, 0.36], [-0.18, 0.36], [0.12, 0.35], [-0.22, 0.37], [0.18, 0.35],
@@ -612,7 +614,7 @@ export const WEAPONS = {
     damage: 27, headMult: 1.4, limbMult: 0.9,
     falloffStart: 45, falloffEnd: 120, falloffMinMult: 0.7,
     muzzleVelocity: 680, dropScale: 0.7, pellets: 1,
-    spreadHip: 2.6, spreadAds: 0.2, spreadMove: 1.4, spreadMax: 4.5, spreadPerShot: 0.15,
+    spreadHip: 5.5, spreadAds: 0.22, spreadMove: 2.0, spreadMax: 9.0, spreadPerShot: 0.22,
     recoilPattern: [
       [0, 0.7], [0.04, 0.72], [-0.05, 0.74], [0.08, 0.7], [-0.1, 0.68],
       [0.15, 0.65], [0.22, 0.62], [0.28, 0.6], [0.25, 0.58], [0.15, 0.56],
@@ -629,7 +631,7 @@ export const WEAPONS = {
     damage: 100, headMult: 2.15, limbMult: 0.75,
     falloffStart: 200, falloffEnd: 400, falloffMinMult: 0.88,
     muzzleVelocity: 820, dropScale: 2.4, pellets: 1,
-    spreadHip: 4.0, spreadAds: 0.02, spreadMove: 2.5, spreadMax: 5.0, spreadPerShot: 0.5,
+    spreadHip: 8.5, spreadAds: 0.015, spreadMove: 3.5, spreadMax: 12.0, spreadPerShot: 0.6,
     recoilPattern: [[0, 2.8], [0.15, 2.6], [-0.12, 2.5], [0.2, 2.4], [-0.15, 2.3]],
     color: 0x2a3a4a, viewModel: { len: 0.72, thick: 0.05 },
     // True optic zoom + scope overlay when ADS
@@ -642,7 +644,7 @@ export const WEAPONS = {
     damage: 48, headMult: 1.9, limbMult: 0.85,
     falloffStart: 80, falloffEnd: 180, falloffMinMult: 0.78,
     muzzleVelocity: 760, dropScale: 1.9, pellets: 1,
-    spreadHip: 2.2, spreadAds: 0.08, spreadMove: 1.2, spreadMax: 3.0, spreadPerShot: 0.25,
+    spreadHip: 5.8, spreadAds: 0.06, spreadMove: 1.8, spreadMax: 9.0, spreadPerShot: 0.35,
     // Hide viewmodel on ADS so you look *through* the glass, not at the tube
     scopeZoomFov: 28, scopeOverlay: true, hideViewOnAds: true,
     recoilPattern: [
@@ -660,7 +662,7 @@ export const WEAPONS = {
     damage: 12, headMult: 1.4, limbMult: 1.0,
     falloffStart: 6, falloffEnd: 22, falloffMinMult: 0.12,
     muzzleVelocity: 340, dropScale: 1.4, pellets: 9,
-    spreadHip: 4.5, spreadAds: 3.2, spreadMove: 1.0, spreadMax: 6.0, spreadPerShot: 0.4,
+    spreadHip: 6.5, spreadAds: 3.5, spreadMove: 1.2, spreadMax: 10.0, spreadPerShot: 0.45,
     recoilPattern: [[0, 3.5], [0.3, 3.2], [-0.25, 3.0], [0.2, 2.9], [-0.3, 2.8], [0.15, 2.7]],
     color: 0x5a4030, viewModel: { len: 0.48, thick: 0.07 },
   },
@@ -671,7 +673,8 @@ export const WEAPONS = {
     damage: 22, headMult: 1.7, limbMult: 0.9,
     falloffStart: 14, falloffEnd: 45, falloffMinMult: 0.35,
     muzzleVelocity: 360, dropScale: 1.2, pellets: 1,
-    spreadHip: 1.5, spreadAds: 0.15, spreadMove: 0.8, spreadMax: 2.8, spreadPerShot: 0.2,
+    // Pistol: hip OK up close, still better ADS
+    spreadHip: 2.4, spreadAds: 0.14, spreadMove: 0.9, spreadMax: 4.5, spreadPerShot: 0.22,
     recoilPattern: [
       [0, 0.9], [0.1, 0.85], [-0.12, 0.8], [0.15, 0.78], [-0.1, 0.75],
       [0.12, 0.72], [-0.14, 0.7], [0.08, 0.68], [-0.1, 0.66], [0.1, 0.65],

@@ -129,13 +129,13 @@ export class Ballistics {
   }
 
   _segmentHit(from, to, dir, maxT, targets) {
-    const hits = [];
+    const worldHits = [];
+    const targetHits = [];
 
-    // World boxes along segment AABB
-    const minX = Math.min(from.x, to.x) - 0.4;
-    const maxX = Math.max(from.x, to.x) + 0.4;
-    const minZ = Math.min(from.z, to.z) - 0.4;
-    const maxZ = Math.max(from.z, to.z) + 0.4;
+    const minX = Math.min(from.x, to.x) - 0.5;
+    const maxX = Math.max(from.x, to.x) + 0.5;
+    const minZ = Math.min(from.z, to.z) - 0.5;
+    const maxZ = Math.max(from.z, to.z) + 0.5;
     this.hash.query(minX, minZ, maxX, maxZ, _cand);
 
     for (let i = 0; i < _cand.length; i++) {
@@ -143,92 +143,84 @@ export class Ballistics {
       if (box.disabled) continue;
       const tag = box.tag || 'solid';
       if (tag === 'trigger' || tag === 'door' || tag === 'ladder') continue;
-      const t = rayAABB(from, dir, box.min, box.max, maxT + 0.05);
-      if (t == null || t > maxT + 0.02) continue;
-      hits.push({ t, kind: 'world', box, tag });
+      const t = rayAABB(from, dir, box.min, box.max, maxT + 0.08);
+      if (t == null || t > maxT + 0.04) continue;
+      worldHits.push({ t, kind: 'world', box, tag });
     }
 
     for (const tgt of targets) {
       if (!tgt || tgt.dead || !tgt.parts) continue;
       for (const part of tgt.parts) {
-        const t = rayAABB(from, dir, part.min, part.max, maxT + 0.05);
-        if (t == null || t > maxT + 0.02) continue;
-        hits.push({ t, kind: 'target', target: tgt, part: part.name });
+        const t = rayAABB(from, dir, part.min, part.max, maxT + 0.08);
+        if (t == null || t > maxT + 0.04) continue;
+        targetHits.push({ t, kind: 'target', target: tgt, part: part.name });
       }
     }
 
-    if (!hits.length) return null;
-    hits.sort((a, b) => a.t - b.t);
+    worldHits.sort((a, b) => a.t - b.t);
+    targetHits.sort((a, b) => a.t - b.t);
 
-    const TARGET_BIAS = 0.55; // generous when bots hug walls
-    for (let i = 0; i < hits.length; i++) {
-      const h = hits[i];
-      if (h.kind === 'target') return h;
-
-      // Prefer any target slightly behind this surface
-      for (let j = i + 1; j < hits.length; j++) {
-        const n = hits[j];
-        if (n.t > h.t + TARGET_BIAS) break;
-        if (n.kind === 'target') {
-          // Skip wall if it overlaps the bot (bot standing in/against geometry)
-          if (this._wallOverlapsTarget(h.box, n.target)) return n;
-          // Or if wall is paper-thin in ray direction and target is close
-          if (n.t - h.t < 0.45) return n;
+    // Resolve targets first: only blocked by walls clearly in front that don't hug the bot
+    for (const th of targetHits) {
+      let blocked = false;
+      for (const wh of worldHits) {
+        if (wh.t >= th.t - 0.02) break;
+        if (wh.tag === 'thin') continue;
+        if (this._isFloorish(wh.box) && Math.abs(dir.y) < 0.4) continue;
+        // Wall the bot is standing against / inside — never blocks that bot
+        if (this._wallOverlapsTarget(wh.box, th.target)) continue;
+        // Wall is truly in front of the bot along the ray
+        if (th.t - wh.t > 0.12) {
+          blocked = true;
+          break;
         }
       }
+      if (!blocked) return th;
+    }
 
-      const tag = h.tag || 'solid';
-      if (tag === 'thin') continue; // pass through thin
-
-      // Floor slabs rarely block chest-height horizontal fire
-      const box = h.box;
-      const isFloorish = (box.max.y - box.min.y) < 0.4
-        && (box.max.x - box.min.x) > 1.2
-        && (box.max.z - box.min.z) > 1.2;
-      if (isFloorish && Math.abs(dir.y) < 0.35) {
-        let hasTgt = false;
-        for (let j = i + 1; j < hits.length; j++) {
-          if (hits[j].kind === 'target' && hits[j].t < h.t + 3) {
-            hasTgt = true;
-            break;
-          }
-        }
-        if (hasTgt) continue;
-      }
-
-      // If ANY target center is nearly inside this solid box, ignore box for blocking
-      let block = true;
-      for (const tgt of targets) {
-        if (!tgt || tgt.dead) continue;
-        if (this._wallOverlapsTarget(box, tgt)) {
-          // Only ignore if there's a target hit on this ray
-          for (let j = i + 1; j < hits.length; j++) {
-            if (hits[j].kind === 'target' && hits[j].target === tgt) {
-              block = false;
-              break;
-            }
-          }
-        }
-        if (!block) break;
-      }
-      if (!block) continue;
-
-      return h;
+    // No target: first real solid
+    for (const wh of worldHits) {
+      if (wh.tag === 'thin') continue;
+      if (this._isFloorish(wh.box) && Math.abs(dir.y) < 0.35) continue;
+      return wh;
     }
     return null;
   }
 
+  _isFloorish(box) {
+    return (box.max.y - box.min.y) < 0.45
+      && (box.max.x - box.min.x) > 1.2
+      && (box.max.z - box.min.z) > 1.2;
+  }
+
   _wallOverlapsTarget(box, tgt) {
     if (!box || !tgt) return false;
-    const px = tgt.x;
-    const py = (tgt.y ?? 0) + 1.1;
-    const pz = tgt.z;
-    const pad = 0.55;
-    return (
-      px >= box.min.x - pad && px <= box.max.x + pad
-      && py >= box.min.y - pad && py <= box.max.y + pad
-      && pz >= box.min.z - pad && pz <= box.max.z + pad
-    );
+    // Fat pad: bots standing against exterior walls often sit inside wall AABB slightly
+    const pad = 1.15;
+    const feet = tgt.y ?? 0;
+    // Test feet, torso, head
+    const pts = [
+      [tgt.x, feet + 0.3, tgt.z],
+      [tgt.x, feet + 1.1, tgt.z],
+      [tgt.x, feet + 1.65, tgt.z],
+    ];
+    for (const [px, py, pz] of pts) {
+      if (
+        px >= box.min.x - pad && px <= box.max.x + pad
+        && py >= box.min.y - pad && py <= box.max.y + pad
+        && pz >= box.min.z - pad && pz <= box.max.z + pad
+      ) return true;
+    }
+    // Also: horizontal proximity — wall within 1.2 m of bot on XZ
+    const cx = (box.min.x + box.max.x) * 0.5;
+    const cz = (box.min.z + box.max.z) * 0.5;
+    const hx = Math.max(box.min.x - tgt.x, 0, tgt.x - box.max.x);
+    const hz = Math.max(box.min.z - tgt.z, 0, tgt.z - box.max.z);
+    const distXZ = Math.hypot(hx, hz);
+    if (distXZ < 1.1 && feet + 1.2 >= box.min.y - 0.5 && feet <= box.max.y + 0.5) {
+      return true;
+    }
+    return false;
   }
 
   _resolveHit(p, hit) {

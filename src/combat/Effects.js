@@ -95,7 +95,7 @@ export class CombatEffects {
   }
 
   /**
-   * Muzzle flash streak along aim.
+   * Muzzle flash streak along aim — always centerline (no side offset).
    * @param {{ long?: boolean }} opts
    */
   spawnTracer(from, to, opts = {}) {
@@ -105,11 +105,6 @@ export class CombatEffects {
     dir.normalize();
     const maxLen = opts.long ? 55 : 18;
     const start = len > maxLen ? from.clone().addScaledVector(dir, len - maxLen) : from.clone();
-    const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0));
-    if (right.lengthSq() > 1e-6) {
-      right.normalize();
-      start.addScaledVector(right, 0.03);
-    }
     const geo = new THREE.BufferGeometry().setFromPoints([start, to.clone()]);
     const mat = this._lineMat.clone();
     mat.opacity = opts.long ? 0.9 : 0.55;
