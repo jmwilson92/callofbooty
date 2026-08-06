@@ -86,10 +86,10 @@ export class RappelSystem {
       const top = roofY + 0.15;
       if (top - bot < 12) continue;
 
-      // Landing point: scoot onto roof deck inside the footprint
-      const landX = THREE.MathUtils.clamp(x, b.x + 1.2, b.x + b.w - 1.2);
-      const landZ = b.z + Math.min(2.2, b.d * 0.25);
-      const landY = roofY + 0.12;
+      // Landing point: scoot well onto the roof deck (inside footprint)
+      const landX = THREE.MathUtils.clamp(x, b.x + 1.5, b.x + b.w - 1.5);
+      const landZ = b.z + Math.min(3.2, Math.max(2.0, b.d * 0.28));
+      const landY = roofY + 0.15;
 
       this._addVertical(x, bot, z, top, landX, landY, landZ);
       n++;
@@ -324,9 +324,26 @@ export class RappelSystem {
     controller.prevPos.copy(controller.pos);
 
     if (u >= 1) {
-      // Land / scoot onto roof deck
-      const land = r.land;
-      controller.pos.set(land.x, land.y, land.z);
+      // Phase 1 (zip) finished → optional phase 2 scoot onto roof deck
+      if (r.phase === 'zip' && r.land) {
+        const scootSpeed = RAPPEL.SCOOT_SPEED ?? 12;
+        const from = { x: r.to.x, y: r.to.y, z: r.to.z };
+        const to = { ...r.land };
+        const dist = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+        if (dist > 0.15) {
+          this.ride = {
+            kind: r.kind,
+            phase: 'scoot',
+            from,
+            to,
+            land: null,
+            t: 0,
+            duration: Math.max(0.22, dist / scootSpeed),
+          };
+          return true;
+        }
+        controller.pos.set(to.x, to.y, to.z);
+      }
       controller.vel.set(0, 0, 0);
       controller.grounded = true;
       controller.prevPos.copy(controller.pos);
@@ -341,18 +358,20 @@ export class RappelSystem {
     if (line.kind === 'vertical') {
       const py = controller.pos.y;
       const nearTop = py > (line.top + line.bot) * 0.55;
-      // Default: go up to roof. From top half, go down to base (unless forced up).
-      const goUp = opts.up || opts.express || !nearTop;
+      // Default: go up. From roof/top half, go down (unless forced up via W auto-grab).
+      const goUp = opts.up === true ? true : opts.up === false ? false : !nearTop;
       if (goUp) {
+        // Express: straight to top of rope, then scoot onto roof deck
         const from = {
           x: line.x,
           y: Math.max(line.bot + 0.15, Math.min(py, line.top - 1)),
           z: line.z,
         };
-        const to = { x: line.x, y: line.top - 0.15, z: line.z };
+        const to = { x: line.x, y: line.top - 0.05, z: line.z };
         const dist = Math.abs(to.y - from.y);
         this.ride = {
           kind: 'vertical',
+          phase: 'zip',
           from,
           to,
           land: { ...line.land },
@@ -360,12 +379,13 @@ export class RappelSystem {
           duration: Math.max(0.55, dist / zipSpeed),
         };
       } else {
-        // Ride down to base
+        // Ride down to base (no roof scoot)
         const from = { x: line.x, y: Math.min(line.top - 0.2, py), z: line.z };
         const to = { x: line.x, y: line.bot + 0.2, z: line.z };
         const dist = Math.abs(to.y - from.y);
         this.ride = {
           kind: 'vertical',
+          phase: 'zip',
           from,
           to,
           land: { x: line.x, y: line.bot + 0.15, z: line.z + 0.8 },
@@ -397,6 +417,7 @@ export class RappelSystem {
     const dist = line.len || Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
     this.ride = {
       kind: 'horizontal',
+      phase: 'zip',
       from,
       to,
       land,
@@ -435,6 +456,7 @@ export class RappelSystem {
 
   prompt(px, py, pz) {
     if (this.ride) {
+      if (this.ride.phase === 'scoot') return 'Landing on roof…';
       return this.ride.kind === 'horizontal' ? 'Zipping…' : 'Rappelling to roof…';
     }
     const line = this._findNear(px, py, pz);

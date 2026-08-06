@@ -82,6 +82,8 @@ export const RAPPEL = {
   FACADE_OUT: 0.55,
   // Express zip speed (m/s) along the cable
   ZIP_SPEED: 34,
+  // After reaching rope top, scoot onto roof deck (m/s)
+  SCOOT_SPEED: 14,
   // Horizontal building-to-building lines
   HORIZONTAL_COUNT: 8,
   HORIZONTAL_MIN_DIST: 14,
