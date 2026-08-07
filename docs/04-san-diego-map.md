@@ -27,7 +27,7 @@ Terrain follows the natural map; buildings seat on local height.
 | `airport` | **San Diego International Airport** | Hangars + bay flats |
 | `mcrd` | **MCRD Depot** | Parade deck + arcaded barracks — see below |
 | `downtown` | **Downtown** | Zoned street grid, highest loot — see below |
-| `pointloma` | **Point Loma** | Ridge high ground |
+| `pointloma` | **Point Loma** | Lighthouse, Fort Rosecrans, submarine base |
 | `balboa` | **Balboa Park** | Museums, on the mesa NE of downtown across I-5 |
 | `zoo` | **San Diego Zoo** | Canyon-terraced habitats, aviary, Skyfari |
 | `coronado` | **Coronado** | NAS North Island, carrier + destroyer, Hotel del |
@@ -149,6 +149,25 @@ The carrier deck is the point of the whole POI: it is the largest flat surface
 on the map, it reads from every approach, and it is a genuinely good fight. Deck
 overhang, angled landing stripe, catapult tracks, island superstructure to
 starboard and parked aircraft clear of the landing lane.
+
+## Point Loma
+
+The peninsula ridge that closes the bay (`src/world/structures/PointLoma.js`).
+Three things make it read as Point Loma and nowhere else:
+
+- **Old Point Loma Lighthouse** on the crest — white tower, black lantern room
+  and gallery, over the keeper's cottage. It is short because the real one is;
+  it was built on the ridge, which was the whole point (and the reason fog
+  eventually retired it).
+- **Fort Rosecrans** — eleven terraced rows of white headstones stepping down
+  the bay slope. Cheap in geometry, unmistakable from anywhere on the map, and
+  the terraces turn a bare hillside into real cover.
+- **Submarine base** on the water below, with two boats alongside a pile wharf
+  under a gantry crane.
+
+Plus ridge housing down the spine and a Sunset Cliffs wall on the ocean edge.
+The ridge top runs 37–46 m with cliffs either side, so everything terraces along
+the spine instead of sitting on a pad.
 
 ## Geography (still present under the POIs)
 

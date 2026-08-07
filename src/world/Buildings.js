@@ -5,6 +5,7 @@ import { placeMcrdDepot } from './structures/Mcrd.js';
 import { placeSanDiegoZoo } from './structures/Zoo.js';
 import { placeKearnyMesa } from './structures/KearnyMesa.js';
 import { placeCoronado } from './structures/Coronado.js';
+import { placePointLoma } from './structures/PointLoma.js';
 import { kearnyPlan } from './KearnyPlan.js';
 import { mcrdBounds } from './McrdPlan.js';
 import { Occupancy } from './Occupancy.js';
@@ -127,36 +128,14 @@ function buildMcrd(sink, terrain, rng) {
   return stats;
 }
 
-// --- Point Loma: ridge housing + lighthouse tower ---
+// --- Point Loma: lighthouse, Fort Rosecrans, sub base (structures/PointLoma.js) ---
 function buildPointLoma(sink, terrain, rng) {
   const p = poi('pointloma');
-  const base = seatY(terrain, p, p.x, p.z, 24, 24);
-
-  makeBuilding(sink, {
-    x: p.x - 6, z: p.z - 6, w: 12, d: 12, floors: 4,
-    baseY: base, color: PAL[4], rng,
-  });
-  const mastY = base + BUILDINGS.GROUND_FLOOR_HEIGHT + 3 * BUILDINGS.FLOOR_HEIGHT;
-  sink.addSpan(p.x - 0.6, mastY, p.z - 0.6, p.x + 0.6, mastY + 18, p.z + 0.6, 0x9a968c);
-
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 1.7 + 0.3;
-    const r = 24 + (i % 2) * 16;
-    const w = 14, d = 10;
-    const x = p.x + Math.cos(a) * r - w / 2;
-    const z = p.z + Math.sin(a) * r - d / 2;
-    makeBuilding(sink, {
-      x, z, w, d, floors: 1 + Math.floor(rng() * 2),
-      baseY: seatY(terrain, p, x, z, w, d),
-      color: pick(rng, PAL), rng,
-    });
-  }
-
-  // Cliff-edge low walls
-  for (let i = 0; i < 10; i++) {
-    const wx = p.x - 50 + i * 10;
-    sink.addSpan(wx, base, p.z + 48, wx + 8, base + 1.2, p.z + 48.35, 0x9a968c, 'thin');
-  }
+  const stats = placePointLoma(sink, terrain, p, rng);
+  // Reserve the ridge so scatter doesn't drop houses through the headstone rows
+  // or into the ridge-housing run, which reaches ~200 m south of the anchor.
+  worldOcc.claim(p.x - 100, p.z - 130, 190, 340, 0, true);
+  return stats;
 }
 
 // --- Mission Valley: hotel / mall blocks on the valley floor ---
