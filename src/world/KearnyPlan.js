@@ -1,9 +1,8 @@
 import { POIS } from '../config.js';
 
-// Kearny Mesa: San Diego's flat-topped commercial mesa, split into quadrants by
-// the I-15 and SR-52 corridors that cross at the anchor. Big-box retail and the
-// dealership row cluster on the freeway-adjacent quadrants (which is where they
-// really are), and the residential tracts sit on the two quiet ones.
+// Kearny Mesa: San Diego's flat-topped commercial mesa. Big-box retail and the
+// dealership row cluster on the two freeway-adjacent quadrants (which is where
+// they really are); six residential tracts spread over the rest of the mesa top.
 //
 // Roads.js paints the streets from this plan; structures/KearnyMesa.js fills the
 // lots, so the two cannot drift.
@@ -20,6 +19,17 @@ export function kearnyPlan() {
   const tractB = { id: 'tractB', x: a.x + 55, z: a.z - 170, w: 145, d: 150 };
   const retail = { id: 'retail', x: a.x - 190, z: a.z + 25, w: 140, d: 150 };
   const business = { id: 'business', x: a.x + 55, z: a.z + 25, w: 145, d: 150 };
+
+  // Four more tracts on mesa the district was not using. The flat top runs well
+  // past the original four quadrants — north of z −560 the ground is 35–55 m with
+  // no freeway on it at all, and the shelf east of x 350 is nearly as clear — so
+  // the suburb spreads onto it the way Clairemont and Mira Mesa really do.
+  const tractC = { id: 'tractC', x: a.x - 190, z: a.z - 330, w: 140, d: 150 };
+  const tractD = { id: 'tractD', x: a.x + 55, z: a.z - 330, w: 145, d: 150 };
+  const tractE = { id: 'tractE', x: a.x + 210, z: a.z - 200, w: 120, d: 160 };
+  // Fills the 105 m of bare mesa between C and D so the north reads as one
+  // continuous suburb rather than two estates with a field between them.
+  const tractF = { id: 'tractF', x: a.x - 45, z: a.z - 330, w: 95, d: 150 };
 
   // Residential streets: a north-south collector with cross streets off it.
   const STREET_W = 8;
@@ -71,23 +81,50 @@ export function kearnyPlan() {
     ],
   }]);
 
+  // Neighbourhood collector tying the north tracts down to the original pair,
+  // so the new blocks connect to the district instead of sitting beside it.
+  const linkX = a.x - 190 + 70;
+  const link = {
+    id: 'kearny-link',
+    width: 10,
+    blend: 4,
+    kind: 'street',
+    pts: [
+      { x: linkX, z: tractC.z + 6 },
+      { x: linkX, z: tractA.z + tractA.d - 6 },
+    ],
+  };
+  const linkE = {
+    id: 'kearny-link-e',
+    width: 10,
+    blend: 4,
+    kind: 'street',
+    pts: [
+      { x: tractB.x + tractB.w * 0.5, z: tractD.z + 6 },
+      { x: tractE.x + tractE.w * 0.5, z: tractE.z + 20 },
+    ],
+  };
+
+  const tracts = [tractA, tractB, tractC, tractD, tractE, tractF];
+
   return {
     cx: a.x,
     cz: a.z,
-    tracts: [tractA, tractB],
+    tracts,
     retail,
     business,
     rows,
     streetW: STREET_W,
     streets: [
-      ...tractStreets(tractA),
-      ...tractStreets(tractB),
+      ...tracts.flatMap(tractStreets),
       ...spine(retail, 'retail'),
       ...spine(business, 'business'),
+      link,
+      linkE,
     ],
     bounds: {
-      x0: tractA.x, z0: tractA.z,
-      x1: tractB.x + tractB.w, z1: retail.z + retail.d,
+      x0: tractA.x, z0: tractC.z,
+      x1: tractE.x + tractE.w, z1: retail.z + retail.d,
     },
   };
 }

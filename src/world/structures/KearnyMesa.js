@@ -106,8 +106,13 @@ function suburbanLot(sink, terrain, lx, lz, lw, ld, rng, facing, stats) {
 
 /** Fill a residential tract with lots either side of each cross street. */
 function residentialTract(sink, terrain, t, plan, rng, stats) {
-  const lotsPerSide = 6;
+  // Lots per side follows the tract's width rather than being fixed at six, so
+  // tracts of different sizes all get ~20 m frontages. A lot narrower than that
+  // cannot hold the house (11–15 m) plus its attached garage (5.2 m), and the
+  // centring maths would start pushing neighbours through each other.
+  const LOT_W = 20;
   const usable = t.w - 20;
+  const lotsPerSide = Math.max(3, Math.round(usable / LOT_W));
   const lotW = usable / lotsPerSide;
   const spacing = (t.d - 60) / (plan.rows - 1);
   const half = plan.streetW / 2 + 1.5;      // kerb to lot line
