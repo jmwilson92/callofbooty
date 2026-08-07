@@ -649,8 +649,12 @@ export class Terrain {
       out.lerp(_tmpC.setHex(C.URBAN), urban * 0.28);
     }
 
+    // Only a faint darkening of the corridor. The visible road surface is the
+    // ribbon mesh in world/RoadMesh.js — painting it here at full strength is
+    // what quantised the asphalt to 4 m squares, because this is a per-vertex
+    // colour on the heightfield grid and roadAt() is a nearest-cell lookup.
     const road = this.roadAt(x, z);
-    if (road > 0) out.lerp(_tmpC.setHex(C.ASPHALT), road);
+    if (road > 0) out.lerp(_tmpC.setHex(C.ASPHALT), road * 0.3);
 
     // Tiny macro variation only — large smear was killing definition
     const m = 1 + this.detail.noise2D(x * 0.003, z * 0.003) * C.NOISE_VARIATION;

@@ -44,6 +44,7 @@ import { SpottingSystem } from './combat/Spotting.js';
 import { ThrowableSystem } from './combat/Throwables.js';
 import { MatchController } from './game/Match.js';
 import { ZoneSystem } from './game/Zone.js';
+import { buildRoadMesh } from './world/RoadMesh.js';
 import { isExplore, MODES, getMode, setMode } from './game/Mode.js';
 import { THROWABLES } from './config.js';
 import { EndScreen } from './ui/EndScreen.js';
@@ -128,6 +129,10 @@ async function start() {
   const genMs = performance.now() - t0;
 
   scene.add(terrain.buildMesh());
+  // Road surfaces are their own geometry rather than vertex colours on the
+  // terrain: one vertex per 4 m cell cannot draw a 9 m street without
+  // quantising it into squares. See world/RoadMesh.js.
+  if (terrain.roadLines) scene.add(buildRoadMesh(terrain, terrain.roadLines));
   scene.add(terrain.buildWater());
   for (const mesh of structureMeshes) scene.add(mesh);
 
