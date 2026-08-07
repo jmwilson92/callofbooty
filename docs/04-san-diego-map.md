@@ -22,7 +22,7 @@ Terrain follows the natural map; buildings seat on local height.
 | ID | Name | Role |
 |----|------|------|
 | `lajolla` | **La Jolla** | NW coastal cliffs / village |
-| `kearnymesa` | **Kearny Mesa** | Industrial/commercial |
+| `kearnymesa` | **Kearny Mesa** | Suburbs + big-box retail + business park |
 | `missionvalley` | **Mission Valley** | I-8 spawn hub |
 | `airport` | **San Diego International Airport** | Hangars + bay flats |
 | `mcrd` | **MCRD Depot** | Parade deck + arcaded barracks — see below |
@@ -115,6 +115,25 @@ pad cuts to its high corner and the retaining wall grows downhill to meet grade.
 Contains the entry plaza and gate arch, five moated habitats, a walk-through
 mesh aviary down in the canyon, reptile and primate houses, a canyon footbridge,
 and the Skyfari running from the low west terminal up to the east ridge.
+
+## Kearny Mesa
+
+A flat-topped mesa split into four quadrants by the I-15 and SR-52 corridors
+that cross at the anchor. Big-box retail and the dealership row sit on the two
+freeway-adjacent quadrants — which is where they really are — and the two quiet
+quadrants hold residential tracts.
+
+Streets come from `src/world/KearnyPlan.js` (a collector with cross streets and
+a cul-de-sac per tract, plus one access spine per commercial quadrant);
+`src/world/structures/KearnyMesa.js` fills the lots. Residential lot depth is
+derived from the street spacing so back-to-back houses on adjacent streets
+cannot meet in the middle of the block.
+
+Every building pours a terrace pad down to its low corner rather than demanding
+already-flat ground, which is what lets a suburb sit on rolling mesa.
+
+Arterials stop at the district edge, the same rule downtown and MCRD use — five
+of them converged on the anchor and paved the quadrants flat before that.
 
 ## Geography (still present under the POIs)
 

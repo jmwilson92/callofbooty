@@ -3,6 +3,8 @@ import { makeBuilding, makeShed, slab } from './BuildingKit.js';
 import { placeDowntownDistrict, placeVehicle } from './structures/Catalog.js';
 import { placeMcrdDepot } from './structures/Mcrd.js';
 import { placeSanDiegoZoo } from './structures/Zoo.js';
+import { placeKearnyMesa } from './structures/KearnyMesa.js';
+import { kearnyPlan } from './KearnyPlan.js';
 import { mcrdBounds } from './McrdPlan.js';
 import { Occupancy } from './Occupancy.js';
 import { claimRoadCorridors, placeParkingLotDetails, placeRoadMarkings } from './Roads.js';
@@ -188,37 +190,13 @@ function buildMissionValley(sink, terrain, rng) {
   }
 }
 
-// --- Kearny Mesa: commercial / industrial plateau ---
+// --- Kearny Mesa: suburbs + big-box retail + business park (structures/KearnyMesa.js) ---
 function buildKearnyMesa(sink, terrain, rng) {
-  const p = poi('kearnymesa');
-  const base = seatY(terrain, p, p.x, p.z, 24, 24);
-
-  // Office / light industrial grid
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      const x = p.x - 50 + c * 38;
-      const z = p.z - 45 + r * 36;
-      const industrial = rng() > 0.45;
-      if (industrial) {
-        makeShed(sink, {
-          x, z, w: 28 + rng() * 8, d: 20 + rng() * 6, h: 8 + rng() * 4,
-          baseY: base, color: pick(rng, [0x87857f, 0x6b5943, 0x8a8880]),
-          doorW: 5,
-        });
-      } else {
-        makeBuilding(sink, {
-          x, z, w: 22, d: 16, floors: 2 + Math.floor(rng() * 3),
-          baseY: base, color: pick(rng, PAL), rng,
-        });
-      }
-    }
-  }
-
-  // Transformer / utility blocks as hard cover
-  for (let i = 0; i < 6; i++) {
-    const tx = p.x - 40 + i * 16;
-    sink.addSpan(tx, base, p.z + 55, tx + 3.2, base + 2.4, p.z + 57.5, 0x5c6166);
-  }
+  const stats = placeKearnyMesa(sink, terrain, rng);
+  // Reserve the district so scatter doesn't drop strays between the tracts
+  const b = kearnyPlan().bounds;
+  worldOcc.claim(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0, 0, true);
+  return stats;
 }
 
 // --- Balboa Park: museum halls + plaza walls ---

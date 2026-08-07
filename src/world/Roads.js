@@ -2,6 +2,7 @@ import { POIS, FREEWAYS, ROAD_LINKS, ROADS } from '../config.js';
 import { smoothstep, lerp } from '../core/Noise.js';
 import { downtownPlan, downtownStreetLines } from './DowntownPlan.js';
 import { mcrdPlan } from './McrdPlan.js';
+import { kearnyStreetLines, kearnyParkingLots, kearnyPlan } from './KearnyPlan.js';
 
 // Road network = heightfield corridors only (smooth asphalt via vertex colors).
 // No stacked box-decks. Ramps are short polylines off the main freeways.
@@ -138,18 +139,34 @@ export function buildRoadPolylines() {
   // which is how you actually get onto a base.
   const RING_HW = 172;
   const RING_HD = 158;
+  // Half-extents of each built-up district. An arterial stops where it first
+  // meets this box instead of driving to the anchor, so the pavement never
+  // crosses the blocks, the depot or the tracts.
+  const km = kearnyPlan().bounds;
+  const EDGE = {
+    downtown: { hw: RING_HW, hd: RING_HD },
+    kearnymesa: {
+      hw: (km.x1 - km.x0) / 2,
+      hd: (km.z1 - km.z0) / 2,
+      cx: (km.x0 + km.x1) / 2,
+      cz: (km.z0 + km.z1) / 2,
+    },
+  };
   const ringEndpoint = (poi, fromX, fromZ) => {
     if (poi.id === 'mcrd') return mcrdPlan().gate;
-    if (poi.id !== 'downtown') return { x: poi.x, z: poi.z };
-    const dx = fromX - poi.x;
-    const dz = fromZ - poi.z;
-    if (Math.abs(dx) < 1e-3 && Math.abs(dz) < 1e-3) return { x: poi.x, z: poi.z };
-    // Scale the approach direction out to whichever ring face it hits first.
+    const e = EDGE[poi.id];
+    if (!e) return { x: poi.x, z: poi.z };
+    const cx = e.cx ?? poi.x;
+    const cz = e.cz ?? poi.z;
+    const dx = fromX - cx;
+    const dz = fromZ - cz;
+    if (Math.abs(dx) < 1e-3 && Math.abs(dz) < 1e-3) return { x: cx, z: cz };
+    // Scale the approach direction out to whichever face it hits first.
     const t = Math.min(
-      Math.abs(dx) > 1e-3 ? RING_HW / Math.abs(dx) : Infinity,
-      Math.abs(dz) > 1e-3 ? RING_HD / Math.abs(dz) : Infinity
+      Math.abs(dx) > 1e-3 ? e.hw / Math.abs(dx) : Infinity,
+      Math.abs(dz) > 1e-3 ? e.hd / Math.abs(dz) : Infinity
     );
-    return { x: poi.x + dx * t, z: poi.z + dz * t };
+    return { x: cx + dx * t, z: cz + dz * t };
   };
 
   // Arterials between POIs — multi-bend toward dry land
@@ -218,6 +235,8 @@ export function buildRoadPolylines() {
 
   // Full downtown grid as smooth heightfield streets (avenues + streets)
   lines.push(...buildDowntownGridLines());
+  // Kearny Mesa residential streets and commercial frontage loops
+  lines.push(...kearnyStreetLines());
 
   return lines;
 }
@@ -374,6 +393,8 @@ export function defaultParkingLots() {
     const m = mcrdPlan();
     lots.push({ x: m.ox + 159, z: m.oz + 5, w: 32, d: 22 });
   }
+  // Big-box aprons on the Kearny Mesa commercial quadrants
+  lots.push(...kearnyParkingLots());
   add('coronado', 40, -25, 50, 35);
   // La Jolla
   add('lajolla', 30, 25, 40, 32);

@@ -8,6 +8,7 @@ import {
 } from './Roads.js';
 import { downtownPlan } from './DowntownPlan.js';
 import { mcrdBounds, mcrdPlan } from './McrdPlan.js';
+import { kearnyBounds } from './KearnyPlan.js';
 
 // San Diego heightfield shaped from satellite_view.png + terrain_map.png.
 // Same array backs render mesh and collision.
@@ -454,7 +455,7 @@ export class Terrain {
     // city the street grid is the road network, and the depot is fenced ground
     // reached through its gate. Without this, any corridor clipping either one
     // paints asphalt straight through the buildings.
-    const keepOut = [downtownPlan().bounds, mcrdBounds()];
+    const keepOut = [downtownPlan().bounds, mcrdBounds(), kearnyBounds()];
 
     for (const seg of this.roads) {
       const cityStreet = seg.kind === 'street' || seg.kind === 'alley';
