@@ -137,37 +137,68 @@ of them converged on the anchor and paved the quadrants flat before that.
 
 ## Coronado
 
-Naval Air Station North Island on the bay side, the Hotel del and its cottages
-on the ocean side (`src/world/structures/Coronado.js`).
+Three things share the island, west to east (`src/world/structures/Coronado.js`):
 
-The island is a narrow strip — about 120 m of buildable land between two
-stretches of −8 m water — so the base works the way the real one does: hangars,
-ops and the control tower on the land, and the fleet moored out on piers running
-north into the bay. A carrier and a destroyer sit alongside.
+- **Naval Air Station North Island** on the west end — apron, runway with
+  centreline and threshold markings, a hangar line, the control tower, a fuel
+  farm and a parked air wing.
+- A low-rise **village** of cottage rows facing a street, with a short
+  commercial block behind them.
+- The **Hotel del Coronado** on the ocean beach at the south: white walls, steep
+  red shingle roof, dormers, a wrap-around verandah and the fat conical corner
+  turret it is famous for.
 
-The carrier deck is the point of the whole POI: it is the largest flat surface
-on the map, it reads from every approach, and it is a genuinely good fight. Deck
-overhang, angled landing stripe, catapult tracks, island superstructure to
-starboard and parked aircraft clear of the landing lane.
+A **carrier and two destroyers** are moored off the north shore on the bay side,
+bow out to the channel, which is where the real berths are. The carrier deck is
+the point of the whole POI — the largest flat surface on the map, readable from
+every approach, and registered as a floor so it is a genuinely good fight. Deck
+overhang on sponsons, angled landing area, catapult tracks, arresting wires,
+island superstructure to starboard, deck-edge lifts, and the air wing parked
+clear of the landing lane.
 
 ## Point Loma
 
-The peninsula ridge that closes the bay (`src/world/structures/PointLoma.js`).
-Three things make it read as Point Loma and nowhere else:
+The peninsula ridge that closes the bay (`src/world/structures/PointLoma.js`),
+north to south:
 
-- **Old Point Loma Lighthouse** on the crest — white tower, black lantern room
-  and gallery, over the keeper's cottage. It is short because the real one is;
-  it was built on the ridge, which was the whole point (and the reason fog
-  eventually retired it).
-- **Fort Rosecrans** — eleven terraced rows of white headstones stepping down
-  the bay slope. Cheap in geometry, unmistakable from anywhere on the map, and
-  the terraces turn a bare hillside into real cover.
-- **Submarine base** on the water below, with two boats alongside a pile wharf
-  under a gantry crane.
+- A **residential grid** of streets and lots on the flat plateau.
+- **Fort Rosecrans National Cemetery** on the east-facing slope above the bay —
+  eight terraced benches of white markers, each faced with a retaining wall at
+  its downhill nose, with a flagpole and rostrum at the head of the plot. The
+  slope loses ~32 m over 100 m; markers laid on that raw grade would vanish into
+  the hillside, which is also why the real cemetery is terraced.
+- The **Old Point Loma Lighthouse** on the southern crest — white tower through
+  the keeper's cottage roof, gallery and black lantern room — and the **Cabrillo
+  overlook** beyond it.
+- The **submarine base out on Ballast Point**, the spit that runs east off the
+  ridge at around z 420, with a boat alongside the quay.
 
-Plus ridge housing down the spine and a Sunset Cliffs wall on the ocean edge.
-The ridge top runs 37–46 m with cliffs either side, so everything terraces along
-the spine instead of sitting on a pad.
+Sunset Cliffs gets a railed footpath along the west edge, which walks the coast
+to find it rather than assuming a line — the west shore wanders by 30 m over the
+length of the ridge.
+
+### Anything that touches the water
+
+`src/world/structures/Waterfront.js` is the shared marine kit, used by both
+peninsulas. Both coastlines are noise-shaped ellipses rather than surveyed
+geometry, so nothing at the waterline may be placed on a hardcoded coordinate:
+
+- `findShore()` walks to the real waterline before a quay commits, and tests the
+  quay's full width rather than one sample.
+- `berth()` searches for open water fore-and-aft **and** athwartships. The bay
+  floor is noise, not a dredged channel — the two berths either side of one pier
+  differ by 8 m of depth, and there are shoals that run the whole length of a
+  mooring line. Point Loma's quay is rooted at the *seaward* end of Ballast
+  Point for the same reason: from the landward end the only water a berth can
+  reach is a 55 m pocket closed off by a bar.
+- Beaches are graded ramps, not tiles sampled off the heightfield. A shore that
+  loses 6 m in 10 m of z turns per-tile sampling into a checkerboard of paving
+  stones hovering over the water.
+
+A carrier placed on faith ends up parked on the island. That is not
+hypothetical — it is what the first version of this POI did, and it survived a
+1080-point drop test, because a drop test measures whether you fall through the
+world, not whether a ship is in it.
 
 ## Geography (still present under the POIs)
 
@@ -189,6 +220,14 @@ is checked in `_applyRoads`) and `structures/Overpass.js` carries it instead:
 a ramped deck on piers, Jersey barriers, a centre stripe, two quadrant connector
 ramps peeling down to the road below, and a sign gantry on the approach.
 
+Both the deck and its ramps run a **grade**, not the ground: the abutments set a
+straight baseline and the profile humps over it, and the ramp interpolates from
+the deck down to grade at its far end. Sampling terrain at every station and
+adding the profile to that made the deck inherit every bump between the
+abutments, so a 124 m span came out of the generator as a staircase of
+disconnected slabs. The piers underneath vary in length instead, which is what
+really happens.
+
 ### Far-eastern mountain system
 
 Stylized BR wall on the east rim (`WORLD.EAST_MOUNTAINS`) — **not GIS-accurate**,
@@ -209,6 +248,12 @@ claim instead of spending the whole structure on one contested spot — and
 housing prefers to grow within 75 m of a road, the way suburbia actually
 spreads. It is a preference rather than a rule, because the western coastal
 shelf has few roads and still needs to fill.
+
+**Large footprints are placed first.** Raising `SUBURBAN` to 190 saturated the
+mid-city band with 16 × 14 house lots before the 30 × 26 business centres and
+the 24 × 22 fringe towers got a turn, and both dropped to zero placed. Of 1015
+sites that passed the business-centre predicate, 1011 were already claimed.
+Moving those two passes ahead of the small fill restored them at no other cost.
 
 ## Spawn
 

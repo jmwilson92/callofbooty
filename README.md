@@ -65,6 +65,15 @@ Click the page to lock the pointer.
   Airport, MCRD Depot, Downtown (highest loot), Point Loma, Balboa Park,
   San Diego Zoo, Coronado, Radio Tower. Spaced for readability; clearer fog and
   terrain definition. See `docs/04-san-diego-map.md`.
+- **Coronado is NAS North Island, a village and the Hotel del**, with a carrier
+  and two destroyers moored on the bay side. The flight deck is a registered
+  floor, so it is somewhere you can fight.
+- **Point Loma is its lighthouse, Fort Rosecrans and Ballast Point** — a
+  terraced cemetery of white markers down the bay slope, the Cabrillo overlook,
+  a submarine base on the spit, and a ridge-top residential grid.
+- **Freeways have real grade separation** — `Interchanges.js` works out which
+  road flies at each crossing and `structures/Overpass.js` carries it on a
+  ramped deck with piers, barriers, connector ramps and a sign gantry.
 - **Downtown is a zoned street grid**, not a scatter — 6 × 6 blocks subdivided
   into parcels built to the lot line, so the streets are canyons (14.6 m facade
   to facade). Marina, Little Italy, financial core, civic, Gaslamp Quarter,
@@ -114,6 +123,31 @@ src/
 
 Every box the world generator emits becomes both a rendered instance and a
 collision AABB, so what you see is exactly what you collide with.
+
+## Screenshots
+
+```bash
+npm run dev                                        # in one terminal
+node tools/shoot.mjs --poi all --out shots/
+node tools/shoot.mjs --poi coronado
+node tools/shoot.mjs '[["deck",-237,22,462,-0.06,0]]'   # inline shot list
+node tools/shoot.mjs myshots.json                       # or from a file
+```
+
+A shot is `[name, x, y, z, pitchRad, yawRad]`. Yaw 0 looks north (−Z), `+PI/2`
+looks west (−X); negative pitch looks down.
+
+The tool drives `__game.freeCam(x, y, z, pitch, yaw)`, which parks the render
+camera anywhere in the world detached from the player. Moving the *player* is
+not a reliable way to frame a shot — the simulation keeps ticking and collides
+the controller underneath you — so the camera is overridden after
+`playerCam.update` and before the render. `__game.freeCam(null)` hands the view
+back.
+
+**Look at the map you generate.** Generation counts, overlap checks and drop
+tests all pass happily on a world with an aircraft carrier parked in a field;
+this repo has shipped exactly that. None of those measure whether the thing is
+where it looks like it should be.
 
 ## Tests
 

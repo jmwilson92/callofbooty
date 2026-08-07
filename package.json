@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "smoketest": "node tools/smoketest.mjs",
+    "shoot": "node tools/shoot.mjs",
     "url": "node scripts/print-dev-url.mjs 5173",
     "party": "node server/party.mjs"
   },

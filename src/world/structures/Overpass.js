@@ -25,6 +25,17 @@ function overpass(sink, terrain, c) {
   const px = -c.uz; // across-road unit
   const pz = c.ux;
 
+  // The deck runs a *grade*, not the ground. Sampling terrain at every station
+  // and adding the profile to it made the deck inherit every bump between the
+  // abutments, so a 124 m span came out as a staircase of disconnected slabs.
+  // Instead the abutments set a straight baseline and the profile humps over it;
+  // the piers below then vary in length, which is what really happens.
+  const abut = (sign) => terrain.heightAt(c.x + c.ux * DECK_HALF * sign, c.z + c.uz * DECK_HALF * sign);
+  const gA = abut(-1);
+  const gB = abut(1);
+  if (!Number.isFinite(gA) || !Number.isFinite(gB)) return;
+  const deckY = (t) => gA + (gB - gA) * ((t + 1) / 2) + deckProfile(Math.abs(t) * DECK_HALF);
+
   let prev = null;
   for (let i = 0; i <= steps; i++) {
     const t = (i / steps) * 2 - 1;            // -1 .. 1 along the deck
@@ -33,7 +44,7 @@ function overpass(sink, terrain, c) {
     const cz = c.z + c.uz * along;
     const g = terrain.heightAt(cx, cz);
     if (!Number.isFinite(g)) continue;
-    const y = g + deckProfile(Math.abs(along));
+    const y = deckY(t);
 
     if (prev) {
       const [qx, qz, qy] = prev;
@@ -83,38 +94,46 @@ function overpass(sink, terrain, c) {
   }
 
   // Connector ramps: two quadrant loops peeling off the flying road down to the
-  // road below, which is what turns a bridge into an interchange.
+  // road below, which is what turns a bridge into an interchange. The ramp runs
+  // its own grade from the deck down to the ground at its far end, for the same
+  // reason the deck does — sampling terrain per station gave a broken staircase.
   for (const s of [-1, 1]) {
-    const n = 10;
+    const n = 16;
+    const startT = 0.42;
+    const arc = (t) => {
+      const a = (Math.PI * 0.55) * t;
+      const r = 44;
+      // Start alongside the deck, curve away and drop to grade
+      const ax = c.x + c.ux * (DECK_HALF * startT) + px * s * (halfW + 2);
+      const az = c.z + c.uz * (DECK_HALF * startT) + pz * s * (halfW + 2);
+      return [
+        ax + (c.ux * Math.cos(a) + px * s * Math.sin(a)) * r * t,
+        az + (c.uz * Math.cos(a) + pz * s * Math.sin(a)) * r * t,
+      ];
+    };
+    const [ex, ez] = arc(1);
+    const gEnd = terrain.heightAt(ex, ez);
+    const yStart = deckY(startT);
+    if (!Number.isFinite(gEnd)) continue;
+    const rampY = (t) => yStart + (gEnd - yStart) * (t * t * (3 - 2 * t));
+
     for (let i = 0; i < n; i++) {
       const t0 = i / n;
       const t1 = (i + 1) / n;
-      const arc = (t) => {
-        const a = (Math.PI * 0.55) * t;
-        const r = 44;
-        // Start alongside the deck, curve away and drop to grade
-        const ax = c.x + c.ux * (DECK_HALF * 0.42) + px * s * (halfW + 2);
-        const az = c.z + c.uz * (DECK_HALF * 0.42) + pz * s * (halfW + 2);
-        return [
-          ax + (c.ux * Math.cos(a) + px * s * Math.sin(a)) * r * t,
-          az + (c.uz * Math.cos(a) + pz * s * Math.sin(a)) * r * t,
-        ];
-      };
       const [ax, az] = arc(t0);
       const [bx, bz] = arc(t1);
       const ga = terrain.heightAt(ax, az);
-      const gb = terrain.heightAt(bx, bz);
-      if (!Number.isFinite(ga) || !Number.isFinite(gb)) continue;
-      const ya = ga + deckProfile(DECK_HALF * 0.42) * (1 - t0);
-      const yb = gb + deckProfile(DECK_HALF * 0.42) * (1 - t1);
+      if (!Number.isFinite(ga)) continue;
+      const ya = rampY(t0);
+      const yb = rampY(t1);
       const w = 4.2;
       sink.addSpan(
-        Math.min(ax, bx) - w, Math.min(ya, yb) - 0.8, Math.min(az, bz) - w,
+        Math.min(ax, bx) - w, Math.min(ya, yb) - 1.0, Math.min(az, bz) - w,
         Math.max(ax, bx) + w, Math.max(ya, yb) + 0.2, Math.max(az, bz) + w,
         DECK
       );
-      if (Math.max(ya, yb) - Math.max(ga, gb) > 2.5 && i % 3 === 0) {
-        post(sink, ax - 0.6, ga - 0.5, az - 0.6, ya - ga - 0.6, 1.2, PIER);
+      if (ya - ga > 2.5 && i % 3 === 0) {
+        post(sink, ax - 0.6, ga - 0.5, az - 0.6, ya - ga - 0.8, 1.2, PIER);
       }
     }
   }

@@ -555,6 +555,13 @@ async function start() {
   const loading = document.getElementById('loading');
   if (loading) loading.remove();
 
+  // Detached debug camera. When set, it overrides the player camera for the rest
+  // of the frame, so tooling can park the view anywhere in the world without
+  // fighting the simulation for the controller's position — the controller is
+  // still being ticked and collided underneath, which made "just move the
+  // player" an unreliable way to frame a shot. Drive it with __game.freeCam().
+  let freeCam = null;
+
   function frame() {
     requestAnimationFrame(frame);
 
@@ -1220,9 +1227,17 @@ async function start() {
       mapView.setZone?.(zone.snapshot());
     }
 
+    if (freeCam) {
+      playerCam.camera.position.set(freeCam.x, freeCam.y, freeCam.z);
+      playerCam.camera.rotation.set(freeCam.pitch, freeCam.yaw, 0, 'YXZ');
+      playerCam.camera.updateMatrixWorld(true);
+    }
     renderer.render(scene, playerCam.camera);
-    // Gun overlay only in first-person on foot
-    if (input.locked && !vehicles.riding && !controller.parachute) weaponOverlay.render();
+    // Gun overlay only in first-person on foot — and never over a detached cam,
+    // where the arms would hang in mid-air at the debug viewpoint.
+    if (input.locked && !vehicles.riding && !controller.parachute && !freeCam) {
+      weaponOverlay.render();
+    }
     {
       const spottedIds = new Set((spotting.pings || []).map((p) => String(p.id)));
       const mapBots = bots.getMapVisibleTargets(spottedIds);
@@ -1243,6 +1258,17 @@ async function start() {
     scene, renderer, controller, terrain, hash, playerCam, stats, clock, SIM, mapView,
     weapons, loot, testRange, effects, party, peerBodies, localBody, fpArms,
     match, zone, bots,
+
+    /**
+     * Park the camera anywhere in the world, detached from the player.
+     * `__game.freeCam(x, y, z, pitchRad, yawRad)` to set, `__game.freeCam(null)`
+     * to hand the view back. Yaw 0 looks north (−Z); negative pitch looks down.
+     * Used by tools/shoot.mjs and handy from the console for capture.
+     */
+    freeCam(x, y, z, pitch = 0, yaw = 0) {
+      freeCam = x == null ? null : { x, y, z, pitch, yaw };
+      return freeCam;
+    },
   };
 }
 

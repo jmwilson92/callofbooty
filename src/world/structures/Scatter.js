@@ -92,6 +92,69 @@ export function scatterStructures(sink, terrain, rng) {
     fire: 0, business: 0, sky: 0, boat: 0, billboard: 0, animal: 0, vehicle: 0,
   };
 
+  // Large footprints go first. Business centers are 30x26 and the fringe
+  // towers need a 24x22 pad; the small fill below claims 190 house lots and
+  // saturates the same mid-city band, which left both of these placing zero.
+  // --- Business centers (mid density) — not on downtown plate ---
+  for (let n = 0; n < S.BUSINESS; n++) {
+    tryPlace(terrain, rng, 70, (x, z, t) => {
+      if (!dryLand(t, x, z, 14)) return false;
+      if (tooCloseToPoiCore(x, z, 0.85)) return false;
+      if (onDowntownPlate(t, x, z)) return false;
+      // Ban orphan "city hall" pads that were stacking west of skyline
+      if (x > 15 && x < 110 && z > 300 && z < 460) return false;
+      return (Math.abs(x) < 280 && z > -200 && z < 400) || (x > 50 && x < 250 && z < -100);
+    }, (x, z) => {
+      if (!claimFoot(x, z, 30, 26)) return false;
+      placeBusinessCenter(sink, terrain, x, z, rng);
+      stats.business++;
+    });
+  }
+
+  // Extra towers: east/north rim of downtown only — never west orphans (~35,433)
+  const dt = poi('downtown');
+  if (dt) {
+    let attempts = 0;
+    while (stats.sky < S.SKY && attempts < S.SKY * 60) {
+      attempts++;
+      // East or north only (angle ~ -0.4π .. 0.4π east, or north band)
+      const east = rng() > 0.35;
+      const a = east
+        ? (rng() - 0.5) * 0.9 // mostly +X
+        : -Math.PI * 0.5 + (rng() - 0.5) * 0.7; // mostly -Z (north in our map)
+      // Outside the block grid and clear of the ring road, so these read as the
+      // fringe towers beyond the district rather than strays inside it.
+      const r = 195 + rng() * 45;
+      const x = dt.x + Math.cos(a) * r;
+      const z = dt.z + Math.sin(a) * r;
+      // Kill west side completely (user: three towers around 35, 433)
+      if (x < dt.x - 40) continue;
+      if (insideCity(x, z, 12)) continue;
+      if (x < 80) continue;
+      if (terrain.heightAt(x, z) < 3 || terrain.slopeDegAt(x, z) > 12) continue;
+      if (terrain.roadAt(x, z) > 0.2) continue;
+      if (!claimFoot(x - 8, z - 8, 24, 22)) continue;
+      const samples = [
+        terrain.heightAt(x, z),
+        terrain.heightAt(x + 14, z),
+        terrain.heightAt(x, z + 14),
+        terrain.heightAt(x + 14, z + 14),
+        terrain.heightAt(x + 7, z + 7),
+      ];
+      const lo = Math.min(...samples);
+      const hi = Math.max(...samples);
+      if (hi - lo > 1.0) continue;
+      const by = hi;
+      const tw = 12 + rng() * 4;
+      const td = 12 + rng() * 4;
+      placeSkylineTower(sink, x - tw * 0.5, z - td * 0.5, by, rng, 12 + Math.floor(rng() * 10), terrain, {
+        w: tw,
+        d: td,
+      });
+      stats.sky++;
+    }
+  }
+
   // --- Suburban homes: mid-city rings (Clairemont / Kearny / Mission valleys) ---
   for (let n = 0; n < S.SUBURBAN; n++) {
     const ok = tryPlace(terrain, rng, 120, (x, z, t) => {
@@ -197,65 +260,6 @@ export function scatterStructures(sink, terrain, rng) {
     });
   }
 
-  // --- Business centers (mid density) — not on downtown plate ---
-  for (let n = 0; n < S.BUSINESS; n++) {
-    tryPlace(terrain, rng, 70, (x, z, t) => {
-      if (!dryLand(t, x, z, 14)) return false;
-      if (tooCloseToPoiCore(x, z, 0.85)) return false;
-      if (onDowntownPlate(t, x, z)) return false;
-      // Ban orphan "city hall" pads that were stacking west of skyline
-      if (x > 15 && x < 110 && z > 300 && z < 460) return false;
-      return (Math.abs(x) < 280 && z > -200 && z < 400) || (x > 50 && x < 250 && z < -100);
-    }, (x, z) => {
-      if (!claimFoot(x, z, 30, 26)) return false;
-      placeBusinessCenter(sink, terrain, x, z, rng);
-      stats.business++;
-    });
-  }
-
-  // Extra towers: east/north rim of downtown only — never west orphans (~35,433)
-  const dt = poi('downtown');
-  if (dt) {
-    let attempts = 0;
-    while (stats.sky < S.SKY && attempts < S.SKY * 60) {
-      attempts++;
-      // East or north only (angle ~ -0.4π .. 0.4π east, or north band)
-      const east = rng() > 0.35;
-      const a = east
-        ? (rng() - 0.5) * 0.9 // mostly +X
-        : -Math.PI * 0.5 + (rng() - 0.5) * 0.7; // mostly -Z (north in our map)
-      // Outside the block grid and clear of the ring road, so these read as the
-      // fringe towers beyond the district rather than strays inside it.
-      const r = 195 + rng() * 45;
-      const x = dt.x + Math.cos(a) * r;
-      const z = dt.z + Math.sin(a) * r;
-      // Kill west side completely (user: three towers around 35, 433)
-      if (x < dt.x - 40) continue;
-      if (insideCity(x, z, 12)) continue;
-      if (x < 80) continue;
-      if (terrain.heightAt(x, z) < 3 || terrain.slopeDegAt(x, z) > 12) continue;
-      if (terrain.roadAt(x, z) > 0.2) continue;
-      if (!claimFoot(x - 8, z - 8, 24, 22)) continue;
-      const samples = [
-        terrain.heightAt(x, z),
-        terrain.heightAt(x + 14, z),
-        terrain.heightAt(x, z + 14),
-        terrain.heightAt(x + 14, z + 14),
-        terrain.heightAt(x + 7, z + 7),
-      ];
-      const lo = Math.min(...samples);
-      const hi = Math.max(...samples);
-      if (hi - lo > 1.0) continue;
-      const by = hi;
-      const tw = 12 + rng() * 4;
-      const td = 12 + rng() * 4;
-      placeSkylineTower(sink, x - tw * 0.5, z - td * 0.5, by, rng, 12 + Math.floor(rng() * 10), terrain, {
-        w: tw,
-        d: td,
-      });
-      stats.sky++;
-    }
-  }
 
   // --- Boat houses along coasts / bays ---
   for (let n = 0; n < S.BOAT; n++) {
@@ -362,13 +366,9 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
     placeBridge(sink, terrain, mv.x + 90, mv.z - 40, mv.x + 90, mv.z + 45, 15, 12);
   }
 
-  // Point Loma boathouses
-  const pl = poi('pointloma');
-  if (pl) {
-    placeBoatHouse(sink, terrain, pl.x + 40, pl.z + 30, rng);
-    placeBoatHouse(sink, terrain, pl.x + 55, pl.z + 55, rng);
-    stats.boat += 2;
-  }
+  // Point Loma's two boathouses used to be dropped unguarded at +40,+30 and
+  // +55,+55. Those offsets are inside Fort Rosecrans now, and structures/
+  // PointLoma.js gives the peninsula a real waterfront out on Ballast Point.
 
   // La Jolla cove boathouse
   const lj = poi('lajolla');
@@ -489,9 +489,8 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
     fixed(-150, 470, 60, 20, (x, z) => placeHarborPier(sink, terrain, x, z, rng));
   }
 
-  // Coronado resort extras
-  if (cor) {
-    if (fixed(cor.x + 40, cor.z - 30, 22, 18, (x, z) => placeRestaurant(sink, terrain, x, z, rng, false))) stats.restaurant++;
-    if (fixed(cor.x - 40, cor.z + 20, 30, 14, (x, z) => placeBoatHouse(sink, terrain, x, z, rng))) stats.boat++;
-  }
+  // Coronado's own extras used to be dropped here — a restaurant at +40,-30 and
+  // a boat house at -40,+20. structures/Coronado.js now owns the whole island
+  // (airfield, village, hotel, quays) and claims it, so anything scattered on
+  // those offsets would spiral out into the bay looking for a free lot.
 }
