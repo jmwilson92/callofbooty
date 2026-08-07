@@ -2,6 +2,7 @@ import { BUILDINGS, POIS } from '../config.js';
 import { makeBuilding, makeShed, slab } from './BuildingKit.js';
 import { placeDowntownDistrict, placeVehicle } from './structures/Catalog.js';
 import { placeMcrdDepot } from './structures/Mcrd.js';
+import { placeSanDiegoZoo } from './structures/Zoo.js';
 import { mcrdBounds } from './McrdPlan.js';
 import { Occupancy } from './Occupancy.js';
 import { claimRoadCorridors, placeParkingLotDetails, placeRoadMarkings } from './Roads.js';
@@ -251,55 +252,13 @@ function buildBalboa(sink, terrain, rng) {
   }
 }
 
-// --- San Diego Zoo: pavilions + winding low walls / habitat sheds ---
+// --- San Diego Zoo: canyon-terraced habitats, aviary, Skyfari (structures/Zoo.js) ---
 function buildZoo(sink, terrain, rng) {
   const p = poi('zoo');
-  const base = seatY(terrain, p, p.x, p.z, 24, 24);
-
-  // Entry / large pavilion
-  makeShed(sink, {
-    x: p.x - 20, z: p.z - 30, w: 40, d: 24, h: 11,
-    baseY: base, color: 0x6b7f43, doorW: 6,
-  });
-
-  // Habitat sheds scattered on a ring
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    const r = 28 + (i % 3) * 10;
-    const w = 12 + rng() * 6;
-    const d = 10 + rng() * 4;
-    const x = p.x + Math.cos(a) * r - w / 2;
-    const z = p.z + Math.sin(a) * r - d / 2;
-    makeShed(sink, {
-      x, z, w, d, h: 4 + rng() * 3,
-      baseY: seatY(terrain, p, x, z, w, d),
-      color: pick(rng, [0x6b7f43, 0x8a8b52, 0x7a4a3c, 0x8a8880]),
-      doorW: 2.5,
-    });
-  }
-
-  // Viewing platforms / mid buildings
-  makeBuilding(sink, {
-    x: p.x - 8, z: p.z + 8, w: 16, d: 14, floors: 2,
-    baseY: base, color: PAL[5], rng,
-  });
-
-  // Winding low habitat walls for cover
-  for (let i = 0; i < 20; i++) {
-    const a = (i / 20) * Math.PI * 2;
-    const r = 42;
-    const x = p.x + Math.cos(a) * r;
-    const z = p.z + Math.sin(a) * r;
-    const x2 = p.x + Math.cos(a + 0.25) * r;
-    const z2 = p.z + Math.sin(a + 0.25) * r;
-    const minX = Math.min(x, x2), maxX = Math.max(x, x2);
-    const minZ = Math.min(z, z2), maxZ = Math.max(z, z2);
-    sink.addSpan(
-      minX, base, minZ,
-      Math.max(minX + 1.2, maxX), base + 1.3, Math.max(minZ + 0.5, maxZ),
-      0x6b5943, 'thin'
-    );
-  }
+  const stats = placeSanDiegoZoo(sink, terrain, p, rng);
+  // Reserve the grounds so scatter doesn't drop houses between the habitats
+  worldOcc.claim(p.x - 135, p.z - 90, 265, 205, 0, true);
+  return stats;
 }
 
 // --- Coronado: resort strip across the bay ---

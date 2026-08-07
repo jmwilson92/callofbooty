@@ -292,6 +292,31 @@ export function scatterStructures(sink, terrain, rng) {
 }
 
 function placeLandmarkStructures(sink, terrain, rng, stats) {
+  // Fixed POI extras: claim before placing. Without this, a hand-tuned offset
+  // that happens to land on another structure silently intersects it — which is
+  // how the Kearny Mesa strip ended up with buildings inside each other.
+  // The offsets are hand-placed for composition, so rather than dropping one
+  // that no longer fits, walk it outward in a short spiral until it does.
+  const fixed = (x, z, w, d, place) => {
+    const RINGS = [0, 12, 24, 36];
+    for (const r of RINGS) {
+      const steps = r === 0 ? 1 : 8;
+      for (let i = 0; i < steps; i++) {
+        const a = (i / steps) * Math.PI * 2;
+        const px = x + Math.cos(a) * r;
+        const pz = z + Math.sin(a) * r;
+        // Deliberately no terrain test: these are authored spots and always
+        // were placed unconditionally. The only new rule is that they may not
+        // sit on top of something else.
+        if (insideCity(px, pz, 8)) continue;
+        if (!claimFoot(px, pz, w, d)) continue;
+        place(px, pz);
+        return true;
+      }
+    }
+    return false;
+  };
+
   // Harbor Island: a marina on the bay shore west of the airport. This used to
   // be two container terminals with gantry cranes, which — now that MCRD sits
   // just north of here — made the whole approach to the depot read as a
@@ -339,25 +364,15 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
     stats.boat++;
   }
 
-  // Zoo animals — mixed habitats around the pad
+  // Zoo concessions. The animals used to be scattered loose on a ring around the
+  // anchor and the "habitat sheds" were restaurants on a 55 m circle — both of
+  // which now land inside the real enclosures built by structures/Zoo.js, so the
+  // residents live in their habitats and only the food stands are placed here.
   const zoo = poi('zoo');
   if (zoo) {
-    const kinds = ['large', 'tall', 'bulk', 'small', 'bird', 'long', 'large', 'tall', 'small', 'bird', 'bulk', 'long'];
-    for (let i = 0; i < STRUCTURES.ANIMALS; i++) {
-      const a = (i / STRUCTURES.ANIMALS) * Math.PI * 2 + rng() * 0.4;
-      const r = 12 + (i % 5) * 10 + rng() * 8;
-      const x = zoo.x + Math.cos(a) * r;
-      const z = zoo.z + Math.sin(a) * r;
-      const y = terrain.heightAt(x, z);
-      if (y < 2) continue;
-      placeAnimal(sink, x, z, y, rng, kinds[i % kinds.length]);
-      stats.animal++;
-    }
-    // Extra habitat sheds around zoo edge
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2;
-      placeRestaurant(sink, terrain, zoo.x + Math.cos(a) * 55, zoo.z + Math.sin(a) * 55, rng, true);
-      stats.restaurant++;
+    for (const [ox, oz] of [[-28, 112], [26, 110], [-64, 74]]) {
+      if (fixed(zoo.x + ox, zoo.z + oz, 22, 18,
+        (x, z) => placeRestaurant(sink, terrain, x, z, rng, true))) stats.restaurant++;
     }
   }
 
@@ -404,31 +419,6 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
   }
 
   // Balboa food + signs
-  // Fixed POI extras: claim before placing. Without this, a hand-tuned offset
-  // that happens to land on another structure silently intersects it — which is
-  // how the Kearny Mesa strip ended up with buildings inside each other.
-  // The offsets are hand-placed for composition, so rather than dropping one
-  // that no longer fits, walk it outward in a short spiral until it does.
-  const fixed = (x, z, w, d, place) => {
-    const RINGS = [0, 12, 24, 36];
-    for (const r of RINGS) {
-      const steps = r === 0 ? 1 : 8;
-      for (let i = 0; i < steps; i++) {
-        const a = (i / steps) * Math.PI * 2;
-        const px = x + Math.cos(a) * r;
-        const pz = z + Math.sin(a) * r;
-        // Deliberately no terrain test: these are authored spots and always
-        // were placed unconditionally. The only new rule is that they may not
-        // sit on top of something else.
-        if (insideCity(px, pz, 8)) continue;
-        if (!claimFoot(px, pz, w, d)) continue;
-        place(px, pz);
-        return true;
-      }
-    }
-    return false;
-  };
-
   const bal = poi('balboa');
   if (bal) {
     if (fixed(bal.x - 40, bal.z + 50, 22, 18, (x, z) => placeRestaurant(sink, terrain, x, z, rng, false))) stats.restaurant++;

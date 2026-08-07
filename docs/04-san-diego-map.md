@@ -29,7 +29,7 @@ Terrain follows the natural map; buildings seat on local height.
 | `downtown` | **Downtown** | Zoned street grid, highest loot — see below |
 | `pointloma` | **Point Loma** | Ridge high ground |
 | `balboa` | **Balboa Park** | Museums, on the mesa NE of downtown across I-5 |
-| `zoo` | **San Diego Zoo** | Zoo grounds |
+| `zoo` | **San Diego Zoo** | Canyon-terraced habitats, aviary, Skyfari |
 | `coronado` | **Coronado** | Resort island |
 | `radiotower` | **Radio Tower** | East mountain outpost |
 
@@ -99,6 +99,22 @@ flattest candidate site still had ~20 m of relief — so the depot gets a
 levelled pad (`MCRD_PLATE`) using the same machinery as `DOWNTOWN_PLATE`.
 Freeways and arterials stop at the fence, and every approach road lands on
 the gate, the same way city traffic stops at downtown's ring.
+
+## San Diego Zoo
+
+Deliberately *not* levelled. The zoo is built into canyons, which is why it
+looks the way it does — exhibits terrace into the hillsides, paths switch back
+along the contours, and the Skyfari gondola crosses overhead because walking it
+is a climb. The site here runs from 15 m at the west end to 90 m on the east
+ridge and the layout takes that as given (`src/world/structures/Zoo.js`).
+
+It also pioneered cageless moated enclosures, so a habitat is a public viewing
+wall, a moat gap and an inner retaining wall — not a barred cage. On a slope the
+pad cuts to its high corner and the retaining wall grows downhill to meet grade.
+
+Contains the entry plaza and gate arch, five moated habitats, a walk-through
+mesh aviary down in the canyon, reptile and primate houses, a canyon footbridge,
+and the Skyfari running from the low west terminal up to the east ridge.
 
 ## Geography (still present under the POIs)
 
