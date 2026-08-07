@@ -57,6 +57,16 @@ function tryPlace(terrain, rng, attempts, pred, placeFn) {
   return false;
 }
 
+/** True if any road passes within `r` metres — used to grow fill along routes. */
+function nearRoad(terrain, x, z, r = 50) {
+  if (terrain.roadAt(x, z) > 0.05) return true;
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2;
+    if (terrain.roadAt(x + Math.cos(a) * r, z + Math.sin(a) * r) > 0.12) return true;
+  }
+  return false;
+}
+
 function dryLand(terrain, x, z, maxSlope = 22) {
   const h = terrain.heightAt(x, z);
   if (h < 3) return false;
@@ -84,19 +94,24 @@ export function scatterStructures(sink, terrain, rng) {
 
   // --- Suburban homes: mid-city rings (Clairemont / Kearny / Mission valleys) ---
   for (let n = 0; n < S.SUBURBAN; n++) {
-    const ok = tryPlace(terrain, rng, 80, (x, z, t) => {
+    const ok = tryPlace(terrain, rng, 120, (x, z, t) => {
       if (!dryLand(t, x, z, 18)) return false;
       if (tooCloseToPoiCore(x, z, 0.9)) return false;
       // Prefer north/central mesas, avoid pure downtown bay core
       if (z > 380 && Math.abs(x) < 150) return false;
       if (x > 450) return false; // not deep mountains
-      return true;
+      // Housing follows the road network — that is what makes the map read as
+      // continuous rather than as a handful of islands. It is a preference, not
+      // a rule: the western coastal shelf has few roads and still needs to fill.
+      return nearRoad(t, x, z, 75) || rng() > 0.6;
     }, (x, z) => {
       if (!claimFoot(x, z, 16, 14)) return false;
       placeSuburbanHome(sink, terrain, x, z, rng);
       stats.suburban++;
     });
-    if (!ok) break;
+    // Don't abandon the whole quota because one draw came up empty; the
+    // predicate is picky enough that a single miss is not a signal.
+    if (!ok && stats.suburban > S.SUBURBAN * 0.8) break;
   }
 
   // --- Trailer parks: pockets near bay flats and valley edges ---

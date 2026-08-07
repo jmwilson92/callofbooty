@@ -200,6 +200,16 @@ but necessary for map readable high ground and a hard eastern edge:
 - Canyon cuts between ridges for rotation routes
 - Chaparral → rock → light summit snow vertex colors
 
+## Filling between the districts
+
+A quarter of the buildable map used to have nothing within 70 m of it, which
+made the POIs read as islands. `STRUCTURES` counts are raised across the board —
+they are actually reached now that `tryPlace` retries on a failed occupancy
+claim instead of spending the whole structure on one contested spot — and
+housing prefers to grow within 75 m of a road, the way suburbia actually
+spreads. It is a preference rather than a rule, because the western coastal
+shelf has few roads and still needs to fill.
+
 ## Spawn
 
 Mission Valley `(0, 70)`, facing south toward Downtown / MCRD.

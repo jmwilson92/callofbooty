@@ -595,18 +595,21 @@ export const PROPS = {
 
 // World-detail structure scatter (procedural kits in world/structures/).
 // Counts are targets; placement retries if terrain is bad.
+// Counts are targets, and since tryPlace retries on a failed claim they are
+// now actually reached. Raised together to close the gaps between districts —
+// a quarter of the buildable map had nothing within 70 m before this.
 export const STRUCTURES = {
-  SUBURBAN: 110,
-  TRAILER: 16,
-  GAS: 20,
-  RESTAURANT: 28,
-  AUTO: 14,
-  FIRE: 8,
-  BUSINESS: 24,
+  SUBURBAN: 190,
+  TRAILER: 26,
+  GAS: 30,
+  RESTAURANT: 44,
+  AUTO: 22,
+  FIRE: 13,
+  BUSINESS: 34,
   SKY: 5, // extra towers on downtown plate fringe only (no orphans outside city)
-  BOAT: 16,
-  BILLBOARD: 20,
-  VEHICLE: 70,
+  BOAT: 22,
+  BILLBOARD: 28,
+  VEHICLE: 90,
   ANIMALS: 36,
 };
 
