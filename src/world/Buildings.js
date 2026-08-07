@@ -8,6 +8,7 @@ import { placeAirport } from './structures/Airport.js';
 import { placeCoronado } from './structures/Coronado.js';
 import { placePointLoma } from './structures/PointLoma.js';
 import { placeOverpasses } from './structures/Overpass.js';
+import { placeHelipads } from './structures/Helipads.js';
 import { kearnyPlan } from './KearnyPlan.js';
 import { mcrdBounds } from './McrdPlan.js';
 import { airportBounds } from './AirportPlan.js';
@@ -306,6 +307,9 @@ export function buildAllStructures(sink, terrain, rng) {
   buildLaJolla(sink, terrain, rng);
   // Freeway grade separations — decks, piers, barriers, connector ramps
   placeOverpasses(sink, terrain);
+  // Rooftop helipads. Runs after every building is registered, because it picks
+  // its roofs out of the registry and writes the pad back onto the record.
+  placeHelipads(sink, terrain, rng);
   // Lane lines, curbs, downtown sidewalks
   if (terrain.roadLines) placeRoadMarkings(sink, terrain, terrain.roadLines);
   // Parking lot curbs + white stalls + cars (skip stalls that hit buildings)

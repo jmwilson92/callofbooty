@@ -158,31 +158,30 @@ export class VehicleSystem {
   }
 
   _spawnRoofHelis(count, rng) {
-    const minF = VEHICLES.HELICOPTER?.minFloors ?? 10;
+    // Only on roofs the world actually built a pad on. Picking by height and
+    // floor area put the bird in the middle of the mechanical plant, on towers
+    // that have no exterior access at all — see structures/Helipads.js.
     const roofs = (worldBuildings || [])
-      .filter((b) => b.floors >= minF && b.w >= 10 && b.d >= 10 && Number.isFinite(b.roofY ?? b.baseY))
+      .filter((b) => b.helipad)
       .map((b) => ({
         b,
-        score: (b.floors || 0) * 2 + (b.w * b.d) * 0.01
-          + (Math.hypot((b.x + b.w * 0.5) - PLAYER.SPAWN.x, (b.z + b.d * 0.5) - PLAYER.SPAWN.z) < 200 ? 8 : 0),
+        score: -Math.hypot(b.helipad.x - PLAYER.SPAWN.x, b.helipad.z - PLAYER.SPAWN.z),
       }))
       .sort((a, c) => c.score - a.score);
 
     let hi = 0;
     const used = [];
-    // Guarantee first heli on the best roof near spawn (player drop point)
+    // Guarantee first heli on the pad nearest spawn (player drop point)
     for (const { b } of roofs) {
       if (hi >= count) break;
-      const cx = b.x + b.w * 0.5;
-      const cz = b.z + b.d * 0.5;
-      if (used.some((u) => Math.hypot(u.x - cx, u.z - cz) < 18)) continue;
-      // Slightly offset heli so there's room to stand on the deck
+      const pad = b.helipad;
+      if (used.some((u) => Math.hypot(u.x - pad.x, u.z - pad.z) < 18)) continue;
+      // Offset the heli off pad centre so there is room to stand on the deck
       const yaw = rng() * Math.PI * 2;
       const side = rightXZ(yaw);
-      const hx = cx - side.x * 1.5;
-      const hz = cz - side.z * 1.5;
-      const roofY = (b.roofY ?? (b.baseY + b.floors * 3.5)) + 0.35;
-      this._addHelicopter(hx, roofY, hz, yaw, rng, true);
+      const hx = pad.x - side.x * 1.8;
+      const hz = pad.z - side.z * 1.8;
+      this._addHelicopter(hx, pad.y + 0.05, hz, yaw, rng, true);
       used.push({ x: hx, z: hz });
       hi++;
     }
