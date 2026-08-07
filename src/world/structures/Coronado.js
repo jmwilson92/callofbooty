@@ -82,17 +82,20 @@ function jet(sink, x, y, z, rng, headingZ = 1, scale = 1) {
  * port, and an air wing parked along the deck edge.
  */
 function carrier(sink, terrain, cx, z0, z1, rng, stats) {
-  const beam = 32;
-  const deckW = 54;              // flight deck is far wider than the hull
-  if (!isWater(terrain, cx - deckW / 2 - 2, z0 - 2, cx + deckW / 2 + 2, z1 + 2)) return false;
+  const beam = 36;
+  const deckW = 70;              // flight deck is far wider than the hull
+  // Only the HULL needs open water. The flight deck sits 13 m up and overhangs
+  // the shallows either side by design — testing the deck's full width was what
+  // capped this ship at 140 m in a channel that has room for 228.
+  if (!isWater(terrain, cx - beam / 2 - 2, z0 - 2, cx + beam / 2 + 2, z1 + 2)) return false;
 
   const free = 12;
-  hullAlongZ(sink, cx, z0, z1, beam, free, { draft: 5.5, taper: 30 });
+  hullAlongZ(sink, cx, z0, z1, beam, free, { draft: 5.5, taper: 34 });
 
   // Flight deck: a slab out to the sponsons, sitting on the hull
   const dy = SEA + free;
-  const dx0 = cx - deckW * 0.46;
-  const dx1 = cx + deckW * 0.54;
+  const dx0 = cx - deckW * 0.54;   // wider to port, where the angled deck runs
+  const dx1 = cx + deckW * 0.46;
   sink.addSpan(dx0, dy, z0 + 6, dx1, dy + 1.2, z1 - 1, DECK);
   // Sponson brackets so the overhang is not floating
   for (let z = z0 + 16; z < z1 - 8; z += 14) {
@@ -101,9 +104,11 @@ function carrier(sink, terrain, cx, z0, z1, rng, stats) {
   }
 
   const top = dy + 1.2;
+  const L = z1 - z0;   // deck furniture is laid out proportionally, so the ship
+                       // reads right at any length the channel happens to allow
   // Angled landing area, canted to port — the marking that makes it read as a
   // carrier from 200 m up rather than a grey barge.
-  const aLen = (z1 - z0) * 0.62;
+  const aLen = L * 0.62;
   const steps = 16;
   for (let i = 0; i < steps; i++) {
     const t = i / steps;
@@ -113,13 +118,13 @@ function carrier(sink, terrain, cx, z0, z1, rng, stats) {
     if (i % 2 === 0) sink.addSpan(ax - 0.4, top + 0.06, az, ax + 0.4, top + 0.1, az + 3.2, C.white, 'thin');
   }
   // Bow catapult tracks
-  for (const ox of [-11, -3]) {
-    sink.addSpan(cx + ox - 0.35, top, z0 + 8, cx + ox + 0.35, top + 0.09, z0 + 62, C.white, 'thin');
+  for (const ox of [-13, -4]) {
+    sink.addSpan(cx + ox - 0.4, top, z0 + L * 0.05, cx + ox + 0.4, top + 0.09, z0 + L * 0.44, C.white, 'thin');
   }
   // Arresting wires across the landing area
   for (let i = 0; i < 4; i++) {
-    const az = z1 - 34 - i * 8;
-    sink.addSpan(cx - 22 - i, top, az, cx - 4 - i, top + 0.08, az + 0.5, C.dark, 'thin');
+    const az = z1 - L * 0.16 - i * (L * 0.045);
+    sink.addSpan(cx - 26 - i, top, az, cx - 5 - i, top + 0.08, az + 0.6, C.dark, 'thin');
   }
   // Deck-edge safety netting
   for (const ex of [dx0, dx1 - 0.5]) {
@@ -140,16 +145,17 @@ function carrier(sink, terrain, cx, z0, z1, rng, stats) {
   for (const oz of [21, 24]) sink.addSpan(ix + 2, top + 7, iz + oz, ix + 6.5, top + 9.5, iz + oz + 2, HULL_DK);
 
   // Deck-edge elevators, one down (a hole you can fall into is a landmark)
-  sink.addSpan(dx1 - 12, top - 0.1, iz - 22, dx1 - 0.5, top + 0.1, iz - 6, DECK_DK);
-  sink.addSpan(dx0 + 0.5, SEA + 6, iz + 30, dx0 + 11, SEA + 6.9, iz + 44, DECK_DK);
+  sink.addSpan(dx1 - 14, top - 0.1, iz - L * 0.14, dx1 - 0.5, top + 0.1, iz - L * 0.04, DECK_DK);
+  sink.addSpan(dx0 + 0.5, SEA + 6, iz + L * 0.16, dx0 + 13, SEA + 6.9, iz + L * 0.26, DECK_DK);
 
   // Air wing parked along the starboard deck edge, clear of the landing area
-  for (let i = 0; i < 6; i++) {
-    jet(sink, cx + 16 + (i % 2) * 3, top + 1.2, z0 + 30 + i * 19, rng, 1, 1);
+  const wing = Math.max(6, Math.round(L / 22));
+  for (let i = 0; i < wing; i++) {
+    jet(sink, cx + 19 + (i % 2) * 3.5, top + 1.2, z0 + L * 0.12 + i * (L * 0.72 / wing), rng, 1, 1);
   }
   // Two spotted on the bow cats
-  jet(sink, cx - 11, top + 1.2, z0 + 30, rng, 1, 1);
-  jet(sink, cx - 3, top + 1.2, z0 + 46, rng, 1, 1);
+  jet(sink, cx - 13, top + 1.2, z0 + L * 0.16, rng, 1, 1);
+  jet(sink, cx - 4, top + 1.2, z0 + L * 0.26, rng, 1, 1);
 
   // The flight deck is a floor you can fight on, so register it as one.
   registerBuilding({ x: dx0, z: z0 + 6, w: dx1 - dx0, d: z1 - z0 - 7, floors: 1, baseY: top, floorYs: [top] });
@@ -486,14 +492,18 @@ export function placeCoronado(sink, terrain, p, rng) {
   // --- the bay side: piers and the fleet ---
   // Carrier pier walks out from the north shore; the carrier lies alongside to
   // port, bow to the channel. Both root themselves on the real waterline.
-  const pierRoot = findShore(terrain, p.x + 1, p.z + 10, -1, 120, 8);
-  if (pierRoot) {
-    if (quay(sink, terrain, pierRoot.x, pierRoot.z, pierRoot.z - 120, 14, rng)) stats.piers++;
-    const b = berth(terrain, pierRoot.x - 38, pierRoot.z - 8, 140, 30, { shift: 8 });
-    if (b && carrier(sink, terrain, b.cx, b.z0, b.z1, rng, stats)) {
+  // The carrier gets the channel, not a berth hung off a pier: the channel is
+  // what limits the ship, and the biggest clear run of open water in it is
+  // ~228 x 40 m. Its quay is then rooted on the spit to starboard, so the pier
+  // does not have to share the water the hull needs.
+  const cb = berth(terrain, p.x - 2, p.z - 60, 228, 20, { shift: 24, slide: 44 });
+  if (cb && carrier(sink, terrain, cb.cx, cb.z0, cb.z1, rng, stats)) {
+    const qRoot = findShore(terrain, cb.cx + 42, p.z + 10, -1, 140, 7);
+    if (qRoot) {
+      if (quay(sink, terrain, qRoot.x, qRoot.z, cb.z0 + 30, 13, rng, { crane: false })) stats.piers++;
       // Brow from the quay across to the flight deck
-      const brz = b.z0 + (b.z1 - b.z0) * 0.55;
-      sink.addSpan(pierRoot.x - 13, SEA + 3, brz, pierRoot.x - 7, SEA + 12.4, brz + 4, CONCRETE);
+      const brz = cb.z0 + (cb.z1 - cb.z0) * 0.62;
+      sink.addSpan(qRoot.x - 12, SEA + 3, brz, qRoot.x - 5, SEA + 12.4, brz + 4.5, CONCRETE);
     }
   }
 
