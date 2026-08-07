@@ -149,12 +149,21 @@ too narrow for a second, and the model follows the same constraint:
   runs out of width.
 - **One runway**, with a parallel taxiway and turn-offs, marked with piano-key
   thresholds, centreline dashes, touchdown-zone bars and edge lights.
-- **The control tower** closes the east end, next to the terminal kerb.
+- **The control tower** closes the east end, and is somewhere you can actually
+  fight from. A tower you cannot get into is scenery, so this one has a caged
+  ladder up the back of the shaft (registered as a real climb volume), a gallery
+  floor at 34 m, and a waist-high parapet running right round an open walkway
+  outside the cab — glass above the parapet only, so nothing blocks a shot taken
+  from cover. The whole field, the approach and MCRD to the north are all
+  covered from it, and it is registered as a building so loot spawns up there.
 
 The airfield gets its own levelled plate (`AIRPORT_PLATE`) because a runway is
-flat by definition. Its west edge stops at x −194, short of the bay inlet
-reaching into the valley mouth, so the plate is never asked to lift water into a
-mesa; its east edge stops at x −60, where Mission Valley's own district begins.
+flat by definition. Its west edge stops at x −206 — about 18 m short of the bay
+inlet, so the blend has dry ground to ramp down through instead of ending as a
+wall out of the water (at x −224 it did exactly that, an 83° drop straight into
+the bay). The east edge stops at x −40, short of Mission Valley's district,
+cutting 3–8 m off the rising ground there. Together those two gains take the
+runway from 128 m to 158 m.
 
 Runway, taxiway and apron are graded into the heightfield through the same stamp
 the parking lots use, so they are ground you can run and land on rather than a

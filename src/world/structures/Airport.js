@@ -2,6 +2,7 @@ import { makeShed } from '../BuildingKit.js';
 import { registerBuilding } from '../BuildingRegistry.js';
 import { C, placeVehicle } from './Catalog.js';
 import { airportPlan } from '../AirportPlan.js';
+import { worldLadders } from '../Ladders.js';
 
 // San Diego International — Lindbergh Field.
 //
@@ -162,24 +163,70 @@ function terminal(sink, t, gates, y, rng, stats) {
   stats.buildings++;
 }
 
-/** Control tower: shaft, cab with canted glass, and the radar above it. */
+/**
+ * Control tower — and the best sniper hide on the map, which is the point of
+ * building it rather than just drawing it.
+ *
+ * A tower you cannot get into is scenery. This one has a caged ladder up the
+ * back of the shaft, a floor at the top you can stand on, and an *open* gallery
+ * running right round the cab behind a waist-high parapet, so the whole
+ * airfield, the approach and MCRD to the north are all shootable from it. The
+ * glass is above the parapet only, so nothing blocks a shot taken from cover.
+ */
 function controlTower(sink, x, z, y, stats) {
-  const H = 26;
-  for (let i = 0; i < 5; i++) {
-    const r = 3.4 - i * 0.22;
-    sink.addSpan(x - r, y + (H * i) / 5, z - r, x + r, y + (H * (i + 1)) / 5, z + r, CONCRETE);
+  const H = 34;              // tall enough to see over the terminal and the mesa
+  const shaftR = 3.6;
+
+  // Shaft, tapering slightly
+  for (let i = 0; i < 6; i++) {
+    const r = shaftR - i * 0.18;
+    sink.addSpan(x - r, y + (H * i) / 6, z - r, x + r, y + (H * (i + 1)) / 6, z + r, CONCRETE);
   }
-  // Cab — wider than the shaft, glazed the whole way round
-  sink.addSpan(x - 5.4, y + H, z - 5.4, x + 5.4, y + H + 0.6, z + 5.4, TERMINAL_DK);
-  sink.addSpan(x - 5.0, y + H + 0.6, z - 5.0, x + 5.0, y + H + 4.4, z + 5.0, C.glassDark);
-  sink.addSpan(x - 5.6, y + H + 4.4, z - 5.6, x + 5.6, y + H + 5.4, z + 5.6, TERMINAL_DK);
+
+  // Gallery floor — a ring wider than the shaft, so you can walk all the way
+  // round the cab and take a shot from any bearing.
+  const gY = y + H;
+  const gR = 6.4;
+  sink.addSpan(x - gR, gY, z - gR, x + gR, gY + 0.5, z + gR, TERMINAL_DK);
+  // Waist-high parapet: cover you can crouch behind and shoot over
+  const pH = 1.1;
+  sink.addSpan(x - gR, gY + 0.5, z - gR, x + gR, gY + 0.5 + pH, z - gR + 0.35, CONCRETE);
+  sink.addSpan(x - gR, gY + 0.5, z + gR - 0.35, x + gR, gY + 0.5 + pH, z + gR, CONCRETE);
+  sink.addSpan(x - gR, gY + 0.5, z - gR, x - gR + 0.35, gY + 0.5 + pH, z + gR, CONCRETE);
+  sink.addSpan(x + gR - 0.35, gY + 0.5, z - gR, x + gR, gY + 0.5 + pH, z + gR, CONCRETE);
+
+  // Cab in the middle of the gallery, glazed above the parapet line only
+  const cR = 4.4;
+  sink.addSpan(x - cR, gY + 0.5, z - cR, x + cR, gY + 1.4, z + cR, TERMINAL_DK);
+  sink.addSpan(x - cR, gY + 1.4, z - cR, x + cR, gY + 5.2, z + cR, C.glassDark, 'glass');
+  sink.addSpan(x - cR - 1.0, gY + 5.2, z - cR - 1.0, x + cR + 1.0, gY + 6.2, z + cR + 1.0, TERMINAL_DK);
+
+  // Caged ladder up the back (north) face of the shaft, onto the gallery
+  const lx = x - 0.35;
+  const lz = z - shaftR - 0.5;
+  const rungW = 0.7;
+  for (const ox of [0, rungW]) post(sink, lx + ox, y, lz, H + 1.2, 0.1, C.metal);
+  for (let ry = y + 0.3; ry < gY + 0.6; ry += 0.32) {
+    sink.addSpan(lx, ry, lz - 0.02, lx + rungW, ry + 0.07, lz + 0.12, C.metalLite);
+  }
+  // Safety hoops, and the climb volume the controller actually reads
+  for (let ry = y + 3.5; ry < gY - 1; ry += 3.5) {
+    sink.addSpan(lx - 0.12, ry, lz - 0.12, lx + rungW + 0.12, ry + 0.08, lz + 0.28, C.metal, 'thin');
+  }
+  worldLadders.add(lx - 0.3, y, lz - 0.4, lx + rungW + 0.35, gY + 1.8, lz + 0.5);
+  // Step-off landing from the ladder onto the gallery, through a gap in the rail
+  sink.addSpan(lx - 0.6, gY + 0.5, lz - 0.1, lx + rungW + 0.6, gY + 0.62, z - cR, TERMINAL_DK);
+
   // Radar and beacon
-  post(sink, x - 0.3, y + H + 5.4, z - 0.3, 5, 0.6, C.metal);
-  sink.addSpan(x - 3.0, y + H + 9.4, z - 0.5, x + 3.0, y + H + 10.4, z + 0.5, C.metalLite);
-  sink.addSpan(x - 0.6, y + H + 10.6, z - 0.6, x + 0.6, y + H + 11.6, z + 0.6, C.red);
+  post(sink, x - 0.3, gY + 6.2, z - 0.3, 5, 0.6, C.metal);
+  sink.addSpan(x - 3.0, gY + 10.2, z - 0.5, x + 3.0, gY + 11.2, z + 0.5, C.metalLite);
+  sink.addSpan(x - 0.6, gY + 11.4, z - 0.6, x + 0.6, gY + 12.4, z + 0.6, C.red);
+
+  // Registered so loot spawns up there — a perch worth climbing to needs a
+  // reason to climb to it.
   registerBuilding({
-    x: x - 3.4, z: z - 3.4, w: 6.8, d: 6.8, floors: 6, baseY: y,
-    floorYs: Array.from({ length: 6 }, (_, i) => y + i * 4.4),
+    x: x - gR, z: z - gR, w: gR * 2, d: gR * 2, floors: 1,
+    baseY: gY + 0.5, floorYs: [gY + 0.5],
   });
   stats.buildings++;
 }

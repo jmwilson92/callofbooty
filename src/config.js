@@ -486,12 +486,14 @@ export const MCRD_PLATE = {
 // site here is a ~14 m bench between the bay inlet to the west and rising ground
 // to the east; the plate is kept clear of both so it never has to lift water.
 export const AIRPORT_PLATE = {
-  // West edge stops at x -194: beyond that the bay inlet reaches into the
-  // valley mouth and the plate would be asked to lift water into a mesa. East
-  // edge stops at x -60, which is where Mission Valley's own district starts.
-  cx: -127,
+  // West edge stops at x -206, ~18 m short of the bay inlet, so the plate's
+  // blend has dry ground to ramp down through instead of ending as a wall out
+  // of the water. East edge stops at x -40, short of Mission Valley's own
+  // district, cutting 3-8 m off the rising ground there — which together with
+  // the western gain is what buys the runway its extra length.
+  cx: -123,
   cz: 103,
-  halfW: 67,
+  halfW: 83,
   halfD: 58,
   blend: 40,
   targetY: null,
@@ -506,27 +508,27 @@ export const AIRPORT_PLATE = {
 // side, the cargo and general-aviation ramp is squeezed onto the west end, and
 // the concourses reach south toward the runway rather than spreading out.
 export const AIRPORT_FIELD = {
-  w: 134,
+  w: 166,
   d: 116,
   // Landside: the access loop and the car park in front of the terminal
-  access: { u0: 24, u1: 122, v: 6, width: 9 },
-  carPark: { u0: 35, u1: 110, v0: 12, v1: 21 },
+  access: { u0: 28, u1: 140, v: 6, width: 9 },
+  carPark: { u0: 42, u1: 130, v0: 12, v1: 21 },
   // The terminal is a single linear block with its gates straight off the
   // airside face. Concourse piers were tried and do not fit: with three piers on
   // a 134 m frontage the pitch is 27 m and an airliner is 22 m across the wings,
   // so every aircraft parked between two piers flew through both of them. A
   // linear terminal is also what Lindbergh actually has, for the same reason.
-  terminal: { u0: 27, u1: 118, v0: 23, v1: 40 },
+  terminal: { u0: 32, u1: 140, v0: 23, v1: 40 },
   // Gates along the airside face: nose-in, wings parallel to the building.
-  gates: { u0: 47, pitch: 30, count: 3 },
-  apron: { u0: 18, u1: 125, v0: 40, v1: 72 },
-  taxiway: { u0: 6, u1: 129, v0: 76, v1: 86 },
-  runway: { u0: 3, u1: 131, v0: 91, v1: 109, markEvery: 14 },
-  tower: { u: 122, v: 24 },
+  gates: { u0: 52, pitch: 32, count: 3 },
+  apron: { u0: 20, u1: 150, v0: 40, v1: 72 },
+  taxiway: { u0: 8, u1: 158, v0: 76, v1: 86 },
+  runway: { u0: 4, u1: 162, v0: 91, v1: 109, markEvery: 16 },
+  tower: { u: 148, v: 24 },
   // Cargo / GA on the west end, where the field runs out of width
-  cargo: { u0: 3, u1: 24, v0: 20, v1: 40, hangars: 2 },
+  cargo: { u0: 4, u1: 32, v0: 20, v1: 40, hangars: 2 },
   // Where the perimeter road meets the field — the terminal kerb
-  gateU: 73,
+  gateU: 86,
 };
 
 // MCRD Depot layout. Bertram Goodhue's 1921 plan is a Spanish Colonial Revival
