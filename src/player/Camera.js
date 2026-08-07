@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { CAMERA, PLAYER, SLIDE, VEHICLES } from '../config.js';
+import { CAMERA, PLAYER, SLIDE, VEHICLES, PARACHUTE } from '../config.js';
 import { clamp, lerp } from '../core/Noise.js';
 
 const DEG = Math.PI / 180;
 const PITCH_LIMIT = CAMERA.PITCH_CLAMP_DEG * DEG;
 
-// First-person on foot; third-person chase cam while riding a vehicle.
+// First-person on foot; third-person chase while riding or under parachute.
 export class PlayerCamera {
   constructor(aspect) {
     this.camera = new THREE.PerspectiveCamera(CAMERA.FOV_BASE, aspect, CAMERA.NEAR, CAMERA.FAR);
@@ -27,6 +27,10 @@ export class PlayerCamera {
     this._euler = new THREE.Euler(0, 0, 0, 'YXZ');
     this._look = new THREE.Vector3();
     this._camTarget = new THREE.Vector3();
+    /** @type {THREE.Vector3|null} smoothed chase focus (vehicle / chute) */
+    this._vehSmooth = null;
+    /** Last third-person mode so we snap cleanly on exit */
+    this._tpMode = null;
   }
 
   setAspect(aspect) {
@@ -45,15 +49,27 @@ export class PlayerCamera {
   /**
    * @param {import('./Controller.js').Controller} controller
    * @param {object|null} vehicle  active vehicle from VehicleSystem (or null)
+   * @param {{ parachute?: boolean }} [opts]
    */
-  update(dt, controller, alpha, strafeInput, vehicle = null) {
+  update(dt, controller, alpha, strafeInput, vehicle = null, opts = null) {
     if (vehicle) {
       this._updateThirdPerson(dt, vehicle);
       return;
     }
+    if (opts?.parachute || controller.parachute) {
+      this._updateParachuteChase(dt, controller, alpha);
+      return;
+    }
 
-    // Left vehicle — drop smoothed vehicle state so re-entry doesn't snap
-    this._vehSmooth = null;
+    // Left vehicle / chute — drop smoothed chase state so re-entry doesn't snap
+    if (this._tpMode) {
+      this._vehSmooth = null;
+      this._tpMode = null;
+      // Snap eye height so FP doesn't blend from mid-air chase
+      controller.interpolated(alpha, this._pos);
+      this.smoothEyeY = this._pos.y + controller.eyeHeight;
+      this._initialised = true;
+    }
 
     controller.interpolated(alpha, this._pos);
     const targetEyeY = this._pos.y + controller.eyeHeight;
@@ -61,6 +77,11 @@ export class PlayerCamera {
     if (!this._initialised) {
       this.smoothEyeY = targetEyeY;
       this._initialised = true;
+    } else if (controller.crawlMode) {
+      // Drop to prone eye height quickly when downed (don't float at stand height)
+      const k = 1 - Math.exp(-14 * dt);
+      this.smoothEyeY = lerp(this.smoothEyeY, targetEyeY, k);
+      if (Math.abs(this.smoothEyeY - targetEyeY) > 0.45) this.smoothEyeY = targetEyeY;
     } else {
       const k = 1 - Math.exp(-CAMERA.FOLLOW_RATE * dt);
       this.smoothEyeY = lerp(this.smoothEyeY, targetEyeY, k);
@@ -107,6 +128,7 @@ export class PlayerCamera {
 
   /** Orbit chase cam behind the vehicle (mouse still steers look / vehicle). */
   _updateThirdPerson(dt, vehicle) {
+    this._tpMode = 'vehicle';
     const isHeli = vehicle.type === 'helicopter';
     const dist = isHeli ? (VEHICLES.CAM_HELI_DIST ?? 18) : (VEHICLES.CAM_MOTO_DIST ?? 7.5);
     const height = isHeli ? (VEHICLES.CAM_HELI_HEIGHT ?? 6.2) : (VEHICLES.CAM_MOTO_HEIGHT ?? 2.4);
@@ -173,5 +195,83 @@ export class PlayerCamera {
       this.camera.updateProjectionMatrix();
     }
     this.roll = 0;
+  }
+
+  /**
+   * Third-person chase under open parachute — body + canopy in frame.
+   * Mouse still steers yaw/pitch (glide direction / look).
+   */
+  _updateParachuteChase(dt, controller, alpha) {
+    const entering = this._tpMode !== 'chute';
+    this._tpMode = 'chute';
+
+    controller.interpolated(alpha, this._pos);
+    const px = this._pos.x;
+    const py = this._pos.y;
+    const pz = this._pos.z;
+
+    if (!this._vehSmooth || entering) {
+      this._vehSmooth = new THREE.Vector3(px, py, pz);
+    } else {
+      const jump = Math.hypot(
+        px - this._vehSmooth.x,
+        py - this._vehSmooth.y,
+        pz - this._vehSmooth.z
+      );
+      if (jump > 40) {
+        this._vehSmooth.set(px, py, pz);
+      } else {
+        const sk = 1 - Math.exp(-(PARACHUTE.CAM_SMOOTH ?? 8) * dt);
+        this._vehSmooth.x = lerp(this._vehSmooth.x, px, sk);
+        this._vehSmooth.y = lerp(this._vehSmooth.y, py, sk);
+        this._vehSmooth.z = lerp(this._vehSmooth.z, pz, sk);
+      }
+    }
+
+    const dist = PARACHUTE.CAM_DIST ?? 6.5;
+    const height = PARACHUTE.CAM_HEIGHT ?? 2.4;
+    const lookY = PARACHUTE.CAM_LOOK_Y ?? 1.2;
+
+    // Orbit behind look direction; pitch limited so canopy stays in frame
+    const pitch = clamp(this.pitch, -0.55, 0.5);
+    const cosP = Math.cos(pitch);
+    const ox = Math.sin(this.yaw) * cosP * dist;
+    const oy = height + Math.sin(-pitch) * dist * 0.55;
+    const oz = Math.cos(this.yaw) * cosP * dist;
+
+    const tx = this._vehSmooth.x;
+    const ty = this._vehSmooth.y + lookY;
+    const tz = this._vehSmooth.z;
+
+    const wantX = tx + ox;
+    const wantY = ty + oy;
+    const wantZ = tz + oz;
+
+    const camRate = PARACHUTE.CAM_SMOOTH ?? 8;
+    const k = 1 - Math.exp(-camRate * dt);
+    if (entering || !this._initialised) {
+      this.camera.position.set(wantX, wantY, wantZ);
+      this._look.set(tx, ty + 0.6, tz);
+      this._initialised = true;
+    } else {
+      this.camera.position.x = lerp(this.camera.position.x, wantX, k);
+      this.camera.position.y = lerp(this.camera.position.y, wantY, k);
+      this.camera.position.z = lerp(this.camera.position.z, wantZ, k);
+      this._look.x = lerp(this._look.x, tx, k);
+      this._look.y = lerp(this._look.y, ty + 0.6, k);
+      this._look.z = lerp(this._look.z, tz, k);
+    }
+
+    this.camera.lookAt(this._look);
+
+    const wantFov = PARACHUTE.CAM_FOV ?? 62;
+    this.fov = lerp(this.fov, wantFov, 1 - Math.exp(-4 * dt));
+    if (Math.abs(this.camera.fov - this.fov) > 0.05) {
+      this.camera.fov = this.fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.roll = 0;
+    // Keep FP eye smooth ready for landing snap
+    this.smoothEyeY = py + controller.eyeHeight;
   }
 }

@@ -20,6 +20,9 @@ export class Input {
 
   _bind() {
     window.addEventListener('keydown', (e) => {
+      // Typing in friends lobby / shop / any form field — don't steal keys for map (M), etc.
+      if (this._isTypingTarget(e.target)) return;
+
       // While playing, kill browser shortcuts that close/reload the tab.
       // Ctrl+W was closing the game mid-heli (looked like a crash).
       // Note: some browsers still refuse to cancel Ctrl+W; we also unbound Ctrl from crouch.
@@ -42,7 +45,10 @@ export class Input {
       }
     }, true); // capture so we beat browser default handlers when allowed
 
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('keyup', (e) => {
+      if (this._isTypingTarget(e.target)) return;
+      this.keys.delete(e.code);
+    });
 
     // Losing focus mid-key leaves a key stuck down forever otherwise.
     window.addEventListener('blur', () => {
@@ -94,6 +100,24 @@ export class Input {
     this.dom.addEventListener('mousedown', (e) => this.buttons.add(e.button));
     window.addEventListener('mouseup', (e) => this.buttons.delete(e.button));
     this.dom.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  /**
+   * True when the user is typing into a text field / lobby UI.
+   * Gameplay binds (M map, WASD, Space…) must not fire then.
+   */
+  _isTypingTarget(el) {
+    if (!el || el === document.body || el === document.documentElement) {
+      // Also treat focused element (capture phase target can be window-ish)
+      el = document.activeElement;
+    }
+    if (!el || el === document.body) return false;
+    if (el.closest?.('#party-ui')) return true;
+    if (el.closest?.('input, textarea, select, [contenteditable="true"]')) return true;
+    const tag = (el.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+    if (el.isContentEditable) return true;
+    return false;
   }
 
   // Ask for pointer lock. Must run in a user-gesture stack (click / key).

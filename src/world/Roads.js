@@ -382,12 +382,13 @@ export function defaultParkingLots() {
     if (!p) return;
     lots.push(parkingLotFootprint(p.x + ox, p.z + oz, w, d));
   };
-  // Downtown fringe lots
-  add('downtown', -95, 45, 55, 42);
-  add('downtown', 105, -55, 48, 58);
-  add('downtown', 85, 95, 58, 42);
-  add('downtown', -70, -80, 45, 40);
-  add('downtown', 40, 130, 50, 35);
+  // Downtown fringe lots — well outside the skyline grid (no buildings on asphalt)
+  // Grid spans roughly x 14–266, z 261–459. Keep lots outside that core.
+  add('downtown', -160, -30, 40, 32);   // west of plate
+  add('downtown', 130, -120, 44, 36);  // north-east of plate
+  add('downtown', 120, 200, 40, 32);   // south-east (was under ~164,489)
+  add('downtown', -40, -140, 42, 34);  // north of plate
+  add('downtown', 160, 40, 40, 30);    // far east
   // Airport long term
   add('airport', 40, -40, 80, 45);
   add('airport', -30, 50, 60, 40);
@@ -406,13 +407,17 @@ export function defaultParkingLots() {
   // La Jolla
   add('lajolla', 30, 25, 40, 32);
 
-  // Downtown fringe surface lots + two interior block lots
+  // Surface lots only on the plate rim — NOT under tower blocks / waterfront hotels
   const g = downtownGridParams();
-  lots.push(parkingLotFootprint(g.cx - 175, g.cz, 48, 55));
-  lots.push(parkingLotFootprint(g.cx + 175, g.cz - 20, 50, 48));
-  lots.push(parkingLotFootprint(g.cx + 40, g.cz + 165, 60, 40));
-  lots.push(parkingLotFootprint(g.cx - 50, g.cz - 165, 55, 38));
-  // Interior lots matching placeDowntownDistrict parkingBlocks 0,0 and 5,4
+  // Far west rim (was under building ~30,405 — moved further west)
+  lots.push(parkingLotFootprint(g.cx - 200, g.cz + 20, 40, 36));
+  // Far east rim
+  lots.push(parkingLotFootprint(g.cx + 200, g.cz - 10, 44, 40));
+  // North rim
+  lots.push(parkingLotFootprint(g.cx + 20, g.cz - 190, 50, 34));
+  // South rim — was (cx+40, cz+165) under ~164,489 / floating pad ~186,548
+  lots.push(parkingLotFootprint(g.cx + 100, g.cz + 210, 48, 34));
+  // Interior lots matching placeDowntownDistrict parkingBlocks 0,0 and 5,4 only
   const stepX = g.blockW + g.streetW;
   const stepZ = g.blockD + g.streetW;
   const originX = g.cx - (g.cols * stepX - g.streetW) / 2;
@@ -445,7 +450,9 @@ export function placeParkingLotDetails(sink, terrain, lots, rng, placeVehicleFn,
     sink.addSpan(lot.x, y, lot.z, lot.x + curb, y + ch, lot.z + lot.d, 0xb0aea8, 'thin');
     sink.addSpan(lot.x + lot.w - curb, y, lot.z, lot.x + lot.w, y + ch, lot.z + lot.d, 0xb0aea8, 'thin');
 
-    const stallW = 3.0;
+    // Stalls: depth along Z (drive-in from aisle), width along X
+    // Cars must face into the stall (length along Z) — not perpendicular
+    const stallW = 2.8;
     const stallD = 5.5;
     const cols = Math.min(12, Math.floor((lot.w - 2) / stallW));
     const rows = Math.min(6, Math.floor((lot.d - 2) / (stallD + 1.5)));
@@ -454,14 +461,17 @@ export function placeParkingLotDetails(sink, terrain, lots, rng, placeVehicleFn,
       for (let c = 0; c < cols; c++) {
         const sx = lot.x + 1.2 + c * stallW;
         const sz = lot.z + 1.2 + r * (stallD + 1.5);
+        // Stall paint: long edge along Z (depth), thin marker on the left
         sink.addSpan(sx, y + 0.01, sz, sx + 0.08, y + 0.04, sz + stallD, 0xe8e6e0, 'thin');
-        if (!placeVehicleFn || cars >= 8 || rng() <= 0.62) continue;
-        // Vehicle footprint ~4.5 x 2 — skip if a building already claimed this stall
-        const vw = 4.8;
-        const vd = 2.2;
-        if (occ && occ.blocked(sx, sz, sx + vw, sz + vd)) continue;
-        placeVehicleFn(sink, sx + 0.25, sz + 0.4, y, rng);
-        if (occ) occ.claim(sx, sz, vw, vd, 0.5);
+        sink.addSpan(sx + stallW - 0.12, y + 0.01, sz, sx + stallW - 0.04, y + 0.04, sz + stallD, 0xe8e6e0, 'thin');
+        if (!placeVehicleFn || cars >= 8 || rng() <= 0.55) continue;
+        // Car footprint ~2.0 x 5.0 when oriented along Z
+        const vw = 2.2;
+        const vd = 5.0;
+        if (occ && occ.blocked(sx + 0.2, sz + 0.2, sx + 0.2 + vw, sz + 0.2 + vd)) continue;
+        // alongZ=true so nose points along the stall (matches paint)
+        placeVehicleFn(sink, sx + 0.35, sz + 0.25, y, rng, null, true);
+        if (occ) occ.claim(sx + 0.2, sz + 0.2, vw, vd, 0.4);
         cars++;
       }
     }

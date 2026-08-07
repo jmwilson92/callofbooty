@@ -105,6 +105,9 @@ export function createHud() {
       <tr><td>Space</td><td>jump / heli ascend</td></tr>
       <tr><td>C</td><td>crouch</td></tr>
       <tr><td>E</td><td>shop / vehicle / loot / door</td></tr>
+      <tr><td>3</td><td>insert armor plate</td></tr>
+      <tr><td>G / F</td><td>frag · smoke</td></tr>
+      <tr><td>4 / 5</td><td>UAV recon · stim</td></tr>
       <tr><td>V / T</td><td>heli gunner · map/free aim</td></tr>
       <tr><td>M</td><td>map · gold H+ = rearm · red = UAV pings</td></tr>
       <tr><td>Esc</td><td>pause (only way back to this screen)</td></tr>
@@ -248,9 +251,10 @@ export function createHud() {
       };
       playBtn.addEventListener('click', go);
       playBtn.addEventListener('pointerup', go);
-      // Keyboard when menu is up
+      // Keyboard when menu is up (skip when typing in friends lobby)
       window.addEventListener('keydown', (e) => {
         if (!menuVisible) return;
+        if (e.target?.closest?.('#party-ui, input, textarea, button, select')) return;
         if (e.code === 'Enter' || e.code === 'Space') {
           e.preventDefault();
           requestLockFn?.();

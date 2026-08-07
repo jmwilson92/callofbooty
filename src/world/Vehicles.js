@@ -55,6 +55,36 @@ export class VehicleSystem {
     this._cand = [];
     this._rearmPads = [];
     this._flareClouds = []; // active ECM spoofs
+    /** @type {null|(() => Array)} live combat targets for splash (bots etc.) */
+    this._getSplashTargets = null;
+    /** @type {null|(() => {x:number,y:number,z:number,health?:number,armor?:number,applyDamage?:Function}|null)} */
+    this._getLocalPlayer = null;
+    /** Stable spawn counters so multiplayer clients share the same vehicle ids */
+    this._heliSeq = 0;
+    this._motoSeq = 0;
+    /** Local party peer id (for seat conflict resolution) */
+    this.localPeerId = null;
+  }
+
+  /** @param {string|null} id */
+  setLocalPeerId(id) {
+    this.localPeerId = id || null;
+  }
+
+  /** @param {string} id */
+  getById(id) {
+    if (!id) return null;
+    return this.vehicles.find((v) => v.id === id) || null;
+  }
+
+  /**
+   * Wire living entities for rocket splash (call from main after bots spawn).
+   * @param {() => Array} getTargets  bots / targets with x,y,z,health,applyDamage
+   * @param {() => object|null} [getLocalPlayer] player vitals + position for friendly-fire/self splash
+   */
+  setSplashProviders(getTargets, getLocalPlayer = null) {
+    this._getSplashTargets = getTargets;
+    this._getLocalPlayer = getLocalPlayer;
   }
 
   spawn() {
@@ -173,6 +203,8 @@ export class VehicleSystem {
     this.active = null;
     this.localSeat = 'pilot';
     this.vehicles.length = 0;
+    this._heliSeq = 0;
+    this._motoSeq = 0;
     this._rockets.length = 0;
     this._flareClouds.length = 0;
     this._rearmPads.length = 0;
@@ -218,11 +250,15 @@ export class VehicleSystem {
 
     this.group.add(root);
     this.vehicles.push({
+      id: `moto_${this._motoSeq++}`,
       type: 'motorcycle',
       root,
       x, y, z, yaw,
       speed: 0,
       vx: 0, vz: 0,
+      health: 55,
+      maxHealth: 55,
+      seats: { pilot: null, gunner: null },
     });
   }
 
@@ -339,7 +375,8 @@ export class VehicleSystem {
     this.group.add(root);
     const cfg = VEHICLES.HELICOPTER;
     this.vehicles.push({
-      id: `heli_${this.vehicles.length}_${(Math.random() * 1e6) | 0}`,
+      // Deterministic id so friends share the same airframe over the party relay
+      id: `heli_${this._heliSeq++}`,
       type: 'helicopter',
       root,
       x, y, z, yaw,
@@ -350,6 +387,7 @@ export class VehicleSystem {
       rocketsRight: nR,
       rocketCd: 0,
       // Crew: pilot flies, gunner targets/fires/ECM
+      // seat values: null | 'local' | peerId string
       seats: { pilot: null, gunner: null },
       // Gunner map-selected target {x,y,z,kind,id?}
       mapTarget: null,
@@ -409,6 +447,8 @@ export class VehicleSystem {
   findNear(px, py, pz) {
     let best = null;
     let bestD = Infinity;
+    let bestFriend = null;
+    let bestFriendD = Infinity;
     const range = VEHICLES.ENTER_RANGE ?? 3.4;
     for (const v of this.vehicles) {
       if (this.active === v) continue;
@@ -420,13 +460,20 @@ export class VehicleSystem {
       let maxDy = 3.5;
       if (v.type === 'helicopter') maxDy = v.crashing ? 14 : 6;
       if (Math.abs(v.y - py) > maxDy) continue;
+      // Prefer a bird a friend is already piloting (shared co-op chopper)
+      const friendPilot = v.seats?.pilot && v.seats.pilot !== 'local';
+      const gunnerOpen = !v.seats?.gunner || v.seats.gunner === 'local';
+      if (friendPilot && gunnerOpen && d < bestFriendD) {
+        bestFriendD = d;
+        bestFriend = v;
+      }
       if (d < bestD) {
         bestD = d;
         best = v;
       }
     }
-    this._near = best;
-    return best;
+    this._near = bestFriend || best;
+    return this._near;
   }
 
   /** Pads for minimap / full map markers. */
@@ -436,61 +483,383 @@ export class VehicleSystem {
     }));
   }
 
-  tryUse(controller) {
+  /**
+   * @param {object} controller
+   * @param {{ allowDismount?: boolean }} [opts]
+   *   allowDismount — false while downed so you stay strapped in
+   */
+  tryUse(controller, opts = {}) {
     if (this.active) {
+      if (opts.allowDismount === false) return false;
+      // Airborne bail while critically hurt is a death trap — require grounded-ish
+      if (opts.requireLanded && this.active.type === 'helicopter') {
+        const v = this.active;
+        const support = this._supportY(v.x, v.y, v.z);
+        if (v.y - support > (VEHICLES.HELICOPTER?.crashBailHeight ?? 4.5)) {
+          return false;
+        }
+      }
       this._dismount(controller);
       return true;
     }
     const v = this.findNear(controller.pos.x, controller.pos.y, controller.pos.z);
     if (!v) return false;
     if (v.wrecked || v.destroyed) return false;
-    this._mount(v, controller);
-    return true;
+    return !!this._mount(v, controller);
+  }
+
+  /**
+   * World-space seat pose for local body / camera attachment.
+   * Pilot sits forward in cabin; gunner slightly aft. Feet at returned y.
+   * @returns {{ x:number, y:number, z:number, yaw:number, seat:'pilot'|'gunner', type:string }|null}
+   */
+  getSeatWorldPose() {
+    if (!this.active) return null;
+    return this.getSeatWorldPoseFor(this.active, this.localSeat);
+  }
+
+  /**
+   * Seat pose on any vehicle (local + remote peer bodies).
+   * @param {object} v
+   * @param {'pilot'|'gunner'|string|null} seat
+   */
+  getSeatWorldPoseFor(v, seat = 'pilot') {
+    if (!v) return null;
+    const role = seat === 'gunner' ? 'gunner' : 'pilot';
+    const yaw = v.yaw ?? 0;
+    const f = forwardXZ(yaw);
+    const r = rightXZ(yaw);
+    if (v.type === 'helicopter') {
+      // Cabin: pilot forward-left, gunner aft-right. Hip height under rotor hub.
+      const isGunner = role === 'gunner';
+      const localY = 0.28;
+      const localZ = isGunner ? 0.25 : -0.35;
+      const localX = isGunner ? 0.12 : -0.1;
+      return {
+        x: v.x + r.x * localX + f.x * localZ,
+        y: v.y + localY,
+        z: v.z + r.z * localX + f.z * localZ,
+        yaw,
+        seat: role,
+        type: v.type,
+      };
+    }
+    return {
+      x: v.x,
+      y: v.y + 0.15,
+      z: v.z,
+      yaw,
+      seat: role,
+      type: v.type || 'motorcycle',
+    };
+  }
+
+  /** @param {string} id @param {'pilot'|'gunner'} seat */
+  getSeatWorldPoseForId(id, seat = 'pilot') {
+    return this.getSeatWorldPoseFor(this.getById(id), seat);
+  }
+
+  /**
+   * Resolve which local vehicle a remote peer is on.
+   * Prefer stable heliId; fall back to nearest airframe to their body
+   * (covers old clients / id desync).
+   */
+  _resolvePeerVehicle(p) {
+    if (!p) return null;
+    if (p.heliId) {
+      const byId = this.getById(p.heliId);
+      if (byId) return byId;
+    }
+    if (p.veh?.id) {
+      const byVeh = this.getById(p.veh.id);
+      if (byVeh) return byVeh;
+    }
+    if (p.x == null || p.z == null) return null;
+    let best = null;
+    let bestD = Infinity;
+    for (const v of this.vehicles) {
+      if (v.wrecked || v.destroyed) continue;
+      // Prefer helicopters when peer reports a heli seat
+      if (p.seat && v.type !== 'helicopter' && p.heliId) continue;
+      const d = Math.hypot((v.x - p.x), (v.z - p.z));
+      // In flight the pad heli is far — also score by height similarity once moving
+      const dy = Math.abs((v.y ?? 0) - (p.y ?? 0));
+      const score = d + dy * 0.15;
+      if (score < bestD && d < 40) {
+        bestD = score;
+        best = v;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Apply remote party vehicle occupancy + pilot kinematics so friends share one bird.
+   * Call every frame before local vehicle update.
+   * @param {Map|Iterable} peers  party.peers
+   * @param {number} [dt]
+   */
+  applyPartyPeers(peers, dt = 1 / 20) {
+    if (!peers) return;
+    const list = peers instanceof Map ? [...peers.values()] : [...peers];
+
+    // Clear remote seat claims (keep local)
+    for (const v of this.vehicles) {
+      if (!v.seats) continue;
+      if (v.seats.pilot && v.seats.pilot !== 'local') v.seats.pilot = null;
+      if (v.seats.gunner && v.seats.gunner !== 'local') v.seats.gunner = null;
+    }
+
+    /** @type {object|null} */
+    let remotePilotPeer = null;
+    /** @type {object|null} */
+    let remotePilotVeh = null;
+
+    for (const p of list) {
+      if (!p?.seat) continue;
+      const v = this._resolvePeerVehicle(p);
+      if (!v) continue;
+      if (!v.seats) v.seats = { pilot: null, gunner: null };
+      const role = p.seat === 'gunner' ? 'gunner' : 'pilot';
+
+      // Seat conflict: two pilots — lower peer id wins pilot, other becomes gunner
+      if (role === 'pilot' && v.seats.pilot === 'local' && this.active === v && this.localSeat === 'pilot') {
+        const remoteId = String(p.id || '');
+        const localId = String(this.localPeerId || 'zzzz');
+        if (remoteId && remoteId < localId) {
+          if (!v.seats.gunner || v.seats.gunner === 'local') {
+            v.seats.pilot = p.id;
+            v.seats.gunner = 'local';
+            this.localSeat = 'gunner';
+          }
+        } else {
+          v.seats.pilot = 'local';
+        }
+      } else if (v.seats[role] !== 'local') {
+        v.seats[role] = p.id;
+      }
+
+      if (role === 'pilot') {
+        remotePilotPeer = p;
+        remotePilotVeh = v;
+        // Prefer explicit airframe packet; else reconstruct from pilot body
+        if (p.veh && Number.isFinite(p.veh.x) && Number.isFinite(p.veh.z)) {
+          this._applyRemotePilot(v, p.veh, dt);
+        } else if (p.x != null && p.z != null) {
+          this._applyFromPilotBody(v, p, dt);
+        }
+      }
+    }
+
+    // Local gunner MUST ride the remote pilot's bird (even if we boarded a different mesh id)
+    if (this.active && this.localSeat === 'gunner' && remotePilotPeer && remotePilotVeh) {
+      if (this.active !== remotePilotVeh) {
+        if (this.active.seats?.gunner === 'local') this.active.seats.gunner = null;
+        this.active = remotePilotVeh;
+        if (!remotePilotVeh.seats) remotePilotVeh.seats = { pilot: null, gunner: null };
+        remotePilotVeh.seats.gunner = 'local';
+        // Re-apply transform onto the bird we just switched to
+        if (remotePilotPeer.veh && Number.isFinite(remotePilotPeer.veh.x)) {
+          this._applyRemotePilot(remotePilotVeh, remotePilotPeer.veh, dt);
+        } else if (remotePilotPeer.x != null) {
+          this._applyFromPilotBody(remotePilotVeh, remotePilotPeer, dt);
+        }
+      }
+    }
+  }
+
+  /**
+   * Soft-follow remote pilot kinematics (gunner / empty local).
+   * Local pilot always ignores this (authority).
+   */
+  _applyRemotePilot(v, veh, dt = 1 / 20) {
+    if (!v || !veh) return;
+    if (this.active === v && this.localSeat === 'pilot') return;
+
+    const tx = Number(veh.x);
+    const ty = Number(veh.y);
+    const tz = Number(veh.z);
+    const tyaw = Number(veh.yaw);
+    if (![tx, ty, tz].every(Number.isFinite)) return;
+
+    const k = 1 - Math.exp(-18 * Math.max(0.001, dt));
+    const jump = Math.hypot(tx - v.x, ty - v.y, tz - v.z);
+    // Passengers need hard snaps when the pilot banks hard / climbs
+    if (jump > 4 || (this.active === v && this.localSeat === 'gunner' && jump > 1.2)) {
+      v.x = tx;
+      v.y = ty;
+      v.z = tz;
+      if (Number.isFinite(tyaw)) v.yaw = tyaw;
+    } else {
+      v.x = lerp(v.x, tx, k);
+      v.y = lerp(v.y, ty, k);
+      v.z = lerp(v.z, tz, k);
+      if (Number.isFinite(tyaw)) {
+        let dy = tyaw - v.yaw;
+        while (dy > Math.PI) dy -= Math.PI * 2;
+        while (dy < -Math.PI) dy += Math.PI * 2;
+        v.yaw += dy * k;
+      }
+    }
+    v.vx = Number.isFinite(veh.vx) ? veh.vx : (v.vx || 0);
+    v.vy = Number.isFinite(veh.vy) ? veh.vy : (v.vy || 0);
+    v.vz = Number.isFinite(veh.vz) ? veh.vz : (v.vz || 0);
+    v.crashing = false;
+    if (v.root) {
+      v.root.position.set(v.x, v.y, v.z);
+      v.root.rotation.y = v.yaw;
+      v.root.rotation.x = 0;
+      v.root.rotation.z = 0;
+    }
+  }
+
+  /**
+   * Reconstruct airframe pose from the pilot's networked body (seat offset inverse).
+   * Used when `veh` packet is missing (old relay) or dropped.
+   */
+  _applyFromPilotBody(v, p, dt = 1 / 20) {
+    if (!v || p?.x == null || p?.z == null) return;
+    if (this.active === v && this.localSeat === 'pilot') return;
+    const yaw = Number.isFinite(p.yaw) ? p.yaw : (v.yaw || 0);
+    const f = forwardXZ(yaw);
+    const r = rightXZ(yaw);
+    // Must match getSeatWorldPoseFor helicopter pilot offsets
+    const localY = 0.28;
+    const localZ = -0.35;
+    const localX = -0.1;
+    const hx = p.x - r.x * localX - f.x * localZ;
+    const hz = p.z - r.z * localX - f.z * localZ;
+    const hy = (p.y ?? v.y + localY) - localY;
+    this._applyRemotePilot(v, {
+      x: hx,
+      y: hy,
+      z: hz,
+      yaw,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+    }, dt);
+  }
+
+  /** Snapshot for party broadcast when local is piloting. */
+  getPilotNetState() {
+    if (!this.active || this.localSeat !== 'pilot') return null;
+    const v = this.active;
+    return {
+      id: v.id,
+      x: +v.x,
+      y: +v.y,
+      z: +v.z,
+      yaw: +v.yaw,
+      vx: +(v.vx || 0),
+      vy: +(v.vy || 0),
+      vz: +(v.vz || 0),
+      type: v.type,
+    };
   }
 
   _mount(v, controller) {
-    if (v.wrecked || v.destroyed) return;
-    this.active = v;
+    if (v.wrecked || v.destroyed) return false;
     // Passenger / new pilot takes over — cancel unmanned crash (only if still flyable)
     v.crashing = false;
-    // Do not clear wrecked — already blocked above
     v.speed = 0;
     if (v.type === 'helicopter') {
       v.vy = Math.min(0, v.vy * 0.35);
       v.vx *= 0.5;
       v.vz *= 0.5;
-      // Solo default pilot; empty gunner for friend/passenger
       if (!v.seats) v.seats = { pilot: null, gunner: null };
-      this.localSeat = v.seats.pilot && !v.seats.gunner ? 'gunner' : 'pilot';
+      const pilotTaken = !!(v.seats.pilot && v.seats.pilot !== 'local');
+      const gunnerTaken = !!(v.seats.gunner && v.seats.gunner !== 'local');
+      if (pilotTaken && gunnerTaken) {
+        this.bus?.emit?.('vehicle:full', { id: v.id });
+        return false;
+      }
+      // Friend already piloting → jump in as gunner. Else take pilot.
+      if (pilotTaken) this.localSeat = 'gunner';
+      else if (gunnerTaken) this.localSeat = 'pilot';
+      else this.localSeat = 'pilot';
       v.seats[this.localSeat] = 'local';
       if (!v.flaresMax) {
         v.flaresMax = VEHICLES.HELICOPTER?.flaresMax ?? 8;
         v.flares = v.flaresMax;
       }
       if (v.ecmAuto == null) v.ecmAuto = VEHICLES.HELICOPTER?.ecmDefaultAuto !== false;
+      // Always start free-aim so click-to-fire works immediately
+      if (!v.aimMode) v.aimMode = 'direct';
+      v.aimMode = 'direct';
+      v.rocketCd = 0;
+      {
+        const nR = VEHICLES.HELICOPTER?.rocketsPerSide ?? 8;
+        if (!Number.isFinite(v.rocketsLeft) || v.rocketsLeft < 0) v.rocketsLeft = nR;
+        if (!Number.isFinite(v.rocketsRight) || v.rocketsRight < 0) v.rocketsRight = nR;
+        if ((v.rocketsLeft | 0) + (v.rocketsRight | 0) <= 0) {
+          v.rocketsLeft = nR;
+          v.rocketsRight = nR;
+        }
+      }
     } else {
+      if (!v.seats) v.seats = { pilot: null, gunner: null };
+      if (v.seats.pilot && v.seats.pilot !== 'local') {
+        this.bus?.emit?.('vehicle:full', { id: v.id });
+        return false;
+      }
       v.vy = 0;
       v.vx = 0;
       v.vz = 0;
       this.localSeat = 'pilot';
+      v.seats.pilot = 'local';
     }
-    const cfg = v.type === 'helicopter' ? VEHICLES.HELICOPTER : VEHICLES.MOTORCYCLE;
-    controller.pos.set(v.x, v.y + (cfg.seatY ?? 1), v.z);
+    this.active = v;
     controller.vel.set(0, 0, 0);
-    controller.grounded = v.type === 'motorcycle';
     controller.sliding = false;
     controller.mantling = false;
     controller.onLadder = false;
-    this.bus?.emit?.('vehicle:mount', { type: v.type, seat: this.localSeat, takeover: true });
+    const seat = this.getSeatWorldPose();
+    if (seat) {
+      controller.pos.set(seat.x, seat.y, seat.z);
+      controller.grounded = v.type === 'motorcycle';
+    } else {
+      const cfg = v.type === 'helicopter' ? VEHICLES.HELICOPTER : VEHICLES.MOTORCYCLE;
+      controller.pos.set(v.x, v.y + (cfg.seatY ?? 1), v.z);
+      controller.grounded = v.type === 'motorcycle';
+    }
+    controller.prevPos?.copy?.(controller.pos);
+    this.bus?.emit?.('vehicle:mount', {
+      type: v.type,
+      seat: this.localSeat,
+      id: v.id,
+      takeover: this.localSeat === 'pilot',
+    });
+    return true;
   }
 
-  /** Solo seat swap: pilot ↔ gunner (V). Multiplayer will assign seats externally. */
+  /**
+   * Solo seat swap: pilot ↔ gunner (V).
+   * Blocked if a healthy friend holds the seat; allowed if they are downed/dead
+   * so the gunner can take the stick when the pilot is incapacitated.
+   */
   swapSeat() {
     if (!this.active || this.active.type !== 'helicopter') return false;
+    if (this.localSeat === 'passenger') {
+      // Downed pilot recovering into gunner or pilot if free
+      return this.tryClaimPilot() || this._forceSeat('gunner');
+    }
     const v = this.active;
     const next = this.localSeat === 'pilot' ? 'gunner' : 'pilot';
     if (v.seats) {
-      v.seats[this.localSeat] = null;
+      const holder = v.seats[next];
+      const taken = holder && holder !== 'local';
+      if (taken) {
+        const downed = this._peerIncap?.(holder);
+        if (!downed) {
+          this.bus?.emit?.('vehicle:seat_blocked', { seat: next, by: holder });
+          return false;
+        }
+        // Steal from incapacitated friend
+      }
+      if (this.localSeat === 'pilot' || this.localSeat === 'gunner') {
+        v.seats[this.localSeat] = null;
+      }
       v.seats[next] = 'local';
     }
     this.localSeat = next;
@@ -498,12 +867,85 @@ export class VehicleSystem {
     return true;
   }
 
+  /**
+   * Gunner takes pilot when the current pilot is downed/dead or seat empty.
+   * @returns {boolean}
+   */
+  tryClaimPilot() {
+    if (!this.active || this.active.type !== 'helicopter') return false;
+    if (this.localSeat === 'pilot') return true;
+    const v = this.active;
+    if (!v.seats) v.seats = { pilot: null, gunner: null };
+    const holder = v.seats.pilot;
+    if (holder && holder !== 'local') {
+      if (!this._peerIncap?.(holder)) {
+        this.bus?.emit?.('vehicle:seat_blocked', { seat: 'pilot', by: holder });
+        return false;
+      }
+    }
+    if (this.localSeat === 'gunner' && v.seats.gunner === 'local') {
+      v.seats.gunner = null;
+    }
+    v.seats.pilot = 'local';
+    this.localSeat = 'pilot';
+    this.bus?.emit?.('vehicle:seat', { seat: 'pilot', claim: true });
+    return true;
+  }
+
+  /** Release pilot controls when downed — free the stick for the gunner. */
+  yieldPilotWhenDowned() {
+    if (!this.active || this.active.type !== 'helicopter') return false;
+    if (this.localSeat !== 'pilot') return false;
+    const v = this.active;
+    if (v.seats) {
+      v.seats.pilot = null;
+    }
+    this.localSeat = 'passenger';
+    this.bus?.emit?.('vehicle:seat', { seat: 'passenger', yield: true });
+    return true;
+  }
+
+  _forceSeat(seat) {
+    if (!this.active) return false;
+    const v = this.active;
+    if (!v.seats) v.seats = { pilot: null, gunner: null };
+    if (this.localSeat === 'pilot' || this.localSeat === 'gunner') {
+      if (v.seats[this.localSeat] === 'local') v.seats[this.localSeat] = null;
+    }
+    if (seat === 'pilot' || seat === 'gunner') v.seats[seat] = 'local';
+    this.localSeat = seat;
+    return true;
+  }
+
+  /** @param {(peerId: string) => boolean} fn */
+  setPeerIncapCheck(fn) {
+    this._peerIncap = fn;
+  }
+
   get isGunner() {
     return !!this.active && this.active.type === 'helicopter' && this.localSeat === 'gunner';
   }
 
   get isPilot() {
-    return !!this.active && (this.active.type !== 'helicopter' || this.localSeat === 'pilot');
+    // Passenger / downed pilot does not fly
+    if (!this.active) return false;
+    if (this.localSeat === 'passenger') return false;
+    return this.active.type !== 'helicopter' || this.localSeat === 'pilot';
+  }
+
+  /**
+   * Only the gunner seat fires rockets. Pilot flies; gunner shoots.
+   * Solo: press V to swap into gunner.
+   */
+  get canFireRockets() {
+    if (!this.active || this.active.type !== 'helicopter') return false;
+    if (this.active.wrecked || this.active.destroyed) return false;
+    return this.localSeat === 'gunner';
+  }
+
+  /** Human-readable why tryFireRockets failed (for HUD). */
+  get lastFireDeny() {
+    return this._lastFireDeny || null;
   }
 
   /** Gunner map-select a world target (bot / heli / ground / roof). */
@@ -759,10 +1201,8 @@ export class VehicleSystem {
     else v.vy *= 0.2;
   }
 
-  /**
-   * @returns {boolean} true if riding
-   */
-  update(dt, controller, input, yaw) {
+  /** Advance missiles / flares even when nobody is driving (needed for remote volleys). */
+  tickProjectiles(dt) {
     try {
       this._updateRockets(dt);
       this._updateFlares(dt);
@@ -770,7 +1210,14 @@ export class VehicleSystem {
       console.warn('[vehicles] rocket/flare update failed', err);
       this._rockets.length = 0;
     }
+  }
 
+  /**
+   * @returns {boolean} true if riding
+   * Note: call tickProjectiles(dt) separately each frame (main loop) so remote
+   * missiles still fly when you're not driving.
+   */
+  update(dt, controller, input, yaw) {
     try {
       this._updateCrashes(dt);
     } catch (err) {
@@ -782,7 +1229,10 @@ export class VehicleSystem {
       const rotor = v.root?.userData?.rotor;
       const tail = v.root?.userData?.tailRotor;
       let spin;
-      if (this.active === v) spin = 28;
+      const crewed = this.active === v
+        || (v.seats?.pilot && v.seats.pilot !== null)
+        || (v.seats?.gunner && v.seats.gunner !== null);
+      if (crewed && !v.wrecked) spin = 28;
       else if (v.crashing) spin = Math.max(1.5, 18 - (v.crashT ?? 0) * 4);
       else if (v.wrecked) spin = 0.15;
       else spin = 0.4;
@@ -792,27 +1242,52 @@ export class VehicleSystem {
       if (v.flareCd > 0) v.flareCd -= dt;
     }
 
+    // Crash eject applied next frame that has a controller
+    if (this._pendingCrashEject && controller) {
+      const e = this._pendingCrashEject;
+      this._pendingCrashEject = null;
+      controller.pos.set(e.x, e.y, e.z);
+      controller.vel.set(0, 0, 0);
+      controller.grounded = true;
+      controller.prevPos?.copy?.(controller.pos);
+    }
+
     if (!this.active || !controller) return false;
     const v = this.active;
     try {
       if (v.type === 'motorcycle') {
         this._driveMoto(dt, v, controller, input, yaw);
       } else {
-        // Gunner: ride along, no flight controls. Pilot: fly.
-        if (this.localSeat === 'gunner') {
+        // Gunner / passenger ride along; only healthy pilot flies
+        if (this.localSeat === 'gunner' || this.localSeat === 'passenger') {
           this._rideAlongGunner(dt, v, controller, input);
-        } else {
+        } else if (this.localSeat === 'pilot') {
           this._driveHeli(dt, v, controller, input, yaw);
+        } else {
+          this._rideAlongGunner(dt, v, controller, input);
         }
         this._updateRearm(dt, v);
         this._updateEcmAuto(dt, v, input);
+      }
+      // Keep controller snapped to the actual seat (not rotor hub)
+      const seat = this.getSeatWorldPose();
+      if (seat) {
+        controller.pos.set(seat.x, seat.y, seat.z);
+        controller.vel.set(v.vx || 0, v.vy || 0, v.vz || 0);
+        controller.grounded = v.type === 'motorcycle';
+        controller.speed = Math.hypot(v.vx || 0, v.vz || 0);
+        controller.prevPos?.copy?.(controller.pos);
       }
     } catch (err) {
       console.warn('[vehicles] drive failed — recovering', err);
       this._sanitizeVehicle(v);
       if (v.root) v.root.position.set(v.x, v.y, v.z);
-      const cfg = v.type === 'helicopter' ? VEHICLES.HELICOPTER : VEHICLES.MOTORCYCLE;
-      controller.pos.set(v.x, v.y + (cfg.seatY ?? 1), v.z);
+      const seat = this.getSeatWorldPose();
+      if (seat) controller.pos.set(seat.x, seat.y, seat.z);
+      else {
+        const cfg = v.type === 'helicopter' ? VEHICLES.HELICOPTER : VEHICLES.MOTORCYCLE;
+        controller.pos.set(v.x, v.y + (cfg.seatY ?? 1), v.z);
+      }
       controller.vel.set(0, 0, 0);
       controller.prevPos?.copy?.(controller.pos);
     }
@@ -823,7 +1298,7 @@ export class VehicleSystem {
   _rideAlongGunner(dt, v, controller, input) {
     const cfg = VEHICLES.HELICOPTER;
     // Solo gunner (no remote pilot): autopilot hover so you can map-target safely.
-    // Multiplayer: remote pilot drives; gunner just rides along.
+    // Multiplayer: remote pilot drives via applyPartyPeers — just sit in seat.
     const remotePilot = v.seats?.pilot && v.seats.pilot !== 'local';
     if (!remotePilot) {
       v.vx *= Math.exp(-2.2 * dt);
@@ -836,11 +1311,23 @@ export class VehicleSystem {
         v.root.position.set(v.x, v.y, v.z);
         v.root.rotation.y = v.yaw;
       }
+    } else {
+      // Keep mesh glued to latest applied pilot transform (belt-and-suspenders)
+      if (v.root) {
+        v.root.position.set(v.x, v.y, v.z);
+        v.root.rotation.y = v.yaw;
+      }
     }
-    controller.pos.set(v.x, v.y + (cfg.seatY ?? 1.1), v.z);
-    controller.vel.set(v.vx, v.vy, v.vz);
+    // Always snap to gunner seat on the shared airframe (not cabin center)
+    const seat = this.getSeatWorldPoseFor(v, 'gunner');
+    if (seat) {
+      controller.pos.set(seat.x, seat.y, seat.z);
+    } else {
+      controller.pos.set(v.x, v.y + (cfg.seatY ?? 1.1), v.z);
+    }
+    controller.vel.set(v.vx || 0, v.vy || 0, v.vz || 0);
     controller.grounded = false;
-    controller.speed = Math.hypot(v.vx, v.vz);
+    controller.speed = Math.hypot(v.vx || 0, v.vz || 0);
     controller.prevPos?.copy?.(controller.pos);
 
     // Gunner hotkeys
@@ -1013,7 +1500,21 @@ export class VehicleSystem {
     v.rocketsLeft = 0;
     v.rocketsRight = 0;
     v.flares = 0;
-    if (this.active === v) this.active = null;
+    // Eject local rider onto the wreck deck (don't leave them floating in the sky)
+    if (this.active === v) {
+      this._pendingCrashEject = {
+        x: v.x,
+        y: v.y + 0.6,
+        z: v.z,
+        yaw: v.yaw,
+      };
+      if (v.seats) {
+        if (v.seats.pilot === 'local') v.seats.pilot = null;
+        if (v.seats.gunner === 'local') v.seats.gunner = null;
+      }
+      this.active = null;
+      this.localSeat = 'pilot';
+    }
     if (v.root) {
       v.root.position.set(v.x, v.y, v.z);
       v.root.rotation.x = 0.25 + Math.min(0.5, speed * 0.012);
@@ -1066,94 +1567,73 @@ export class VehicleSystem {
    * Gunner fires dual rockets.
    * MAP mode  → guided seek to map pin (rooftops land on roof deck).
    * FREE mode → pure dumbfire: straight out of the pods, hit first thing.
+   * Successful fires emit `vehicle:rocket_net` so party peers can see the volley.
    */
   tryFireRockets(targets = [], aim = null) {
+    this._lastFireDeny = null;
     const v = this.active;
-    if (!v || v.type !== 'helicopter') return false;
-    // Only gunner fires (solo: swap to gunner with V)
-    if (this.localSeat !== 'gunner') return false;
-    if (v.rocketCd > 0) return false;
-    const left = v.rocketsLeft ?? 0;
-    const right = v.rocketsRight ?? 0;
-    if (left <= 0 && right <= 0) return false;
+    if (!v || v.type !== 'helicopter') {
+      this._lastFireDeny = 'Not in a helicopter';
+      return false;
+    }
+    if (this.localSeat !== 'gunner') {
+      this._lastFireDeny = 'GUNNER ONLY — press V to take gunner seat';
+      return false;
+    }
+    if (v.wrecked || v.destroyed) {
+      this._lastFireDeny = 'Heli is wrecked';
+      return false;
+    }
+    if (v.rocketCd > 0) {
+      this._lastFireDeny = `Cooldown ${v.rocketCd.toFixed(1)}s`;
+      return false;
+    }
+    // Heal corrupted counters only (not empty — rearm pad for that)
+    const nPer = VEHICLES.HELICOPTER?.rocketsPerSide ?? 8;
+    if (!Number.isFinite(v.rocketsLeft) || v.rocketsLeft < 0) v.rocketsLeft = nPer;
+    if (!Number.isFinite(v.rocketsRight) || v.rocketsRight < 0) v.rocketsRight = nPer;
+    const left = v.rocketsLeft | 0;
+    const right = v.rocketsRight | 0;
+    if (left <= 0 && right <= 0) {
+      this._lastFireDeny = 'No rockets — land on a rearm pad';
+      return false;
+    }
 
     const cfg = VEHICLES.HELICOPTER;
     const minR = cfg.rocketMinRange ?? 18;
     const maxR = cfg.rocketMaxRange ?? 220;
-    const mode = v.aimMode === 'map' ? 'map' : 'direct';
+    // Map mode without a pin → fall back to dumbfire (don't soft-lock the player)
+    let mode = v.aimMode === 'map' ? 'map' : 'direct';
+    if (mode === 'map' && !v.mapTarget) mode = 'direct';
 
     const bodyF = forwardXZ(v.yaw);
-    const bodyR = rightXZ(v.yaw);
     const speed = cfg.rocketSpeed ?? 92;
-    const nPer = cfg.rocketsPerSide ?? 8;
 
     // ── FREE AIM: dumbfire only — no lock, no seek ─────────────────────
     if (mode === 'direct') {
-      // Exactly along heli nose (pod aim), level with airframe — no look curve
-      const fireDir = new THREE.Vector3(bodyF.x, 0, bodyF.z).normalize();
-
-      const fireSide = (side, remaining, tubes) => {
-        if (remaining <= 0) return;
-        const idx = nPer - remaining;
-        const tube = tubes?.[idx];
-        if (tube) {
-          tube.visible = false;
-          tube.userData.loaded = false;
-        }
-        // Spawn at pod hardpoints, velocity pure forward
-        const ox = v.x + bodyR.x * side * 1.7 + bodyF.x * 0.55;
-        const oy = v.y + 0.7 + (idx % 4) * 0.05;
-        const oz = v.z + bodyR.z * side * 1.7 + bodyF.z * 0.55;
-        const mesh = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.08, 0.1, 0.9, 6),
-          new THREE.MeshStandardMaterial({
-            color: 0xc8b060,
-            metalness: 0.5,
-            roughness: 0.35,
-            emissive: 0x402000,
-            emissiveIntensity: 0.35,
-          })
-        );
-        mesh.position.set(ox, oy, oz);
-        try {
-          mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), fireDir.clone());
-        } catch { /* ok */ }
-        this.group.add(mesh);
-
-        this._rockets.push({
-          mesh,
-          x: ox, y: oy, z: oz,
-          vx: fireDir.x * speed,
-          vy: fireDir.y * speed, // 0 — level
-          vz: fireDir.z * speed,
-          speed,
-          life: 5.5,
-          age: 0,
-          phase: 'boost',
-          boostT: 99, // never enter guide phase
-          damage: cfg.rocketDamage ?? 95,
-          splash: cfg.rocketSplash ?? 5.5,
-          targets,
-          guided: false, // DUMBFIRE
-          turnRate: 0,
-          lock: null,
-          lockTarget: null,
-          lockHeli: null,
-          accuracy: 1,
-          owner: v,
-          aimMode: 'direct',
-          noGravity: true,
-        });
-        this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(ox, oy, oz), 1.6);
-      };
-
-      if (left > 0) {
-        fireSide(-1, left, v.root.userData.leftTubes);
-        v.rocketsLeft = left - 1;
-      }
-      if (right > 0) {
-        fireSide(1, right, v.root.userData.rightTubes);
-        v.rocketsRight = right - 1;
+      const fireDir = new THREE.Vector3(bodyF.x, 0, bodyF.z);
+      if (fireDir.lengthSq() < 1e-8) fireDir.set(0, 0, -1);
+      fireDir.normalize();
+      const volley = this._spawnRocketVolley(v, {
+        mode: 'direct',
+        fireDir,
+        speed,
+        nPer,
+        targets,
+        guided: false,
+        boostT: 99,
+        life: 5.5,
+        turnRate: 0,
+        lock: null,
+        noGravity: true,
+        fireLeft: left > 0,
+        fireRight: right > 0,
+        leftBefore: left,
+        rightBefore: right,
+      });
+      if (!volley.ok) {
+        this._lastFireDeny = 'Spawn failed';
+        return false;
       }
       v.rocketCd = cfg.rocketCooldown ?? 0.45;
       this.bus?.emit?.('vehicle:rocket', {
@@ -1161,11 +1641,25 @@ export class VehicleSystem {
         right: v.rocketsRight,
         mode: 'direct',
       });
+      this._emitRocketNet(v, {
+        mode: 'direct',
+        dirX: fireDir.x, dirY: fireDir.y, dirZ: fireDir.z,
+        fireLeft: left > 0,
+        fireRight: right > 0,
+        leftBefore: left,
+        rightBefore: right,
+        guided: false,
+        boostT: 99,
+        life: 5.5,
+      }, volley.projectiles);
       return true;
     }
 
     // ── MAP MODE: guided pin strike ────────────────────────────────────
-    if (!v.mapTarget) return false;
+    if (!v.mapTarget) {
+      this._lastFireDeny = 'MAP mode needs a lock (M click or T for free-aim)';
+      return false;
+    }
     let lock = { ...v.mapTarget };
     if (lock.target && !lock.target.dead) {
       lock.x = lock.target.x;
@@ -1188,25 +1682,20 @@ export class VehicleSystem {
       kind: lock.kind, id: lock.id, target: lock.target,
     };
 
-    // Path profile: loft if target is above heli, else fly straight to pin
     const launchY = v.y + 0.7;
     const horiz = Math.hypot(lock.x - v.x, lock.z - v.z);
     const altDelta = lock.y - launchY;
-    const needLoft = altDelta > 4; // target clearly above launch
-    // Climb high enough to clear, then dive onto the pin
+    const needLoft = altDelta > 4;
     const loftExtra = Math.min(45, Math.max(12, altDelta + 10 + horiz * 0.08));
     const loftY = (needLoft ? lock.y : launchY) + (needLoft ? loftExtra : 0);
-    // Loft waypoint ~halfway to target horizontally, at loft altitude
     const loftT = 0.42;
     const loftX = v.x + (lock.x - v.x) * loftT;
     const loftZ = v.z + (lock.z - v.z) * loftT;
 
-    // Leave tubes: climb-out if lofting, else nose-forward toward target
     let fireDir;
     if (needLoft) {
       fireDir = new THREE.Vector3(bodyF.x * 0.75, 0.65, bodyF.z * 0.75).normalize();
     } else {
-      // Point roughly at target (higher → lower strike)
       const tx = lock.x - v.x;
       const ty = lock.y - launchY;
       const tz = lock.z - v.z;
@@ -1218,71 +1707,26 @@ export class VehicleSystem {
       ).normalize();
     }
 
-    const fireSide = (side, remaining, tubes) => {
-      if (remaining <= 0) return;
-      const idx = nPer - remaining;
-      const tube = tubes?.[idx];
-      if (tube) {
-        tube.visible = false;
-        tube.userData.loaded = false;
-      }
-      const ox = v.x + bodyR.x * side * 1.7 + bodyF.x * 0.55;
-      const oy = v.y + 0.7 + (idx % 4) * 0.05;
-      const oz = v.z + bodyR.z * side * 1.7 + bodyF.z * 0.55;
-      const mesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.08, 0.1, 0.9, 6),
-        new THREE.MeshStandardMaterial({
-          color: 0xc8b060,
-          metalness: 0.5,
-          roughness: 0.35,
-          emissive: 0x402000,
-          emissiveIntensity: 0.35,
-        })
-      );
-      mesh.position.set(ox, oy, oz);
-      try {
-        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), fireDir.clone());
-      } catch { /* ok */ }
-      this.group.add(mesh);
-
-      this._rockets.push({
-        mesh,
-        x: ox, y: oy, z: oz,
-        vx: fireDir.x * speed,
-        vy: fireDir.y * speed,
-        vz: fireDir.z * speed,
-        speed,
-        life: needLoft ? 8 : 6,
-        age: 0,
-        phase: 'boost',
-        boostT: needLoft ? 0.28 : (cfg.rocketBoostTime ?? 0.35),
-        damage: cfg.rocketDamage ?? 95,
-        splash: cfg.rocketSplash ?? 5.5,
-        targets,
-        guided: true,
-        turnRate: (cfg.rocketTurnRate ?? 3.8) * (needLoft ? 1.5 : 1.35),
-        lock: { ...lockPoint },
-        lockTarget: lockPoint.target ?? null,
-        lockHeli: lock.kind === 'heli' ? lock.target : null,
-        accuracy: 0.98,
-        owner: v,
-        aimMode: 'map',
-        // Loft profile when striking a higher target (e.g. roof from street level)
-        mapPath: needLoft ? 'loft' : 'direct',
-        loftX, loftY, loftZ,
-        guidePhase: needLoft ? 'climb' : 'terminal', // climb → terminal dive
-      });
-      this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(ox, oy, oz), 1.6);
-    };
-
-    if (left > 0) {
-      fireSide(-1, left, v.root.userData.leftTubes);
-      v.rocketsLeft = left - 1;
-    }
-    if (right > 0) {
-      fireSide(1, right, v.root.userData.rightTubes);
-      v.rocketsRight = right - 1;
-    }
+    const volley = this._spawnRocketVolley(v, {
+      mode: 'map',
+      fireDir,
+      speed,
+      nPer,
+      targets,
+      guided: true,
+      boostT: needLoft ? 0.28 : (cfg.rocketBoostTime ?? 0.35),
+      life: needLoft ? 8 : 6,
+      turnRate: (cfg.rocketTurnRate ?? 3.8) * (needLoft ? 1.5 : 1.35),
+      lock: lockPoint,
+      mapPath: needLoft ? 'loft' : 'direct',
+      loftX, loftY, loftZ,
+      guidePhase: needLoft ? 'climb' : 'terminal',
+      fireLeft: left > 0,
+      fireRight: right > 0,
+      leftBefore: left,
+      rightBefore: right,
+    });
+    if (!volley.ok) return false;
     v.rocketCd = cfg.rocketCooldown ?? 0.45;
     this.bus?.emit?.('vehicle:rocket', {
       left: v.rocketsLeft,
@@ -1291,7 +1735,360 @@ export class VehicleSystem {
       dist,
       mode: 'map',
     });
+    this._emitRocketNet(v, {
+      mode: 'map',
+      dirX: fireDir.x, dirY: fireDir.y, dirZ: fireDir.z,
+      fireLeft: left > 0,
+      fireRight: right > 0,
+      leftBefore: left,
+      rightBefore: right,
+      guided: true,
+      boostT: needLoft ? 0.28 : (cfg.rocketBoostTime ?? 0.35),
+      life: needLoft ? 8 : 6,
+      turnRate: (cfg.rocketTurnRate ?? 3.8) * (needLoft ? 1.5 : 1.35),
+      lockX: lockPoint.x,
+      lockY: lockPoint.y,
+      lockZ: lockPoint.z,
+      lockKind: lockPoint.kind || null,
+      mapPath: needLoft ? 'loft' : 'direct',
+      loftX, loftY, loftZ,
+      guidePhase: needLoft ? 'climb' : 'terminal',
+    }, volley.projectiles);
     return true;
+  }
+
+  /** Party payload so pilot / spectators see gunner missiles. */
+  _emitRocketNet(v, extra = {}, projectiles = []) {
+    const volleySeq = (this._rocketVolleySeq = (this._rocketVolleySeq || 0) + 1);
+    const n = projectiles.length;
+    // Tag newest local rockets (end of list) so impacts match on peers
+    let tagged = 0;
+    for (let i = this._rockets.length - 1; i >= 0 && tagged < n; i--) {
+      const r = this._rockets[i];
+      if (r.remote || r.netId != null) continue;
+      const idx = n - 1 - tagged;
+      r.volleySeq = volleySeq;
+      r.netId = volleySeq * 10 + idx;
+      if (projectiles[idx]) projectiles[idx].netId = r.netId;
+      tagged += 1;
+    }
+    this.bus?.emit?.('vehicle:rocket_net', {
+      heliId: v.id,
+      hx: v.x,
+      hy: v.y,
+      hz: v.z,
+      hyaw: v.yaw,
+      leftAfter: v.rocketsLeft,
+      rightAfter: v.rocketsRight,
+      volleySeq,
+      projectiles,
+      ...extra,
+    });
+  }
+
+  /**
+   * Spawn dual-pod rockets on a heli (local gunner or remote network volley).
+   * @returns {{ ok:boolean, projectiles:object[] }}
+   */
+  _spawnRocketVolley(v, opts) {
+    if (!v || v.type !== 'helicopter') return { ok: false, projectiles: [] };
+    const cfg = VEHICLES.HELICOPTER;
+    const bodyF = forwardXZ(v.yaw);
+    const bodyR = rightXZ(v.yaw);
+    const speed = opts.speed ?? cfg.rocketSpeed ?? 92;
+    const nPer = opts.nPer ?? cfg.rocketsPerSide ?? 8;
+    const fireDir = opts.fireDir instanceof THREE.Vector3
+      ? opts.fireDir.clone().normalize()
+      : new THREE.Vector3(
+        Number.isFinite(opts.dirX) ? opts.dirX : bodyF.x,
+        Number.isFinite(opts.dirY) ? opts.dirY : 0,
+        Number.isFinite(opts.dirZ) ? opts.dirZ : bodyF.z
+      ).normalize();
+    const targets = opts.targets || [];
+    /** @type {object[]} */
+    const projectiles = [];
+
+    const fireSide = (side, remainingBefore, tubes) => {
+      if (remainingBefore <= 0) return;
+      const idx = Math.max(0, nPer - remainingBefore);
+      const tube = tubes?.[idx];
+      if (tube) {
+        tube.visible = false;
+        tube.userData.loaded = false;
+      }
+      const ox = v.x + bodyR.x * side * 1.7 + bodyF.x * 0.55;
+      const oy = v.y + 0.7 + (idx % 4) * 0.05;
+      const oz = v.z + bodyR.z * side * 1.7 + bodyF.z * 0.55;
+      const vx = fireDir.x * speed;
+      const vy = fireDir.y * speed;
+      const vz = fireDir.z * speed;
+      this._pushRocket({
+        x: ox, y: oy, z: oz, vx, vy, vz, speed,
+        owner: v,
+        targets,
+        mode: opts.mode || 'direct',
+        guided: !!opts.guided,
+        boostT: opts.boostT ?? 99,
+        life: opts.life ?? 5.5,
+        turnRate: opts.turnRate ?? 0,
+        lock: opts.lock
+          ? { x: opts.lock.x, y: opts.lock.y, z: opts.lock.z, kind: opts.lock.kind, id: opts.lock.id }
+          : null,
+        lockTarget: opts.lock?.target ?? null,
+        mapPath: opts.mapPath || null,
+        loftX: opts.loftX, loftY: opts.loftY, loftZ: opts.loftZ,
+        guidePhase: opts.guidePhase || null,
+        noGravity: opts.noGravity !== false && !opts.guided,
+        remote: !!opts.remote,
+      });
+      projectiles.push({
+        x: ox, y: oy, z: oz, vx, vy, vz, speed,
+        side,
+        mode: opts.mode || 'direct',
+        guided: !!opts.guided,
+        boostT: opts.boostT ?? 99,
+        life: opts.life ?? 5.5,
+        turnRate: opts.turnRate ?? 0,
+        lockX: opts.lock?.x, lockY: opts.lock?.y, lockZ: opts.lock?.z,
+        lockKind: opts.lock?.kind || null,
+        mapPath: opts.mapPath || null,
+        loftX: opts.loftX, loftY: opts.loftY, loftZ: opts.loftZ,
+        guidePhase: opts.guidePhase || null,
+      });
+    };
+
+    const leftBefore = opts.leftBefore ?? (v.rocketsLeft ?? 0);
+    const rightBefore = opts.rightBefore ?? (v.rocketsRight ?? 0);
+    if (opts.fireLeft !== false && leftBefore > 0) {
+      fireSide(-1, leftBefore, v.root?.userData?.leftTubes);
+      v.rocketsLeft = Math.max(0, leftBefore - 1);
+    }
+    if (opts.fireRight !== false && rightBefore > 0) {
+      fireSide(1, rightBefore, v.root?.userData?.rightTubes);
+      v.rocketsRight = Math.max(0, rightBefore - 1);
+    }
+    return { ok: projectiles.length > 0, projectiles };
+  }
+
+  /**
+   * Create one live rocket mesh + sim entry.
+   * @param {object} p
+   */
+  _pushRocket(p) {
+    const cfg = VEHICLES.HELICOPTER;
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.1, 0.9, 6),
+      new THREE.MeshStandardMaterial({
+        color: 0xc8b060,
+        metalness: 0.5,
+        roughness: 0.35,
+        emissive: 0x402000,
+        emissiveIntensity: 0.55,
+      })
+    );
+    mesh.position.set(p.x, p.y, p.z);
+    const dir = new THREE.Vector3(p.vx, p.vy, p.vz);
+    if (dir.lengthSq() > 1e-6) {
+      dir.normalize();
+      try {
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      } catch { /* ok */ }
+    }
+    this.group.add(mesh);
+
+    this._rockets.push({
+      mesh,
+      x: p.x, y: p.y, z: p.z,
+      vx: p.vx, vy: p.vy, vz: p.vz,
+      speed: p.speed ?? cfg.rocketSpeed ?? 92,
+      life: p.life ?? 5.5,
+      age: 0,
+      pathDist: 0,
+      // Don't arm fuse until clear of the launching airframe
+      sx: p.x, sy: p.y, sz: p.z,
+      armDist: p.armDist ?? 12,
+      phase: 'boost',
+      boostT: p.boostT ?? 99,
+      damage: cfg.rocketDamage ?? 140,
+      splash: cfg.rocketSplash ?? 18,
+      splashInner: cfg.rocketSplashInner ?? 5,
+      splashMinMult: cfg.rocketSplashMinMult ?? 0.2,
+      vehicleMult: cfg.rocketVehicleMult ?? 1.15,
+      targets: p.targets || [],
+      guided: !!p.guided,
+      turnRate: p.turnRate ?? 0,
+      lock: p.lock || null,
+      lockTarget: p.lockTarget ?? null,
+      lockHeli: p.lock?.kind === 'heli' ? p.lockTarget : null,
+      accuracy: p.guided ? 0.98 : 1,
+      owner: p.owner || null,
+      ownerId: p.owner?.id || p.ownerId || null,
+      aimMode: p.mode || 'direct',
+      noGravity: p.noGravity !== false && !p.guided,
+      mapPath: p.mapPath || null,
+      loftX: p.loftX, loftY: p.loftY, loftZ: p.loftZ,
+      guidePhase: p.guidePhase || null,
+      remote: !!p.remote,
+      // Network identity (impact sync)
+      netId: p.netId ?? null,
+      volleySeq: p.volleySeq ?? null,
+      // Remote rockets: fly visually, detonate at networked impact
+      visualOnly: !!p.visualOnly || !!p.remote,
+      pendingImpact: null,
+    });
+    const bloom = p.remote ? 3.2 : 1.8;
+    this.effects?.spawnMuzzleBloom?.(new THREE.Vector3(p.x, p.y, p.z), bloom);
+    this.effects?.spawnTracer?.(
+      new THREE.Vector3(p.x, p.y, p.z),
+      new THREE.Vector3(p.x + p.vx * 0.12, p.y + p.vy * 0.12, p.z + p.vz * 0.12),
+      { long: true, life: p.remote ? 0.35 : 0.15 }
+    );
+  }
+
+  /**
+   * Spawn rockets fired by a remote gunner (party relay).
+   * Prefers absolute `projectiles[]` from the gunner (reliable).
+   * Pilot sees launch + flight + splash on their screen.
+   * @param {object} msg party rocket packet
+   * @param {Array} [targets]
+   */
+  spawnNetworkRockets(msg, targets = []) {
+    if (!msg) return false;
+
+    // Prefer absolute projectile snapshots from the shooter
+    const list = Array.isArray(msg.projectiles) ? msg.projectiles : null;
+    if (list && list.length) {
+      let spawned = 0;
+      // Owning airframe — critical so fuse doesn't detonate on our own heli
+      const ownerHeli = (msg.heliId && this.getById(msg.heliId))
+        || this.active
+        || null;
+      const volleySeq = msg.volleySeq || msg.seq || 0;
+      for (let pi = 0; pi < list.length; pi++) {
+        const pr = list[pi];
+        let x = Number(pr.x);
+        let y = Number(pr.y);
+        let z = Number(pr.z);
+        let vx = Number(pr.vx);
+        let vy = Number(pr.vy);
+        let vz = Number(pr.vz);
+        if (![x, y, z].every(Number.isFinite)) continue;
+        // Recover zero velocity (bad pack) from heli nose if needed
+        let sp = Math.hypot(vx || 0, vy || 0, vz || 0);
+        if (sp < 5) {
+          const yaw = Number(msg.hyaw) || ownerHeli?.yaw || 0;
+          const f = forwardXZ(yaw);
+          const speed = VEHICLES.HELICOPTER?.rocketSpeed ?? 92;
+          vx = f.x * speed;
+          vy = 0;
+          vz = f.z * speed;
+          sp = speed;
+          // Spawn slightly ahead of fire-time heli so we clear the airframe
+          if (Number.isFinite(msg.hx)) {
+            x = msg.hx + f.x * 4;
+            y = (msg.hy ?? y) + 0.5;
+            z = msg.hz + f.z * 4;
+          }
+        } else {
+          // Nudge spawn forward along velocity so we don't start inside the cabin
+          const inv = 1 / sp;
+          x += vx * inv * 3;
+          y += vy * inv * 3;
+          z += vz * inv * 3;
+        }
+        const lock = (pr.lockX != null)
+          ? { x: +pr.lockX, y: +pr.lockY, z: +pr.lockZ, kind: pr.lockKind || 'ground' }
+          : (msg.lockX != null
+            ? { x: +msg.lockX, y: +msg.lockY, z: +msg.lockZ, kind: msg.lockKind || 'ground' }
+            : null);
+        this._pushRocket({
+          x, y, z,
+          vx, vy, vz,
+          speed: sp || Number(pr.speed) || undefined,
+          targets,
+          mode: pr.mode || msg.mode || 'direct',
+          guided: !!(pr.guided ?? msg.guided),
+          boostT: pr.boostT ?? msg.boostT ?? 99,
+          life: pr.life ?? msg.life ?? 5.5,
+          turnRate: pr.turnRate ?? msg.turnRate ?? 0,
+          lock,
+          mapPath: pr.mapPath || msg.mapPath || null,
+          loftX: pr.loftX ?? msg.loftX,
+          loftY: pr.loftY ?? msg.loftY,
+          loftZ: pr.loftZ ?? msg.loftZ,
+          guidePhase: pr.guidePhase || msg.guidePhase || null,
+          noGravity: !(pr.guided ?? msg.guided),
+          remote: true,
+          visualOnly: true,
+          owner: ownerHeli,
+          ownerId: msg.heliId || ownerHeli?.id || null,
+          armDist: 14,
+          netId: pr.netId ?? (volleySeq * 10 + pi),
+          volleySeq,
+        });
+        spawned += 1;
+      }
+      // Don't overwrite local ammo if we're the ones shooting this bird
+      const v = msg.heliId ? this.getById(msg.heliId) : null;
+      if (v && this.active !== v) {
+        if (msg.leftAfter != null) v.rocketsLeft = msg.leftAfter;
+        if (msg.rightAfter != null) v.rocketsRight = msg.rightAfter;
+      }
+      return spawned > 0;
+    }
+
+    // Fallback: reconstruct from heli pose (older packets)
+    let v = msg.heliId ? this.getById(msg.heliId) : null;
+    if (!v) v = this._resolvePeerVehicle?.({ heliId: msg.heliId, x: msg.hx, z: msg.hz, y: msg.hy, seat: 'gunner' });
+    if (!v || v.type !== 'helicopter') {
+      v = {
+        id: msg.heliId || 'remote_heli',
+        type: 'helicopter',
+        x: msg.hx ?? 0,
+        y: msg.hy ?? 0,
+        z: msg.hz ?? 0,
+        yaw: msg.hyaw ?? 0,
+        rocketsLeft: msg.leftAfter ?? 8,
+        rocketsRight: msg.rightAfter ?? 8,
+        root: null,
+      };
+    } else if (Number.isFinite(msg.hx)) {
+      v.x = msg.hx;
+      v.y = msg.hy ?? v.y;
+      v.z = msg.hz ?? v.z;
+      if (Number.isFinite(msg.hyaw)) v.yaw = msg.hyaw;
+      if (v.root) {
+        v.root.position.set(v.x, v.y, v.z);
+        v.root.rotation.y = v.yaw;
+      }
+    }
+
+    const lock = (msg.lockX != null)
+      ? { x: msg.lockX, y: msg.lockY, z: msg.lockZ, kind: msg.lockKind || 'ground' }
+      : null;
+
+    const res = this._spawnRocketVolley(v, {
+      mode: msg.mode || 'direct',
+      dirX: msg.dirX,
+      dirY: msg.dirY,
+      dirZ: msg.dirZ,
+      fireLeft: msg.fireLeft !== false,
+      fireRight: msg.fireRight !== false,
+      leftBefore: msg.leftBefore ?? ((msg.leftAfter ?? 0) + 1),
+      rightBefore: msg.rightBefore ?? ((msg.rightAfter ?? 0) + 1),
+      targets,
+      guided: !!msg.guided,
+      boostT: msg.boostT ?? (msg.guided ? 0.35 : 99),
+      life: msg.life ?? (msg.guided ? 6 : 5.5),
+      turnRate: msg.turnRate ?? 0,
+      lock,
+      mapPath: msg.mapPath || null,
+      loftX: msg.loftX, loftY: msg.loftY, loftZ: msg.loftZ,
+      guidePhase: msg.guidePhase || null,
+      noGravity: !msg.guided,
+      remote: true,
+    });
+    return res.ok;
   }
 
   /** Unit look vector from yaw/pitch (matches PlayerCamera YXZ convention). */
@@ -1424,11 +2221,87 @@ export class VehicleSystem {
     return null;
   }
 
+  /**
+   * Peer reported impact — snap remote rocket to that point and boom.
+   * Gunner is authority; this keeps pilot impacts matching.
+   */
+  applyNetworkImpact({ netId, volleySeq, x, y, z }) {
+    const tx = Number(x);
+    const ty = Number(y);
+    const tz = Number(z);
+    if (![tx, ty, tz].every(Number.isFinite)) return false;
+    for (let i = this._rockets.length - 1; i >= 0; i--) {
+      const r = this._rockets[i];
+      if (!r.remote && !r.visualOnly) continue;
+      if (netId != null && r.netId === netId) {
+        this._explodeRocket(r, tx, ty, tz, { silentNet: true });
+        this._rockets.splice(i, 1);
+        return true;
+      }
+    }
+    // Fallback: first remote rocket of this volley still flying
+    if (volleySeq != null) {
+      for (let i = this._rockets.length - 1; i >= 0; i--) {
+        const r = this._rockets[i];
+        if (!r.remote && !r.visualOnly) continue;
+        if (r.volleySeq === volleySeq) {
+          this._explodeRocket(r, tx, ty, tz, { silentNet: true });
+          this._rockets.splice(i, 1);
+          return true;
+        }
+      }
+    }
+    // Rocket already gone — still show boom at gunner's true impact
+    const pt = new THREE.Vector3(tx, ty, tz);
+    this.effects?.spawnExplosion?.(pt, 2.2);
+    this.effects?.spawnImpact?.(pt, 'solid');
+    this.effects?.spawnMuzzleBloom?.(pt, 5);
+    return true;
+  }
+
   _updateRockets(dt) {
     for (let i = this._rockets.length - 1; i >= 0; i--) {
       const r = this._rockets[i];
       r.life -= dt;
       r.age = (r.age ?? 0) + dt;
+
+      // Remote / visual-only: coast along velocity, wait for networked impact
+      if (r.visualOnly || r.remote) {
+        if (r.pendingImpact) {
+          const pi = r.pendingImpact;
+          r.x = pi.x; r.y = pi.y; r.z = pi.z;
+          this._explodeRocket(r, pi.x, pi.y, pi.z, { silentNet: true });
+          this._rockets.splice(i, 1);
+          continue;
+        }
+        r.x += (r.vx || 0) * dt;
+        r.y += (r.vy || 0) * dt;
+        r.z += (r.vz || 0) * dt;
+        if (r.mesh) {
+          r.mesh.position.set(r.x, r.y, r.z);
+          const sp = Math.hypot(r.vx, r.vy, r.vz) || 1;
+          try {
+            r.mesh.quaternion.setFromUnitVectors(
+              new THREE.Vector3(0, 1, 0),
+              new THREE.Vector3(r.vx / sp, r.vy / sp, r.vz / sp)
+            );
+          } catch { /* */ }
+        }
+        if ((r._trailAcc = (r._trailAcc || 0) + dt) > 0.04) {
+          r._trailAcc = 0;
+          this.effects?.spawnBallisticTrace?.(
+            new THREE.Vector3(r.x - r.vx * 0.02, r.y - r.vy * 0.02, r.z - r.vz * 0.02),
+            new THREE.Vector3(r.x, r.y, r.z),
+            { bright: true, life: 0.22 }
+          );
+        }
+        // Timeout: no impact packet — soft boom at current (shouldn't happen often)
+        if (r.life <= 0) {
+          this._explodeRocket(r, r.x, r.y, r.z, { silentNet: true });
+          this._rockets.splice(i, 1);
+        }
+        continue;
+      }
 
       // FREE dumbfire: never guide, never gravity-curve — laser-straight
       if (r.aimMode === 'direct' || r.guided === false || r.noGravity) {
@@ -1520,6 +2393,15 @@ export class VehicleSystem {
 
       const steps = Math.max(1, Math.ceil(Math.hypot(r.vx, r.vy, r.vz) * dt / 1.5));
       let hit = false;
+      // Unarmed until clear of the launch heli (remote rockets used to nuke the bird instantly)
+      const flown = Math.hypot(
+        r.x - (r.sx ?? r.x),
+        r.y - (r.sy ?? r.y),
+        r.z - (r.sz ?? r.z)
+      );
+      r.pathDist = flown;
+      const armed = r.age >= 0.18 || flown >= (r.armDist ?? 12);
+
       for (let s = 0; s < steps && !hit; s++) {
         const sp = Math.hypot(r.vx, r.vy, r.vz) || 1;
         const d = (Math.hypot(r.vx, r.vy, r.vz) * dt) / steps;
@@ -1529,6 +2411,12 @@ export class VehicleSystem {
         const nx = r.x + dx;
         const ny = r.y + dy;
         const nz = r.z + dz;
+
+        // Coast clear of pods / cabin before any fuse or solid checks
+        if (!armed) {
+          r.x = nx; r.y = ny; r.z = nz;
+          continue;
+        }
 
         // Proximity fuse on final target — MAP guided only, and only after climb (if lofting)
         const canFuse = r.guided && r.lock && r.age > 0.15
@@ -1597,29 +2485,39 @@ export class VehicleSystem {
           hit = true;
           break;
         }
-        // Air-to-air proximity on helicopters
+        // Air-to-air proximity fuse — never the launching heli
         for (const h of this.vehicles) {
-          if (h.type !== 'helicopter' || h === r.owner || h.wrecked) continue;
+          if (h.type !== 'helicopter' || h.wrecked) continue;
+          if (h === r.owner || (r.ownerId && h.id === r.ownerId)) continue;
+          // Also ignore active local bird if it's the same launch platform
+          if (this.active && h === this.active && r.remote) continue;
           const hd = Math.hypot(h.x - nx, (h.y + 1) - ny, h.z - nz);
-          if (hd < 2.8) {
+          if (hd < 3.5) {
             this._explodeRocket(r, nx, ny, nz);
-            // Damage airframe
-            h.health = Math.max(0, (h.health ?? 100) - (r.damage ?? 95) * 0.65);
-            if (h.health <= 0 && !h.crashing) {
-              h.crashing = true;
-              h.crashT = 0;
-              h.vy = Math.min(h.vy, -4);
-            }
             hit = true;
             break;
           }
         }
         if (hit) break;
+        // Proximity fuse on infantry / targets in flight path
         if (r.targets?.length) {
           for (const t of r.targets) {
             if (t.dead) continue;
             const dist = Math.hypot(t.x - nx, (t.y + 1) - ny, t.z - nz);
-            if (dist < 1.5) {
+            if (dist < 2.2) {
+              this._explodeRocket(r, nx, ny, nz);
+              hit = true;
+              break;
+            }
+          }
+        }
+        // Also fuse near any live splash entity (bots that joined after fire)
+        if (!hit && typeof this._getSplashTargets === 'function') {
+          const live = this._getSplashTargets() || [];
+          for (const t of live) {
+            if (!t || t.dead) continue;
+            const dist = Math.hypot((t.x ?? 0) - nx, ((t.y ?? 0) + 1) - ny, (t.z ?? 0) - nz);
+            if (dist < 2.2) {
               this._explodeRocket(r, nx, ny, nz);
               hit = true;
               break;
@@ -1702,36 +2600,198 @@ export class VehicleSystem {
     return false;
   }
 
-  _explodeRocket(r, x, y, z) {
+  /**
+   * Detonate warhead: visual boom + radius damage to infantry, vehicles, player.
+   * Falloff: full damage inside splashInner, down to splashMinMult at outer edge.
+   * @param {object} r
+   * @param {number} x
+   * @param {number} y
+   * @param {number} z
+   * @param {{ silentNet?: boolean }} [opts] silentNet = don't re-broadcast (already remote impact)
+   */
+  _explodeRocket(r, x, y, z, opts = null) {
+    if (r._exploded) return;
+    r._exploded = true;
     if (r.mesh) {
       this.group.remove(r.mesh);
       r.mesh.geometry?.dispose?.();
     }
     const pt = new THREE.Vector3(x, y, z);
-    // Big missile boom
-    this.effects?.spawnExplosion?.(pt, 1.65);
+    const splash = r.splash ?? VEHICLES.HELICOPTER?.rocketSplash ?? 18;
+    const dmg = r.damage ?? VEHICLES.HELICOPTER?.rocketDamage ?? 140;
+    const inner = r.splashInner ?? VEHICLES.HELICOPTER?.rocketSplashInner ?? 5;
+    const minMult = r.splashMinMult ?? VEHICLES.HELICOPTER?.rocketSplashMinMult ?? 0.2;
+    const vehMult = r.vehicleMult ?? VEHICLES.HELICOPTER?.rocketVehicleMult ?? 1.15;
+
+    // Gunner is authority for impact point — peers snap boom here
+    if (!r.remote && !opts?.silentNet && r.netId != null) {
+      this.bus?.emit?.('vehicle:rocket_impact', {
+        netId: r.netId,
+        volleySeq: r.volleySeq,
+        x, y, z,
+        heliId: r.ownerId || r.owner?.id || null,
+      });
+    }
+
+    // Scale VFX with warhead size
+    const power = 1.4 + Math.min(2.2, splash / 10);
+    this.effects?.spawnExplosion?.(pt, power);
     this.effects?.spawnImpact?.(pt, 'solid');
-    this.effects?.spawnMuzzleBloom?.(pt, 5.5);
-    // Splash damage to bots
-    const splash = r.splash ?? 5;
-    const dmg = r.damage ?? 90;
-    if (r.targets) {
-      for (const t of r.targets) {
-        if (t.dead) continue;
-        const dist = Math.hypot(t.x - x, (t.y + 1) - y, t.z - z);
-        if (dist > splash) continue;
-        const fall = 1 - dist / splash;
-        const applied = dmg * (0.35 + 0.65 * fall);
-        if (typeof t.applyDamage === 'function') t.applyDamage(applied, dist < 1.2 ? 'chest' : 'chest');
-        else if (t.health != null) {
-          t.health -= applied;
-          if (t.health <= 0) {
-            t.health = 0;
-            t.dead = true;
+    this.effects?.spawnMuzzleBloom?.(pt, 4 + splash * 0.25);
+
+    const appliedList = [];
+
+    // ── Infantry / bots / test targets ──
+    const live = typeof this._getSplashTargets === 'function'
+      ? (this._getSplashTargets() || [])
+      : (r.targets || []);
+    // Merge fire-time targets so we never miss a locked unit
+    const seen = new Set();
+    const entities = [];
+    for (const t of live) {
+      if (!t || t.dead) continue;
+      const key = t.id ?? t;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entities.push(t);
+    }
+    for (const t of r.targets || []) {
+      if (!t || t.dead) continue;
+      const key = t.id ?? t;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entities.push(t);
+    }
+
+    for (const t of entities) {
+      const ty = (t.y ?? 0) + 1.0;
+      const dist = Math.hypot((t.x ?? 0) - x, ty - y, (t.z ?? 0) - z);
+      if (dist > splash) continue;
+      const applied = this._splashFalloff(dmg, dist, splash, inner, minMult);
+      if (applied <= 0) continue;
+      let killed = false;
+      if (typeof t.applyDamage === 'function') {
+        const res = t.applyDamage(applied, dist < inner * 0.5 ? 'chest' : 'chest');
+        killed = !!res?.killed || t.dead || (t.health != null && t.health <= 0);
+      } else if (t.health != null) {
+        t.health -= applied;
+        if (t.health <= 0) {
+          t.health = 0;
+          t.dead = true;
+          killed = true;
+        }
+      }
+      appliedList.push({ kind: 'infantry', id: t.id, dmg: applied, dist, killed });
+    }
+
+    // ── Vehicles (helis + motos) ──
+    for (const h of this.vehicles) {
+      if (!h || h.wrecked || h.destroyed) continue;
+      // Don't splash-damage the firing airframe if the blast is right under it
+      // (still allow if far enough that it's a real nearby hit)
+      const hy = (h.y ?? 0) + (h.type === 'helicopter' ? 1.0 : 0.5);
+      const dist = Math.hypot((h.x ?? 0) - x, hy - y, (h.z ?? 0) - z);
+      if (dist > splash) continue;
+      // Owner aircraft only takes reduced self-splash (pod cook-off / near miss)
+      let mult = vehMult;
+      if (h === r.owner) {
+        if (dist < 4) continue; // ignore under-own-skids
+        mult *= 0.35;
+      }
+      const applied = this._splashFalloff(dmg * mult, dist, splash, inner, minMult);
+      if (applied <= 0) continue;
+      h.health = Math.max(0, (h.health ?? 100) - applied);
+      let destroyed = false;
+      if (h.health <= 0) {
+        destroyed = true;
+        if (h.type === 'helicopter') {
+          if (!h.crashing && !h.wrecked) {
+            h.crashing = true;
+            h.crashT = 0;
+            h.vy = Math.min(h.vy ?? 0, -5);
+            h.vx = (h.vx || 0) + (Math.random() - 0.5) * 4;
+            h.vz = (h.vz || 0) + (Math.random() - 0.5) * 4;
+          }
+        } else {
+          // Motorcycle — wreck in place
+          h.wrecked = true;
+          h.destroyed = true;
+          h.speed = 0;
+          if (h.root) {
+            h.root.rotation.z = (Math.random() - 0.5) * 0.8;
+            h.root.traverse((o) => {
+              if (o.isMesh && o.material?.color) {
+                o.material = o.material.clone?.() || o.material;
+                o.material.color?.setHex?.(0x2a2018);
+              }
+            });
+          }
+          if (this.active === h) {
+            this.active = null;
+            this.localSeat = 'pilot';
+          }
+        }
+      }
+      appliedList.push({
+        kind: 'vehicle',
+        id: h.id,
+        type: h.type,
+        dmg: applied,
+        dist,
+        health: h.health,
+        destroyed,
+      });
+    }
+
+    // ── Local player ──
+    if (typeof this._getLocalPlayer === 'function') {
+      const p = this._getLocalPlayer();
+      if (p && p.health > 0) {
+        const py = (p.y ?? 0) + 1.0;
+        const dist = Math.hypot((p.x ?? 0) - x, py - y, (p.z ?? 0) - z);
+        // If player is piloting the owner heli and blast is under them, skip
+        const ridingOwner = this.active && this.active === r.owner;
+        if (dist <= splash && !(ridingOwner && dist < 5)) {
+          let applied = this._splashFalloff(dmg, dist, splash, inner, minMult);
+          if (applied > 0) {
+            // Armor absorbs
+            if (p.armor > 0) {
+              const abs = Math.min(p.armor, applied);
+              p.armor -= abs;
+              applied -= abs;
+            }
+            if (applied > 0 && typeof p.applyDamage === 'function') {
+              p.applyDamage(applied);
+            } else if (applied > 0 && p.health != null) {
+              p.health = Math.max(0, p.health - applied);
+            }
+            this.bus?.emit?.('player:damage', {
+              amount: applied,
+              source: 'rocket',
+              dist,
+            });
+            appliedList.push({ kind: 'player', dmg: applied, dist });
           }
         }
       }
     }
+
+    this.bus?.emit?.('rocket:explode', {
+      x, y, z,
+      damage: dmg,
+      splash,
+      hits: appliedList,
+    });
+  }
+
+  /** Damage at distance: full to `inner`, linear down to `minMult` at `outer`. */
+  _splashFalloff(baseDmg, dist, outer, inner, minMult) {
+    if (dist <= 0) return baseDmg;
+    if (dist <= inner) return baseDmg;
+    if (dist >= outer) return 0;
+    const t = (dist - inner) / Math.max(1e-4, outer - inner);
+    const mult = 1 - t * (1 - minMult);
+    return baseDmg * mult;
   }
 
   _driveMoto(dt, v, controller, input, yaw) {
@@ -1960,21 +3020,30 @@ export class VehicleSystem {
     return 'E · Ride motorcycle';
   }
 
-  /** List map-targetable entities for gunner (bots + helis). */
+  /**
+   * List map-targetable entities for gunner.
+   * `bots` should already be fog-filtered (firing / aerial-spotted only).
+   */
   getMapTargets(bots = []) {
     const list = [];
     for (const t of bots) {
       if (t.dead) continue;
       list.push({
-        kind: 'bot', id: t.id, x: t.x, y: t.y + 1.1, z: t.z,
-        label: `Squad ${t.teamId ?? '?'}`, target: t,
+        kind: 'bot',
+        id: t.id,
+        x: t.x,
+        y: t.y + 1.1,
+        z: t.z,
+        label: `Squad ${t.teamId ?? '?'}`,
+        target: t,
+        revealed: true, // caller only passes visible bots
       });
     }
     for (const h of this.vehicles) {
       if (h.type !== 'helicopter' || h === this.active || h.wrecked) continue;
       list.push({
         kind: 'heli', id: h.id ?? list.length, x: h.x, y: h.y + 1.2, z: h.z,
-        label: 'Helicopter', target: h,
+        label: 'Helicopter', target: h, revealed: true,
       });
     }
     return list;

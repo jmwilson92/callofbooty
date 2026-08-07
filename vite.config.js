@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { partyPlugin } from './vite-plugin-party.js';
 
 // GitHub Codespaces needs:
 // 1) listen on 0.0.0.0 (not localhost-only) so the tunnel can reach Vite
@@ -15,23 +16,20 @@ const hmr = codespace
     }
   : true;
 
-// GitHub Pages project site lives at /callofbooty/ — set base so asset URLs resolve.
-// Local dev and Codespaces keep base '/'.
 const pagesBase = process.env.GITHUB_PAGES === '1' || process.env.GITHUB_PAGES === 'true'
   ? '/callofbooty/'
   : '/';
 
 export default defineConfig({
   base: pagesBase,
+  plugins: [partyPlugin()],
   server: {
     host: '0.0.0.0',
     port,
     strictPort: true,
-    // Critical: accept the *.app.github.dev Host header from the tunnel
+    // Cloudflare quick tunnels rotate random *.trycloudflare.com hosts.
     allowedHosts: true,
     hmr,
-    // Print clear localhost lines so VS Code "output" auto-forward can detect the port
-    // even if process-based detection is flaky.
     watch: {
       usePolling: false,
     },

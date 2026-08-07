@@ -40,6 +40,44 @@ export const PLAYER = {
   SPAWN: { x: 140, z: 350 },
 };
 
+/** Freefall parachute (building jumps / redeploy drops). */
+export const PARACHUTE = {
+  // Min height above ground to open
+  MIN_HEIGHT: 7,
+  // Descent while canopy open (m/s, magnitude)
+  FALL_SPEED: 7.5,
+  // Horizontal glide while open
+  GLIDE_SPEED: 11,
+  GLIDE_ACCEL: 18,
+  // Space toggles open/cut; max cuts before canopy is spent until next landing
+  MAX_CUTS: 2,
+  // Soft land speed cap when open near ground
+  LAND_SOFT: 4.5,
+  // Redeploy drop altitude above terrain
+  REDEPLOY_HEIGHT: 160,
+  REDEPLOY_HEALTH: 80,
+  // Third-person chase while canopy is open (back to FP on land / cut)
+  CAM_DIST: 6.5,
+  CAM_HEIGHT: 2.4,
+  CAM_LOOK_Y: 1.2,
+  CAM_FOV: 62,
+  CAM_SMOOTH: 8,
+  // Canopy visual
+  CANOPY_RADIUS: 2.35,
+  CANOPY_HEIGHT: 4.1,
+};
+
+/** Downed → bleed-out → dead until deploy flare. */
+export const DOWNED = {
+  BLEED_TIME: 45,
+  /** Horizontal crawl speed (m/s) — much slower than crouch walk */
+  CRAWL_SPEED: 1.05,
+  /** Capsule height while prone/crawling */
+  HEIGHT: 0.55,
+  /** Camera eye height while prone (low to the ground) */
+  EYE_HEIGHT: 0.32,
+};
+
 export const SLIDE = {
   SPEED_MULT: 1.35,
   SPEED_CAP: 10.5,
@@ -464,7 +502,7 @@ export const STRUCTURES = {
   AUTO: 14,
   FIRE: 8,
   BUSINESS: 24,
-  SKY: 8, // extra towers beyond the downtown district grid
+  SKY: 5, // extra towers on downtown plate fringe only (no orphans outside city)
   BOAT: 16,
   BILLBOARD: 20,
   VEHICLE: 70,
@@ -493,16 +531,57 @@ export const INPUT = {
     reload: ['KeyR'],
     weapon1: ['Digit1'],
     weapon2: ['Digit2'],
+    plate: ['Digit3'], // insert armor plate
     quickSwap: ['KeyQ'],
     inventory: ['Tab'],
     testRange: ['KeyP'],
     debug: ['F3'],
     map: ['KeyM'],
+    // Gear
+    frag: ['KeyG'], // lethal grenade (on foot; heli gunner uses G for flares)
+    smoke: ['KeyF'], // smoke grenade
+    uav: ['Digit4'], // activate UAV recon
+    stim: ['Digit5'], // stim shot
+    bandage: ['Digit6'], // apply bandage (channel)
+    medkit: ['Digit7'], // apply medkit (channel, no move)
     // Heli crew
     seatSwap: ['KeyV'], // solo: pilot ↔ gunner
-    flares: ['KeyG'], // gunner manual ECM
+    flares: ['KeyG'], // gunner manual ECM (same key — context)
     ecmMode: ['KeyX'], // gunner toggle auto/manual ECM
     aimMode: ['KeyT'], // gunner: map lock ↔ free aim (what's ahead)
+  },
+};
+
+/** Frags, smokes, UAV, stims. */
+export const THROWABLES = {
+  FRAG: {
+    fuse: 2.15,
+    throwSpeed: 24,
+    gravity: 19,
+    bounce: 0.32,
+    damage: 115,
+    splash: 7.5,
+    splashInner: 2.2,
+    selfMult: 0.45, // reduced self-damage
+  },
+  SMOKE: {
+    fuse: 0.9,
+    throwSpeed: 20,
+    gravity: 17,
+    bounce: 0.22,
+    duration: 16,
+    radius: 8.5,
+  },
+  UAV: {
+    duration: 28,
+    height: 48,
+    radius: 72,
+    cooldown: 8, // after effect ends before next use
+  },
+  STIM: {
+    heal: 28,
+    speedMult: 1.22,
+    speedDur: 6.5,
   },
 };
 
@@ -557,8 +636,12 @@ export const VEHICLES = {
     // 8 pods per side; gunner fires L+R dual volleys
     rocketsPerSide: 8,
     rocketSpeed: 92,
-    rocketDamage: 95,
-    rocketSplash: 5.5,
+    // Warhead — big splash kills infantry / wrecks light vehicles in the blast
+    rocketDamage: 140, // center damage (full)
+    rocketSplash: 18, // metres — outer kill/damage radius
+    rocketSplashInner: 5, // full damage within this radius
+    rocketSplashMinMult: 0.2, // edge of splash still hurts
+    rocketVehicleMult: 1.15, // vehicles take more structure damage
     rocketCooldown: 0.45,
     // Straight boost, then turn onto gunner map-selected target
     rocketBoostTime: 0.42, // s flying nose-straight from tubes
@@ -606,13 +689,21 @@ export const BUY_CACHES = {
     smg: { label: 'SMG', cost: 350, kind: 'weapon', weaponId: 'pike', rarity: 'common' },
     sniper: { label: 'Sniper', cost: 650, kind: 'weapon', weaponId: 'longshot', rarity: 'rare' },
     plates: { label: 'Sappi plates (×2)', cost: 200, kind: 'plates', amount: 2 },
-    flak: { label: 'Flak jacket', cost: 400, kind: 'armor', level: 2 },
-    kevlar: { label: 'Kevlar vest', cost: 600, kind: 'armor', level: 3 },
+    flak: { label: 'Flak jacket (body armor)', cost: 400, kind: 'armor', level: 2 },
+    kevlar: { label: 'Kevlar helmet (head protection)', cost: 600, kind: 'helmet' },
+    bandage: { label: 'Bandages (×2)', cost: 100, kind: 'bandage', amount: 2 },
+    medkit: { label: 'Medkit', cost: 350, kind: 'medkit', amount: 1 },
     grenade: { label: 'Frag grenade', cost: 150, kind: 'grenade', amount: 1 },
     smoke: { label: 'Smoke grenade', cost: 100, kind: 'smoke', amount: 1 },
     stim: { label: 'Stim shot', cost: 175, kind: 'stim', amount: 1 },
-    socks: { label: 'Socks + ibuprofen (revive)', cost: 300, kind: 'revive', amount: 1 },
-    silver: { label: 'Silver bullets (instant revive)', cost: 750, kind: 'instant_revive', amount: 1 },
+    socks: { label: 'Socks + ibuprofen (self-revive while downed)', cost: 300, kind: 'revive', amount: 1 },
+    silver: { label: 'Silver bullets (instant self-revive)', cost: 750, kind: 'instant_revive', amount: 1 },
+    // Buddy buys this to bring a dead teammate (or yourself) back via parachute drop
+    deploy_flare: {
+      label: 'Deploy flare (redeploy dead teammate)',
+      cost: 1200,
+      kind: 'deploy_flare',
+    },
   },
 };
 
@@ -621,13 +712,50 @@ export const BR = {
   enabled: true,
   // Human squad size for party
   teamSize: 4,
-  // Enemy bot squads in the match
-  botSquads: 8,
+  // Enemy bots: 90 total in fireteams of 4 (~23 squads)
+  botCount: 90,
+  botSquads: 23,
   squadSizeMin: 4,
-  squadSizeMax: 5,
-  // Soft circle shrink later — for now just match state
-  matchDuration: 1200,
+  squadSizeMax: 4,
+  // Soft failsafe only — real win is last alive (zones / eliminations)
+  matchDuration: 0,
   startingCash: 2500,
+
+  /**
+   * Exactly 5 zones. Flow per zone: HOLD (next circle shown) → SHRINK to that circle.
+   * When a shrink finishes, the next zone's hold starts. Zone 5 ends at radius 0 —
+   * the whole map is deadly gas; last alive wins.
+   *
+   * hold/shrink in seconds, radius in metres, dps = gas damage/sec outside the circle.
+   */
+  zone: {
+    // Opening safe area (before zone 1 finishes closing)
+    initialRadius: 820,
+    centerBias: 0.28,
+    wallHeight: 220,
+    wallSegments: 96,
+    // 5 zones total (~12–14 min full close)
+    phases: [
+      // Zone 1 — first close
+      { hold: 75, shrink: 55, radius: 480, dps: 3 },
+      // Zone 2
+      { hold: 55, shrink: 50, radius: 260, dps: 7 },
+      // Zone 3
+      { hold: 45, shrink: 45, radius: 120, dps: 14 },
+      // Zone 4
+      { hold: 35, shrink: 40, radius: 40,  dps: 24 },
+      // Zone 5 — collapses to nothing; entire map contaminated
+      { hold: 25, shrink: 35, radius: 0,   dps: 45 },
+    ],
+  },
+
+  // Bot pressure ramps with the 5 zones
+  botRamp: {
+    damage:   [1.0, 1.1, 1.25, 1.4, 1.55],
+    accuracy: [1.0, 1.08, 1.18, 1.28, 1.38],
+    aggro:    [1.0, 1.08, 1.15, 1.25, 1.35],
+    speed:    [1.0, 1.04, 1.08, 1.12, 1.15],
+  },
 };
 
 /** Friends multiplayer (small lobby). */
@@ -655,6 +783,10 @@ export const COMBAT = {
   PENETRATION_MAX: 2,
   PICKUP_RANGE: 2.8,
   GROUND_LOOT_RANGE: 3.0,
+  // Bullet drop: flat to DROP_START_M, then ramps to full gravity by DROP_FULL_M
+  BULLET_DROP_START_M: 300,
+  BULLET_DROP_FULL_M: 420,
+  BULLET_GRAVITY: 14,
 };
 
 /**
@@ -662,45 +794,56 @@ export const COMBAT = {
  * TTK vs 100 HP: longer fights; they flank and use cover better.
  */
 export const BOTS = {
-  COUNT: 48,
-  HEALTH: 120,
-  ARMOR: 25,
-  SPEED: 2.9,
-  SPEED_JITTER: 0.55,
-  // Spawn ring around player SPAWN (metres)
-  SPAWN_MIN: 22,
-  SPAWN_MAX: 240,
+  // Default count; BR.botCount overrides when battle royale is enabled
+  COUNT: 90,
+  HEALTH: 135,
+  ARMOR: 35,
+  SPEED: 3.05,
+  SPEED_JITTER: 0.5,
+  // Spawn ring around player SPAWN (metres) — wider for 90 bots
+  SPAWN_MIN: 40,
+  SPAWN_MAX: 520,
   WANDER_RADIUS: 70,
   WAYPOINT_REACH: 1.4,
-  WAYPOINT_PAUSE: 0.45,
+  WAYPOINT_PAUSE: 0.4,
   // Corpse stays on ground this long before despawn/respawn (seconds)
-  CORPSE_TIME: 120,
-  RESPAWN_TIME: 120,
-  // Squads
+  CORPSE_TIME: 90,
+  RESPAWN_TIME: 90,
+  // Squads of 4 — fireteams that stick together and share aggro
   TEAM_SIZE_MIN: 4,
-  TEAM_SIZE_MAX: 5,
-  TEAM_SPACING: 4.5, // spawn cluster radius
+  TEAM_SIZE_MAX: 4,
+  TEAM_SPACING: 4.2, // spawn cluster radius
   // Building approaches
   BUILDING_WAYPOINT_CHANCE: 0.5,
-  // Combat — smarter, not death lasers
-  AGGRO_RANGE: 62,
-  LOSE_RANGE: 90,
-  FIRE_RANGE: 48,
-  FIRE_COOLDOWN: 0.22, // slower ROF
-  FIRE_DAMAGE: 7, // softer hits
-  FIRE_SPREAD_DEG: 5.5,
-  AGGRESSIVE_FRACTION: 0.72,
-  REACTION_TIME: 0.45,
+  // Combat — squad-focused BR pressure
+  AGGRO_RANGE: 70,
+  LOSE_RANGE: 100,
+  FIRE_RANGE: 52,
+  FIRE_COOLDOWN: 0.2,
+  FIRE_DAMAGE: 9,
+  FIRE_SPREAD_DEG: 4.8,
+  AGGRESSIVE_FRACTION: 0.82,
+  REACTION_TIME: 0.38,
   // Tactics
-  FLANK_CHANCE: 0.4,
-  SUPPRESS_PAUSE: 0.55, // brief hold after volley
-  COVER_SEEK_CHANCE: 0.35,
+  FLANK_CHANCE: 0.48,
+  SUPPRESS_PAUSE: 0.48,
+  COVER_SEEK_CHANCE: 0.4,
   TEAM_SHARE_AGGRO: true, // whole squad aggro when one spots you
+  // Fight other bot squads, not only players
+  BOT_VS_BOT: true,
+  // How tightly followers stick to their leader (metres)
+  SQUAD_FOLLOW_DIST: 7.5,
+  SQUAD_MAX_SPREAD: 14,
+  // Prefer rotating into the gas circle when outside
+  ZONE_ROTATE: true,
+  ZONE_EDGE_MARGIN: 18, // stay this far inside the wall when rotating
   // Camo / kit palette (per team tint applied in code)
   COLORS: [0x3d5234, 0x2c3d52, 0x4a3c2e, 0x3a3a3e, 0x4a5240, 0x2a3830, 0x3a4540, 0x2e3540],
   TEAM_COLORS: [0x3d5234, 0x2c3d52, 0x5a3a2a, 0x3a3a4e, 0x4a5240, 0x523a3a, 0x2e4540, 0x3e3540],
   RADIUS: 0.35,
   HEIGHT: 1.8,
+  // How long a bot stays on the minimap after shooting (seconds)
+  MAP_REVEAL_FIRE: 2.8,
 };
 
 // Rarity multipliers (Phase 3)
@@ -720,15 +863,25 @@ export const AMMO = {
 };
 
 export const ARMOR = {
-  LEVELS: { 1: 50, 2: 100, 3: 150 },
+  // Body armor capacity by vest level (plates fill this bar)
+  LEVELS: { 0: 50, 1: 50, 2: 100, 3: 150 },
   PLATE_RESTORE: 50,
   PLATE_TIME: 2.0,
-  MAX_CARRIED_PLATES: 3,
+  MAX_CARRIED_PLATES: 5,
+  // Incoming bot fire: chance a round is a headshot (helmet only helps these)
+  HEAD_HIT_CHANCE: 0.2,
+  HEAD_DAMAGE_MULT: 1.85,
+  // Kevlar helmet — durability that only absorbs head damage
+  HELMET: {
+    max: 100,
+    // Fraction of head damage soaked by helmet before body/HP (1 = full soak while durable)
+    absorb: 1,
+  },
 };
 
 export const HEALING = {
-  bandage: { heal: 25, time: 3.0, cap: 75 },
-  medkit:  { heal: 100, time: 6.5, cap: 100, noMove: true },
+  bandage: { heal: 25, time: 3.0, cap: 75, maxCarry: 5 },
+  medkit:  { heal: 100, time: 6.5, cap: 100, noMove: true, maxCarry: 2 },
   stim:    { heal: 20, time: 1.5, overTime: 3.0, speedMult: 1.25, speedDur: 6.0 },
 };
 
@@ -747,7 +900,7 @@ export const WEAPONS = {
     // Mid-range king — solid to ~120 m ADS, loses to sniper past that
     damage: 24, headMult: 1.6, limbMult: 0.88,
     falloffStart: 45, falloffEnd: 130, falloffMinMult: 0.62,
-    muzzleVelocity: 740, dropScale: 0.5, pellets: 1,
+    muzzleVelocity: 740, dropScale: 0.35, pellets: 1,
     effectiveRange: 95, rangeScatterDeg: 0.55,
     spreadHip: 4.8, spreadAds: 0.11, spreadMove: 1.5, spreadMax: 8.5, spreadPerShot: 0.32,
     adsRecoilMult: 0.42,
@@ -767,7 +920,7 @@ export const WEAPONS = {
     reloadTime: 2.1, reloadTimeEmpty: 2.7, adsTime: 0.26, swapTime: 0.42,
     damage: 22, headMult: 1.55, limbMult: 0.88,
     falloffStart: 40, falloffEnd: 115, falloffMinMult: 0.6,
-    muzzleVelocity: 720, dropScale: 0.52, pellets: 1,
+    muzzleVelocity: 720, dropScale: 0.35, pellets: 1,
     effectiveRange: 85, rangeScatterDeg: 0.65,
     spreadHip: 5.0, spreadAds: 0.14, spreadMove: 1.6, spreadMax: 9.0, spreadPerShot: 0.34,
     adsRecoilMult: 0.4,
@@ -787,7 +940,7 @@ export const WEAPONS = {
     // CQC shredder — hipfire strong close; past ~30 m sprays / falls off hard
     damage: 18, headMult: 1.4, limbMult: 0.92,
     falloffStart: 10, falloffEnd: 38, falloffMinMult: 0.22,
-    muzzleVelocity: 360, dropScale: 1.25, pellets: 1,
+    muzzleVelocity: 360, dropScale: 0.55, pellets: 1,
     effectiveRange: 22, rangeScatterDeg: 4.8, // past 22 m ADS still walks off target
     spreadHip: 1.9, spreadAds: 0.55, spreadMove: 0.55, spreadMax: 7.5, spreadPerShot: 0.42,
     adsRecoilMult: 0.55, // still bouncy ADS — SMG recoil character
@@ -809,7 +962,7 @@ export const WEAPONS = {
     // Sustained mid-long — slower RoF, hits out further than AR slightly
     damage: 29, headMult: 1.45, limbMult: 0.88,
     falloffStart: 55, falloffEnd: 160, falloffMinMult: 0.66,
-    muzzleVelocity: 700, dropScale: 0.65, pellets: 1,
+    muzzleVelocity: 700, dropScale: 0.4, pellets: 1,
     effectiveRange: 110, rangeScatterDeg: 0.7,
     spreadHip: 6.2, spreadAds: 0.26, spreadMove: 2.2, spreadMax: 10.0, spreadPerShot: 0.2,
     adsRecoilMult: 0.48,
@@ -828,7 +981,7 @@ export const WEAPONS = {
     // Laser ADS long-range; hipfire nearly unusable. Head = delete, body = 2 taps.
     damage: 92, headMult: 2.25, limbMult: 0.72,
     falloffStart: 220, falloffEnd: 450, falloffMinMult: 0.9,
-    muzzleVelocity: 860, dropScale: 2.2, pellets: 1,
+    muzzleVelocity: 860, dropScale: 0.85, pellets: 1,
     effectiveRange: 320, rangeScatterDeg: 0.08,
     spreadHip: 14.0, spreadAds: 0.018, spreadMove: 4.5, spreadMax: 16.0, spreadPerShot: 0.9,
     adsRecoilMult: 0.55,
@@ -842,7 +995,7 @@ export const WEAPONS = {
     reloadTime: 2.5, reloadTimeEmpty: 3.0, adsTime: 0.34, swapTime: 0.52,
     damage: 52, headMult: 2.0, limbMult: 0.82,
     falloffStart: 90, falloffEnd: 220, falloffMinMult: 0.74,
-    muzzleVelocity: 780, dropScale: 1.75, pellets: 1,
+    muzzleVelocity: 780, dropScale: 0.7, pellets: 1,
     effectiveRange: 160, rangeScatterDeg: 0.28,
     spreadHip: 6.5, spreadAds: 0.05, spreadMove: 2.0, spreadMax: 10.0, spreadPerShot: 0.38,
     adsRecoilMult: 0.4,
@@ -860,7 +1013,7 @@ export const WEAPONS = {
     reloadTime: 0.5, reloadTimeEmpty: 0.5, adsTime: 0.28, swapTime: 0.48,
     damage: 13, headMult: 1.35, limbMult: 1.0,
     falloffStart: 5, falloffEnd: 20, falloffMinMult: 0.1,
-    muzzleVelocity: 330, dropScale: 1.5, pellets: 9,
+    muzzleVelocity: 330, dropScale: 0.6, pellets: 9,
     effectiveRange: 12, rangeScatterDeg: 2.5,
     spreadHip: 7.0, spreadAds: 3.8, spreadMove: 1.3, spreadMax: 11.0, spreadPerShot: 0.5,
     adsRecoilMult: 0.7,
@@ -873,7 +1026,7 @@ export const WEAPONS = {
     reloadTime: 1.55, reloadTimeEmpty: 1.95, adsTime: 0.16, swapTime: 0.28,
     damage: 24, headMult: 1.75, limbMult: 0.88,
     falloffStart: 12, falloffEnd: 42, falloffMinMult: 0.3,
-    muzzleVelocity: 370, dropScale: 1.15, pellets: 1,
+    muzzleVelocity: 370, dropScale: 0.5, pellets: 1,
     effectiveRange: 28, rangeScatterDeg: 1.8,
     spreadHip: 2.2, spreadAds: 0.16, spreadMove: 0.85, spreadMax: 5.0, spreadPerShot: 0.28,
     adsRecoilMult: 0.5,
@@ -889,10 +1042,11 @@ export const WEAPONS = {
 export const LOOT = {
   // Relative class weights when an item spawns (cases + outdoor)
   CLASS_WEIGHTS: {
-    weapon: 38,
-    ammo: 36,
-    armor: 12,
-    heal: 14,
+    weapon: 34,
+    ammo: 30,
+    armor: 11,
+    heal: 12,
+    cash: 13,
   },
   WEAPON_SPAWN_WEIGHTS: {
     // Longshot weighted high so snipers show up often in cases
@@ -910,6 +1064,30 @@ export const LOOT = {
   OUTDOOR_PER_POI: 6,
   OUTDOOR_DOWNTOWN_EXTRA: 8,
   OUTDOOR_SCATTER: 28,
+
+  /**
+   * Cash drops — common enough to fund shops without carpeting the map.
+   * Amounts are dollars added to loadout.cash.
+   */
+  MONEY: {
+    // Supply cases: chance to spit cash when opened
+    CASE_CHANCE: 0.58, // first cash stack
+    CASE_BONUS_CHANCE: 0.25, // second stack
+    // Outdoor dedicated money piles (in addition to mixed loot)
+    OUTDOOR_PILES: 110,
+    OUTDOOR_PER_POI: 5,
+    OUTDOOR_DOWNTOWN_EXTRA: 8,
+    // Mixed outdoor loot weight for cash (used in outdoorWeights)
+    OUTDOOR_CLASS_WEIGHT: 24,
+    // Bot death chance to drop cash
+    BOT_DROP_CHANCE: 0.4,
+    // Amount tiers: [min, max] rolled with weights
+    TIERS: [
+      { w: 50, min: 50, max: 140 }, // small
+      { w: 35, min: 150, max: 380 }, // medium
+      { w: 15, min: 400, max: 850 }, // large
+    ],
+  },
 };
 
 /** Pelican / hard cases inside buildings — open for 3–4 random items. */
@@ -922,7 +1100,9 @@ export const CASES = {
   MAX_PER_FLOOR: 1,
   MAX_PER_BUILDING: 5,
   /** Min distance between any two cases (metres) */
-  MIN_SEPARATION: 3.0,
+  MIN_SEPARATION: 3.4,
+  /** Keep cases this far from door openings (placement logic uses door keep-outs) */
+  DOOR_CLEARANCE: 2.6,
 };
 
 // Minimap (always-on square, top-left) + full map (toggle with M).

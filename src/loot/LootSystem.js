@@ -147,6 +147,64 @@ export class LootSystem {
       const cross2 = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.1), mat(0xcc2020, { em: 0.2 }));
       cross2.position.y = 0.13;
       g.add(cross2);
+    } else if (item.kind === 'silver' || item.kind === 'instant_revive') {
+      // Bright silver bullet — easy to spot while crawling for self-revive
+      const silver = mat(0xd8e0f0, { metal: 0.92, rough: 0.18, em: 0.35 });
+      const tip = mat(0xf0f4ff, { metal: 0.85, rough: 0.22, em: 0.25 });
+      const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.035, 0.04, 0.22, 10),
+        silver
+      );
+      body.rotation.z = Math.PI / 2;
+      body.position.y = 0.08;
+      body.castShadow = true;
+      g.add(body);
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.08, 10), tip);
+      nose.rotation.z = -Math.PI / 2;
+      nose.position.set(0.15, 0.08, 0);
+      g.add(nose);
+      const glow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 10, 10),
+        new THREE.MeshBasicMaterial({
+          color: 0xc0d0ff, transparent: true, opacity: 0.35, depthWrite: false,
+        })
+      );
+      glow.position.y = 0.1;
+      g.add(glow);
+    } else if (item.kind === 'cash') {
+      // Stack of bills / coin pile — readable gold
+      const gold = mat(0xe8c040, { metal: 0.55, rough: 0.35, em: 0.18 });
+      const darkGold = mat(0xa07820, { metal: 0.45, rough: 0.45, em: 0.08 });
+      const amt = item.amount ?? 100;
+      const stacks = amt >= 400 ? 4 : amt >= 150 ? 3 : 2;
+      for (let i = 0; i < stacks; i++) {
+        const bill = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.02, 0.11),
+          i % 2 === 0 ? gold : darkGold
+        );
+        bill.position.set((i - stacks * 0.5) * 0.02, 0.04 + i * 0.022, (i % 2) * 0.015);
+        bill.rotation.y = (i - 1) * 0.12;
+        bill.castShadow = true;
+        g.add(bill);
+      }
+      // Coin on top
+      const coin = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 0.015, 12),
+        gold
+      );
+      coin.position.y = 0.06 + stacks * 0.022;
+      coin.castShadow = true;
+      g.add(coin);
+      // Soft glow marker so piles read at a distance
+      const glow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 8, 8),
+        mat(0xffe080, { em: 0.55, rough: 0.8, metal: 0 })
+      );
+      glow.position.y = 0.12 + stacks * 0.01;
+      glow.material.transparent = true;
+      glow.material.opacity = 0.35;
+      glow.material.depthWrite = false;
+      g.add(glow);
     } else {
       const box = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.18), mat(0xb0b0b0));
       box.position.y = 0.08;
@@ -302,6 +360,21 @@ export class LootSystem {
   }
 
   /**
+   * Silver bullet for self-revive (dropped when a downed player scores a kill).
+   * @param {number} x
+   * @param {number} z
+   */
+  spawnSilverBullet(x, z) {
+    const ang = Math.random() * Math.PI * 2;
+    const r = 0.35 + Math.random() * 0.45;
+    return this.spawnItemAtGround(
+      { kind: 'silver', amount: 1 },
+      x + Math.cos(ang) * r,
+      z + Math.sin(ang) * r
+    );
+  }
+
+  /**
    * Bot death loot — 1–3 pickups scattered around the body.
    * @param {number} x
    * @param {number} z
@@ -316,16 +389,18 @@ export class LootSystem {
       const r = 0.45 + rng() * 0.9;
       const ix = x + Math.cos(ang) * r;
       const iz = z + Math.sin(ang) * r;
-      // Prefer ammo / heal / armor; occasional weapon
+      // Prefer ammo / heal / armor / cash; occasional weapon
       let item;
       const roll = rng();
-      if (roll < 0.42) {
+      if (roll < 0.34) {
         const type = weightedPick(rng, { light: 28, heavy: 38, long: 12, shell: 14 });
         item = { kind: 'ammo', ammoType: type, amount: LOOT.AMMO_PICKUPS[type]?.amount ?? 20 };
-      } else if (roll < 0.62) {
+      } else if (roll < 0.5) {
         item = { kind: 'heal', healType: weightedPick(rng, { bandage: 55, medkit: 25, stim: 20 }) };
-      } else if (roll < 0.78) {
+      } else if (roll < 0.62) {
         item = { kind: 'armor', level: rng() > 0.75 ? 2 : 1, plates: 1 };
+      } else if (roll < 0.88) {
+        item = this._rollCash(rng);
       } else {
         item = {
           kind: 'weapon',
@@ -336,7 +411,29 @@ export class LootSystem {
       const rec = this.spawnItemAtGround(item, ix, iz);
       if (rec) drops.push(rec);
     }
+    // Extra small chance of a pure cash drop next to body
+    if (rng() < (LOOT.MONEY?.BOT_DROP_CHANCE ?? 0.4) * 0.6) {
+      const ang = rng() * Math.PI * 2;
+      const r = 0.5 + rng() * 0.7;
+      const rec = this.spawnItemAtGround(this._rollCash(rng), x + Math.cos(ang) * r, z + Math.sin(ang) * r);
+      if (rec) drops.push(rec);
+    }
     return drops;
+  }
+
+  /** Roll a cash pickup amount from configured tiers. */
+  _rollCash(rng) {
+    const tiers = LOOT.MONEY?.TIERS || [
+      { w: 50, min: 50, max: 140 },
+      { w: 35, min: 150, max: 380 },
+      { w: 15, min: 400, max: 850 },
+    ];
+    const weights = {};
+    tiers.forEach((t, i) => { weights[i] = t.w; });
+    const idx = Number(weightedPick(rng, weights));
+    const t = tiers[idx] || tiers[0];
+    const amount = t.min + Math.floor(rng() * (t.max - t.min + 1));
+    return { kind: 'cash', amount };
   }
 
   _rollItem(rng) {
@@ -356,6 +453,9 @@ export class LootSystem {
     if (cls === 'heal') {
       return { kind: 'heal', healType: weightedPick(rng, { bandage: 50, medkit: 30, stim: 20 }) };
     }
+    if (cls === 'cash') {
+      return this._rollCash(rng);
+    }
     return { kind: 'ammo', ammoType: 'heavy', amount: 24 };
   }
 
@@ -374,6 +474,14 @@ export class LootSystem {
         weaponId: weightedPick(rng, LOOT.WEAPON_SPAWN_WEIGHTS),
         rarity: rollRarity(rng),
       };
+    }
+    // Cash often falls out of supply cases
+    const mon = LOOT.MONEY || {};
+    if (rng() < (mon.CASE_CHANCE ?? 0.58)) {
+      contents.push(this._rollCash(rng));
+    }
+    if (rng() < (mon.CASE_BONUS_CHANCE ?? 0.25)) {
+      contents.push(this._rollCash(rng));
     }
     this.cases.push({
       id: ++this._id,
@@ -409,6 +517,38 @@ export class LootSystem {
       const z = (rng() * 2 - 1) * half;
       if (this.terrain.heightAt(x, z) < 3) continue;
       this._rollAndSpawnOutdoor(rng, x, z);
+    }
+
+    // Dedicated cash piles — common enough to fund shops, not carpeted
+    const mon = LOOT.MONEY || {};
+    let cashPiles = 0;
+    for (const p of POIS) {
+      const n = (mon.OUTDOOR_PER_POI ?? 5) + (p.id === 'downtown' ? (mon.OUTDOOR_DOWNTOWN_EXTRA ?? 8) : 0);
+      for (let i = 0; i < n; i++) {
+        const ang = rng() * Math.PI * 2;
+        const r = 12 + rng() * 55;
+        const x = p.x + Math.cos(ang) * r;
+        const z = p.z + Math.sin(ang) * r;
+        if (this.terrain.heightAt(x, z) < 3) continue;
+        this.spawnItemAtGround(this._rollCash(rng), x, z);
+        cashPiles++;
+      }
+    }
+    for (let i = 0; i < (mon.OUTDOOR_PILES ?? 110); i++) {
+      const x = (rng() * 2 - 1) * half;
+      const z = (rng() * 2 - 1) * half;
+      if (this.terrain.heightAt(x, z) < 3) continue;
+      // Small piles: 1 stack; sometimes a double pile
+      this.spawnItemAtGround(this._rollCash(rng), x, z);
+      cashPiles++;
+      if (rng() < 0.18) {
+        this.spawnItemAtGround(
+          this._rollCash(rng),
+          x + (rng() - 0.5) * 1.2,
+          z + (rng() - 0.5) * 1.2
+        );
+        cashPiles++;
+      }
     }
 
     // Pelican cases — along walls, facing open room, never clustered
@@ -447,78 +587,167 @@ export class LootSystem {
       }
     }
 
-    console.info(`[loot] outdoor items ${this.items.length} · supply cases ${caseCount} · buildings ${worldBuildings.length}`);
-    return { items: this.items.length, cases: caseCount };
+    const cashOnGround = this.items.filter((it) => it.kind === 'cash').length;
+    console.info(
+      `[loot] outdoor items ${this.items.length} · cash piles ~${cashOnGround} · supply cases ${caseCount} · buildings ${worldBuildings.length}`
+    );
+    return { items: this.items.length, cases: caseCount, cash: cashOnGround };
   }
 
   /**
-   * Place case against a wall. Mesh layout: local +Z = front (latches / open face),
-   * local −Z = hinge. Yaw is always computed so +Z points INTO the room
-   * (toward footprint center) — never into the wall.
+   * Place case against a wall, clear of doors and walk paths.
+   * Mesh: local +Z = front (opens into room). BuildingKit puts main entrance
+   * on the south center and a second door on the east face (~32% along depth).
    */
   _pickWallCaseSpot(b, floorIdx, rng, placedXZ, minSep) {
-    // Case depth 0.78 → half 0.39; sit flush to interior face (~0.3 wall) + gap
-    const wallInset = 0.72;
+    // Deeper inset so the case body + open lid stay out of the walkway
+    const wallInset = 1.05;
     const y = b.floorYs?.[floorIdx] ?? (b.baseY + 0.15 + floorIdx * 3.4);
+    const isGround = floorIdx === 0;
 
-    const along = (len) => {
-      const n = Math.max(2, Math.floor(len / 2.8));
+    // Keep-out rectangles in building-local (lx, lz) space
+    const keepouts = [];
+    // Stair bulkhead / SE core
+    keepouts.push({
+      lx0: b.w * 0.52, lx1: b.w + 0.5,
+      lz0: b.d * 0.52, lz1: b.d + 0.5,
+    });
+    if (isGround) {
+      // South main entrance — wide + deep so cases never sit in the door
+      const doorHalf = Math.max(2.4, Math.min(3.2, b.w * 0.2));
+      keepouts.push({
+        lx0: b.w * 0.5 - doorHalf - 1.6,
+        lx1: b.w * 0.5 + doorHalf + 1.6,
+        lz0: -0.5,
+        lz1: Math.min(b.d * 0.45, 4.2),
+      });
+      // East side door (BuildingKit: centre at z + d*0.32)
+      const eastDoor = b.d * 0.32;
+      keepouts.push({
+        lx0: b.w - Math.min(b.w * 0.4, 4.0),
+        lx1: b.w + 0.5,
+        lz0: eastDoor - 2.4,
+        lz1: eastDoor + 2.4,
+      });
+      // Clear a strip just inside the south facade (entry walk-in)
+      keepouts.push({
+        lx0: 0.4,
+        lx1: b.w - 0.4,
+        lz0: 0,
+        lz1: 2.2,
+      });
+    }
+
+    const inKeepout = (lx, lz) => {
+      for (const k of keepouts) {
+        if (lx >= k.lx0 && lx <= k.lx1 && lz >= k.lz0 && lz <= k.lz1) return true;
+      }
+      return false;
+    };
+
+    const along = (len, margin = 0.12) => {
+      // denser samples, stay off extreme corners a bit
+      const n = Math.max(3, Math.floor(len / 2.0));
       const out = [];
-      for (let i = 0; i < n; i++) out.push((i + 0.5) / n);
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n;
+        if (t < margin || t > 1 - margin) continue;
+        out.push(t);
+      }
       return out;
     };
 
-    // Wall slots: long axis (local X, 1.28m) runs parallel to the wall;
-    // front (+local Z) opens into the room. Fixed cardinal yaws only.
+    // Candidates: prefer back/side walls; deprioritize south on ground floor
     const candidates = [];
-    // South wall (runs ±X): front +Z into room → yaw 0
-    for (const t of along(b.w)) {
-      if (Math.abs(t - 0.5) < 0.22) continue;
-      candidates.push({ lx: b.w * t, lz: wallInset, yaw: 0 });
+    const push = (lx, lz, yaw, wall, priority) => {
+      if (inKeepout(lx, lz)) return;
+      // Stay inside footprint with margin
+      if (lx < 0.85 || lx > b.w - 0.85 || lz < 0.85 || lz > b.d - 0.85) return;
+      candidates.push({ lx, lz, yaw, wall, priority });
+    };
+
+    // North wall (best for ground — opposite the main door)
+    for (const t of along(b.w, 0.1)) {
+      push(b.w * t, b.d - wallInset, Math.PI, 'N', isGround ? 10 : 6);
     }
-    // North wall: front −Z into room → yaw π
-    for (const t of along(b.w)) {
-      candidates.push({ lx: b.w * t, lz: b.d - wallInset, yaw: Math.PI });
+    // West wall
+    for (const t of along(b.d, 0.14)) {
+      // Ground: skip near south (entry) and near east door depth
+      if (isGround && t < 0.28) continue;
+      push(wallInset, b.d * t, Math.PI / 2, 'W', isGround ? 8 : 5);
     }
-    // West wall (runs ±Z): front +X into room → yaw +π/2
-    for (const t of along(b.d)) {
-      if (t < 0.15) continue;
-      candidates.push({ lx: wallInset, lz: b.d * t, yaw: Math.PI / 2 });
+    // East wall — skip around side door on ground
+    for (const t of along(b.d, 0.14)) {
+      if (isGround && Math.abs(t - 0.32) < 0.28) continue;
+      if (isGround && t < 0.22) continue; // near SE entry corner
+      if (t > 0.72) continue; // stair core
+      push(b.w - wallInset, b.d * t, -Math.PI / 2, 'E', isGround ? 4 : 5);
     }
-    // East wall: front −X into room → yaw −π/2
-    for (const t of along(b.d)) {
-      if (t > 0.55) continue;
-      candidates.push({ lx: b.w - wallInset, lz: b.d * t, yaw: -Math.PI / 2 });
+    // South wall — upper floors only (ground south is the entrance face)
+    if (!isGround) {
+      for (const t of along(b.w, 0.18)) {
+        if (Math.abs(t - 0.5) < 0.2) continue;
+        push(b.w * t, wallInset, 0, 'S', 3);
+      }
+    } else {
+      // Ground: only far corners of south wall, well clear of door
+      for (const t of [0.12, 0.18, 0.82, 0.88]) {
+        push(b.w * t, wallInset + 0.15, 0, 'S', 1);
+      }
     }
 
-    for (let i = candidates.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      const tmp = candidates[i];
-      candidates[i] = candidates[j];
-      candidates[j] = tmp;
-    }
+    // Interior-ish fallback: against north wall mid, deeper inset
+    push(b.w * 0.28, b.d - wallInset - 0.2, Math.PI, 'N', 7);
+    push(b.w * 0.72, b.d - wallInset - 0.2, Math.PI, 'N', 7);
 
+    // Score: higher priority + distance from door keepouts + not clustered
+    const scored = [];
     for (const c of candidates) {
-      if (c.lx > b.w * 0.65 && c.lz > b.d * 0.65) continue; // stair core
       const x = b.x + c.lx;
       const z = b.z + c.lz;
-
-      let ok = true;
+      let sepOk = true;
+      let nearest = 99;
       for (const p of placedXZ) {
-        if (Math.hypot(p.x - x, p.z - z) < minSep) {
-          ok = false;
+        const d = Math.hypot(p.x - x, p.z - z);
+        nearest = Math.min(nearest, d);
+        if (d < minSep) {
+          sepOk = false;
           break;
         }
       }
-      if (!ok) continue;
-      return { x, y, z, yaw: c.yaw };
+      if (!sepOk) continue;
+
+      // Distance to nearest keepout center (prefer farther from doors)
+      let doorDist = 20;
+      for (const k of keepouts) {
+        const cx = (k.lx0 + k.lx1) * 0.5;
+        const cz = (k.lz0 + k.lz1) * 0.5;
+        doorDist = Math.min(doorDist, Math.hypot(c.lx - cx, c.lz - cz));
+      }
+      // Prefer corners of the room (away from open middle)
+      const edgeScore = Math.min(c.lx, b.w - c.lx, c.lz, b.d - c.lz);
+      const score = c.priority * 3 + doorDist * 0.8 + nearest * 0.35 - edgeScore * 0.15
+        + rng() * 0.8;
+      scored.push({ ...c, x, y, z, score });
     }
-    return null;
+
+    if (!scored.length) return null;
+    scored.sort((a, b) => b.score - a.score);
+    // Pick among top few for variety
+    const top = scored.slice(0, Math.min(4, scored.length));
+    const pick = top[Math.floor(rng() * top.length)];
+    return { x: pick.x, y: pick.y, z: pick.z, yaw: pick.yaw };
   }
 
   _rollAndSpawnOutdoor(rng, x, z) {
-    // Outdoor: mostly ammo/heal, rare weapons
-    const outdoorWeights = { weapon: 12, ammo: 50, armor: 12, heal: 26 };
+    // Outdoor: ammo/heal/cash, rare weapons
+    const outdoorWeights = {
+      weapon: 12,
+      ammo: 40,
+      armor: 10,
+      heal: 18,
+      cash: LOOT.MONEY?.OUTDOOR_CLASS_WEIGHT ?? 24,
+    };
     const cls = weightedPick(rng, outdoorWeights);
     let item;
     if (cls === 'weapon') {
@@ -532,6 +761,8 @@ export class LootSystem {
       item = { kind: 'ammo', ammoType: type, amount: LOOT.AMMO_PICKUPS[type]?.amount ?? 20 };
     } else if (cls === 'armor') {
       item = { kind: 'armor', level: 1, plates: 1 };
+    } else if (cls === 'cash') {
+      item = this._rollCash(rng);
     } else {
       item = { kind: 'heal', healType: weightedPick(rng, { bandage: 60, medkit: 20, stim: 20 }) };
     }
@@ -574,7 +805,14 @@ export class LootSystem {
     return best;
   }
 
-  tryPickup(weaponSystem, px, py, pz) {
+  /**
+   * @param {import('../combat/WeaponSystem.js').WeaponSystem} weaponSystem
+   * @param {number} px
+   * @param {number} py
+   * @param {number} pz
+   * @param {import('../player/Loadout.js').Loadout|null} [loadout] needed for cash
+   */
+  tryPickup(weaponSystem, px, py, pz, loadout = null) {
     const hit = this.nearest(px, py, pz);
     if (!hit) return false;
 
@@ -604,23 +842,73 @@ export class LootSystem {
       return true;
     }
     if (it.kind === 'armor') {
-      if (it.level > weaponSystem.armorLevel) {
+      // Vest upgrade + spare plates into inventory (press 3 to equip)
+      if (it.level > (weaponSystem.armorLevel || 0)) {
         weaponSystem.armorLevel = it.level;
-        weaponSystem.armor = Math.max(weaponSystem.armor, it.level * 50);
+      }
+      if (loadout) {
+        const max = 5;
+        const add = Math.max(1, it.plates | 0) || 1;
+        loadout.plates = Math.min(max, (loadout.plates || 0) + add);
       } else {
-        weaponSystem.armor = Math.min(
-          (weaponSystem.armorLevel || 1) * 50 || 50,
-          weaponSystem.armor + 50
-        );
+        const cap = (weaponSystem.armorLevel || 1) * 50 || 50;
+        weaponSystem.armor = Math.min(cap, (weaponSystem.armor || 0) + 50);
       }
       this._remove(it);
+      this.bus.emit('loot:pickup', { kind: 'armor', level: it.level, plates: it.plates ?? 1 });
+      return true;
+    }
+    if (it.kind === 'helmet') {
+      const maxH = 100;
+      weaponSystem.helmet = maxH;
+      this._remove(it);
+      this.bus.emit('loot:pickup', { kind: 'helmet' });
       return true;
     }
     if (it.kind === 'heal') {
-      if (it.healType === 'bandage') weaponSystem.health = Math.min(75, weaponSystem.health + 25);
-      else if (it.healType === 'medkit') weaponSystem.health = 100;
-      else weaponSystem.health = Math.min(100, weaponSystem.health + 20);
+      // Stims still apply on pickup (instant). Bandages / medkits go to inventory.
+      if (it.healType === 'stim') {
+        weaponSystem.health = Math.min(100, (weaponSystem.health || 0) + 20);
+        if (loadout) loadout.stims = (loadout.stims || 0) + 1;
+        this._remove(it);
+        this.bus.emit('loot:pickup', { kind: 'heal', healType: 'stim' });
+        return true;
+      }
+      if (!loadout) {
+        // No loadout: fall back to instant heal
+        if (it.healType === 'medkit') weaponSystem.health = 100;
+        else weaponSystem.health = Math.min(75, (weaponSystem.health || 0) + 25);
+        this._remove(it);
+        return true;
+      }
+      if (it.healType === 'medkit') {
+        const maxM = 2;
+        if ((loadout.medkits || 0) >= maxM) return false;
+        loadout.medkits = (loadout.medkits || 0) + 1;
+      } else {
+        // bandage (default)
+        const maxB = 5;
+        if ((loadout.bandages || 0) >= maxB) return false;
+        loadout.bandages = (loadout.bandages || 0) + 1;
+      }
       this._remove(it);
+      this.bus.emit('loot:pickup', { kind: 'heal', healType: it.healType || 'bandage' });
+      return true;
+    }
+    if (it.kind === 'cash') {
+      if (!loadout) return false;
+      const amt = Math.max(0, it.amount | 0);
+      loadout.cash = (loadout.cash || 0) + amt;
+      this._remove(it);
+      this.bus.emit('loot:pickup', { kind: 'cash', amount: amt, total: loadout.cash });
+      return true;
+    }
+    if (it.kind === 'silver' || it.kind === 'instant_revive') {
+      if (!loadout) return false;
+      const n = Math.max(1, it.amount | 0);
+      loadout.grantSilverBullet?.(n) ?? (loadout.instantRevives = (loadout.instantRevives || 0) + n);
+      this._remove(it);
+      this.bus.emit('loot:pickup', { kind: 'silver', amount: n, total: loadout.instantRevives });
       return true;
     }
     return false;
@@ -678,8 +966,17 @@ export class LootSystem {
       return `E · Pick up ${r} ${n}`;
     }
     if (it.kind === 'ammo') return `E · Pick up ${it.ammoType} ammo (${it.amount})`;
-    if (it.kind === 'armor') return `E · Pick up Armor Lv${it.level}`;
-    if (it.kind === 'heal') return `E · Pick up ${it.healType}`;
+    if (it.kind === 'armor') return `E · Armor vest Lv${it.level} + plate`;
+    if (it.kind === 'helmet') return 'E · Pick up Kevlar helmet';
+    if (it.kind === 'heal') {
+      if (it.healType === 'medkit') return 'E · Pick up medkit (7 to use)';
+      if (it.healType === 'stim') return 'E · Pick up stim';
+      return 'E · Pick up bandage (6 to use)';
+    }
+    if (it.kind === 'cash') return `E · Pick up $${it.amount | 0}`;
+    if (it.kind === 'silver' || it.kind === 'instant_revive') {
+      return 'E · Pick up silver bullet (self-revive)';
+    }
     return 'E · Pick up';
   }
 

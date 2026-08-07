@@ -99,34 +99,151 @@ function post(sink, x, y0, z, h, s = 0.35, col = C.metal) {
   sink.addSpan(x, y0, z, x + s, y0 + h, z + s, col);
 }
 
+/**
+ * Office clutter for one floor slab: desks, chairs, monitors, plants, partitions.
+ * Keeps a clear lane near center for elevators / stairs (caller should leave holes free).
+ */
+export function placeOfficeFloorFurniture(sink, x, z, w, d, floorY, rng, opts = {}) {
+  const inset = opts.inset ?? 1.1;
+  const x0 = x + inset;
+  const z0 = z + inset;
+  const x1 = x + w - inset;
+  const z1 = z + d - inset;
+  if (x1 - x0 < 6 || z1 - z0 < 5) return;
+
+  // Avoid center cross (stairs / elev often mid-building)
+  const midX0 = x + w * 0.38;
+  const midX1 = x + w * 0.62;
+  const midZ0 = z + d * 0.35;
+  const midZ1 = z + d * 0.65;
+  const clear = (px, pz, pw, pd) => {
+    const a0 = px;
+    const a1 = px + pw;
+    const b0 = pz;
+    const b1 = pz + pd;
+    if (a1 > midX0 && a0 < midX1 && b1 > midZ0 && b0 < midZ1) return false;
+    return true;
+  };
+
+  const deskW = 1.6;
+  const deskD = 0.75;
+  const cols = Math.min(4, Math.floor((x1 - x0) / 3.2));
+  const rows = Math.min(3, Math.floor((z1 - z0) / 3.4));
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (rng() < 0.18) continue; // empty desk slots
+      const px = x0 + 0.4 + c * ((x1 - x0 - deskW) / Math.max(1, cols - 0.01));
+      const pz = z0 + 0.5 + r * ((z1 - z0 - deskD - 1.2) / Math.max(1, rows - 0.01));
+      // Chair sits in front of desk (pz - 0.7); keep that lane free of elev/stairs
+      if (!clear(px, pz - 0.75, deskW, deskD + 1.0)) continue;
+      // Desk — monitor on +Z edge; sitter faces +Z toward screen
+      sink.addSpan(px, floorY, pz, px + deskW, floorY + 0.72, pz + deskD, C.wood);
+      // Legs hint
+      sink.addSpan(px + 0.05, floorY, pz + 0.05, px + 0.15, floorY + 0.7, pz + 0.15, C.metal);
+      sink.addSpan(px + deskW - 0.15, floorY, pz + deskD - 0.15, px + deskW - 0.05, floorY + 0.7, pz + deskD - 0.05, C.metal);
+      // Monitor (far edge of desk)
+      sink.addSpan(px + 0.45, floorY + 0.72, pz + deskD - 0.28, px + 1.05, floorY + 1.15, pz + deskD - 0.12, C.dark);
+      sink.addSpan(px + 0.5, floorY + 0.78, pz + deskD - 0.15, px + 1.0, floorY + 1.1, pz + deskD - 0.1, C.neonCyan);
+      // Keyboard slab (near sitter)
+      sink.addSpan(px + 0.4, floorY + 0.73, pz + 0.2, px + 1.1, floorY + 0.78, pz + 0.45, C.dark);
+      // Chair on the OPEN side of the desk, backrest away from desk (facing monitor)
+      const chx = px + deskW * 0.35;
+      const chz = pz - 0.7; // in front of desk (turned around vs old "behind" placement)
+      sink.addSpan(chx, floorY, chz, chx + 0.55, floorY + 0.45, chz + 0.55, C.dark);
+      // Backrest on far side of seat (away from desk)
+      sink.addSpan(chx + 0.05, floorY + 0.45, chz + 0.02, chx + 0.5, floorY + 0.95, chz + 0.18, 0x2a4a6a);
+    }
+  }
+
+  // Cubicle partitions along one side
+  if (w > 10 && rng() > 0.35) {
+    const px = x0 + (x1 - x0) * 0.55;
+    if (clear(px, z0 + 0.5, 0.12, z1 - z0 - 1)) {
+      sink.addSpan(px, floorY, z0 + 0.5, px + 0.12, floorY + 1.35, z1 - 0.5, C.gray, 'thin');
+    }
+  }
+
+  // Corner plants
+  const plantSpots = [
+    [x0 + 0.2, z0 + 0.2],
+    [x1 - 0.9, z0 + 0.2],
+    [x0 + 0.2, z1 - 0.9],
+    [x1 - 0.9, z1 - 0.9],
+  ];
+  for (const [px, pz] of plantSpots) {
+    if (rng() < 0.35) continue;
+    if (!clear(px, pz, 0.7, 0.7)) continue;
+    sink.addSpan(px, floorY, pz, px + 0.55, floorY + 0.4, pz + 0.55, C.sand);
+    sink.addSpan(px + 0.08, floorY + 0.4, pz + 0.08, px + 0.47, floorY + 1.35, pz + 0.47, C.green);
+    sink.addSpan(px + 0.15, floorY + 1.2, pz + 0.15, px + 0.4, floorY + 1.7, pz + 0.4, C.lime);
+  }
+
+  // Filing cabinets / copy machine
+  if (rng() > 0.4) {
+    const fx = x1 - 1.4;
+    const fz = z0 + 1.2;
+    if (clear(fx, fz, 0.7, 1.6)) {
+      sink.addSpan(fx, floorY, fz, fx + 0.65, floorY + 1.25, fz + 1.5, C.metalLite);
+      sink.addSpan(fx + 0.05, floorY + 0.4, fz + 0.1, fx + 0.6, floorY + 0.5, fz + 0.7, C.dark);
+      sink.addSpan(fx + 0.05, floorY + 0.85, fz + 0.8, fx + 0.6, floorY + 0.95, fz + 1.4, C.dark);
+    }
+  }
+  if (rng() > 0.55) {
+    const mx = x0 + 0.5;
+    const mz = z1 - 1.5;
+    if (clear(mx, mz, 1.2, 0.8)) {
+      sink.addSpan(mx, floorY, mz, mx + 1.1, floorY + 1.0, mz + 0.7, C.white);
+      sink.addSpan(mx + 0.15, floorY + 1.0, mz + 0.15, mx + 0.95, floorY + 1.15, mz + 0.55, C.glassDark);
+    }
+  }
+}
+
 function neonStrip(sink, x0, y, z0, x1, y2, z1, col) {
   sink.addSpan(x0, y, z0, x1, y2, z1, col);
 }
 
 // ===================== VEHICLES =====================
-export function placeVehicle(sink, x, z, baseY, rng, color = null) {
+/**
+ * Parked car. `alongZ=true` orients length along +Z (matches N–S parking stalls).
+ * Default is length along +X (driveway / street parallel).
+ */
+export function placeVehicle(sink, x, z, baseY, rng, color = null, alongZ = false) {
   const col = color ?? pick(rng, [
     0x2a4a8a, 0x8a2020, 0x1a6a3a, 0xc4a020, 0x1a1a1a, 0xd0d0d0, 0x6a2a8a, 0xe07020,
   ]);
   const L = 4.5 + rng() * 1.2;
   const W = 1.9;
   const H = 1.35 + rng() * 0.4;
+  // Local helpers: map car-space (length L, width W) into world XZ
+  const wx = (u, v) => (alongZ ? x + v : x + u);
+  const wz = (u, v) => (alongZ ? z + u : z + v);
+  const box = (u0, v0, y0, u1, v1, y1, c) => {
+    const xa = wx(u0, v0);
+    const za = wz(u0, v0);
+    const xb = wx(u1, v1);
+    const zb = wz(u1, v1);
+    sink.addSpan(
+      Math.min(xa, xb), y0, Math.min(za, zb),
+      Math.max(xa, xb), y1, Math.max(za, zb),
+      c
+    );
+  };
   // Body
-  sink.addSpan(x, baseY + 0.28, z, x + L, baseY + H * 0.55, z + W, col);
+  box(0, 0, baseY + 0.28, L, W, baseY + H * 0.55, col);
   // Cabin
-  sink.addSpan(x + L * 0.28, baseY + H * 0.48, z + 0.12, x + L * 0.72, baseY + H, z + W - 0.12, C.glassDark);
-  // Hood / trunk accents
-  sink.addSpan(x + 0.1, baseY + H * 0.5, z + 0.15, x + L * 0.28, baseY + H * 0.58, z + W - 0.15, col);
+  box(L * 0.28, 0.12, baseY + H * 0.48, L * 0.72, W - 0.12, baseY + H, C.glassDark);
+  // Hood
+  box(0.1, 0.15, baseY + H * 0.5, L * 0.28, W - 0.15, baseY + H * 0.58, col);
   // Wheels
   const wh = 0.42;
-  for (const [lx, lz] of [[0.55, -0.05], [0.55, W - 0.15], [L - 0.9, -0.05], [L - 0.9, W - 0.15]]) {
-    sink.addSpan(x + lx, baseY, z + lz, x + lx + 0.55, baseY + wh, z + lz + 0.35, C.dark);
+  for (const [lu, lv] of [[0.55, -0.05], [0.55, W - 0.15], [L - 0.9, -0.05], [L - 0.9, W - 0.15]]) {
+    box(lu, lv, baseY, lu + 0.55, lv + 0.35, baseY + wh, C.dark);
   }
-  // Lights
-  sink.addSpan(x + L - 0.12, baseY + 0.45, z + 0.15, x + L, baseY + 0.7, z + 0.45, C.yellowHot);
-  sink.addSpan(x + L - 0.12, baseY + 0.45, z + W - 0.45, x + L, baseY + 0.7, z + W - 0.15, C.yellowHot);
-  sink.addSpan(x, baseY + 0.5, z + 0.2, x + 0.1, baseY + 0.72, z + 0.5, C.redHot);
-  sink.addSpan(x, baseY + 0.5, z + W - 0.5, x + 0.1, baseY + 0.72, z + W - 0.2, C.redHot);
+  // Headlights (front = +L) / taillights (rear = 0)
+  box(L - 0.12, 0.15, baseY + 0.45, L, 0.45, baseY + 0.7, C.yellowHot);
+  box(L - 0.12, W - 0.45, baseY + 0.45, L, W - 0.15, baseY + 0.7, C.yellowHot);
+  box(0, 0.2, baseY + 0.5, 0.1, 0.5, baseY + 0.72, C.redHot);
+  box(0, W - 0.5, baseY + 0.5, 0.1, W - 0.2, baseY + 0.72, C.redHot);
 }
 
 export function placeTruck(sink, x, z, baseY, rng) {
@@ -238,9 +355,15 @@ export function placeGasStation(sink, terrain, x, z, rng) {
     sink.addSpan(px - 0.15, baseY + 1.7, z + 6.0, px + 1.55, baseY + 2.55, z + 7.8, C.redHot);
     neonStrip(sink, px + 0.2, baseY + 2.4, z + 6.3, px + 1.2, baseY + 2.65, z + 7.5, C.yellowHot);
   }
-  // Store
-  makeShed(sink, { x: x + 2, z: z + 16, w: 16, d: 9, h: 4.0, baseY, color: C.white, doorW: 2.6 });
-  neonStrip(sink, x + 2, baseY + 3.5, z + 15.9, x + 18, baseY + 3.95, z + 16.15, C.neonPink);
+  // Store shell
+  const sx = x + 2;
+  const sz = z + 16;
+  const sw = 16;
+  const sd = 9;
+  makeShed(sink, { x: sx, z: sz, w: sw, d: sd, h: 4.0, baseY, color: C.white, doorW: 2.6 });
+  neonStrip(sink, sx, baseY + 3.5, sz - 0.1, sx + sw, baseY + 3.95, sz + 0.15, C.neonPink);
+  // Interior floor is already in shed — add aisles, shelves, cashier
+  placeGasStoreInterior(sink, sx, sz, sw, sd, baseY, rng);
   // Price totem
   post(sink, x - 3, baseY, z + 3, 10, 0.5, C.metal);
   sink.addSpan(x - 5.5, baseY + 7.5, z + 2, x - 0.5, baseY + 11.2, z + 4.2, C.yellowHot);
@@ -248,6 +371,51 @@ export function placeGasStation(sink, terrain, x, z, rng) {
   // Trash + air pump
   sink.addSpan(x + 20, baseY, z + 17, x + 21.2, baseY + 1.1, z + 18.2, C.dark);
   post(sink, x + 22, baseY, z + 6, 1.4, 0.25, C.metal);
+}
+
+/** Convenience store aisles, food shelves, coolers, cashier desk. */
+function placeGasStoreInterior(sink, x, z, w, d, baseY, rng) {
+  const y = baseY + BUILDINGS.GROUND_SLAB_LIFT + 0.02;
+  // Cashier counter near south door (front of store)
+  const cx = x + w * 0.5 - 1.4;
+  const cz = z + 1.1;
+  sink.addSpan(cx, y, cz, cx + 2.8, y + 1.05, cz + 0.55, C.wood);
+  sink.addSpan(cx + 0.15, y + 1.05, cz + 0.1, cx + 1.0, y + 1.2, cz + 0.45, C.dark); // register
+  sink.addSpan(cx + 1.1, y + 1.05, cz + 0.15, cx + 1.55, y + 1.18, cz + 0.4, C.neonCyan); // screen
+  // Cashier figure (simple torso)
+  sink.addSpan(cx + 1.9, y, cz + 0.7, cx + 2.35, y + 1.55, cz + 1.05, 0x2a4a6a);
+  sink.addSpan(cx + 1.95, y + 1.55, cz + 0.75, cx + 2.3, y + 1.85, cz + 1.0, 0xd4b090);
+
+  // Three grocery aisles running N–S
+  const aisleColors = [0xc03030, 0xf0e8d0, 0x3a8a40, 0xf0a020, 0x4a6aaa, 0xd0d0d8];
+  for (let a = 0; a < 3; a++) {
+    const ax = x + 1.6 + a * 4.2;
+    // Left shelf unit
+    sink.addSpan(ax, y, z + 2.4, ax + 0.55, y + 1.85, z + d - 1.4, C.metalLite);
+    // Right shelf unit (aisle gap ~1.1m walkable)
+    sink.addSpan(ax + 1.65, y, z + 2.4, ax + 2.2, y + 1.85, z + d - 1.4, C.metalLite);
+    // Product blocks on shelves
+    for (let row = 0; row < 4; row++) {
+      const pz = z + 2.6 + row * 1.35;
+      const col = aisleColors[(a * 2 + row) % aisleColors.length];
+      sink.addSpan(ax + 0.05, y + 0.35 + (row % 2) * 0.55, pz, ax + 0.5, y + 0.7 + (row % 2) * 0.55, pz + 0.9, col);
+      sink.addSpan(ax + 1.7, y + 0.4 + ((row + 1) % 2) * 0.5, pz, ax + 2.15, y + 0.75 + ((row + 1) % 2) * 0.5, pz + 0.9,
+        aisleColors[(a + row + 3) % aisleColors.length]);
+    }
+  }
+  // Back-wall coolers
+  for (let i = 0; i < 4; i++) {
+    const cx2 = x + 1.2 + i * 3.5;
+    sink.addSpan(cx2, y, z + d - 1.15, cx2 + 2.8, y + 2.1, z + d - 0.35, C.metal);
+    sink.addSpan(cx2 + 0.15, y + 0.35, z + d - 1.05, cx2 + 2.65, y + 1.95, z + d - 0.95, C.glass);
+    neonStrip(sink, cx2 + 0.2, y + 2.0, z + d - 1.1, cx2 + 2.6, y + 2.12, z + d - 0.4, C.neonCyan);
+  }
+  // Snack end-cap near door
+  sink.addSpan(x + w - 2.4, y, z + 1.8, x + w - 1.1, y + 1.4, z + 3.2, C.yellowHot);
+  for (let i = 0; i < 3; i++) {
+    sink.addSpan(x + w - 2.3, y + 0.3 + i * 0.35, z + 1.9, x + w - 1.2, y + 0.55 + i * 0.35, z + 3.1,
+      pick(rng, [C.redHot, C.orange, C.neonPink]));
+  }
 }
 
 // ===================== RESTAURANT / FAST FOOD =====================
@@ -322,8 +490,14 @@ export function placeAutoRepair(sink, terrain, x, z, rng) {
 
 // ===================== FIRE STATION =====================
 export function placeFireStation(sink, terrain, x, z, rng) {
-  const baseY = groundY(terrain, x, z, 36, 22);
-  sink.addSpan(x - 2, baseY - 0.05, z - 8, x + 38, baseY + 0.04, z + 20, C.concrete);
+  const padW = 36;
+  const padD = 22;
+  const fh = footprintHeights(terrain, x, z, padW, padD);
+  const baseY = (Number.isFinite(fh.max) ? fh.max : groundY(terrain, x, z, padW, padD));
+  sink.addSpan(
+    x - 2, (Number.isFinite(fh.min) ? fh.min : baseY) - 0.2, z - 8,
+    x + 38, baseY + 0.04, z + 20, C.concrete
+  );
   // Bays
   makeShed(sink, { x, z, w: 26, d: 18, h: 7.2, baseY, color: C.white, doorW: 7 });
   neonStrip(sink, x, baseY + 6.3, z - 0.12, x + 26, baseY + 7.0, z + 0.2, C.redHot);
@@ -350,10 +524,18 @@ export function placeFireStation(sink, terrain, x, z, rng) {
 
 // ===================== BUSINESS =====================
 export function placeBusinessCenter(sink, terrain, x, z, rng) {
-  const baseY = groundY(terrain, x, z, 32, 26) - 0.06;
+  // Dense sample seat — never float (user: buildings hovering south of grid)
+  const w = 18 + rng() * 8;
+  const d = 14 + rng() * 6;
+  const fh = footprintHeights(terrain, x, z, w, d);
+  const baseY = (Number.isFinite(fh.max) ? fh.max : groundY(terrain, x, z, w, d)) - 0.06;
   const floors = 4 + Math.floor(rng() * 4);
-  const w = 20 + rng() * 10;
-  const d = 16 + rng() * 8;
+  // Plinth under full pad
+  sink.addSpan(
+    x - 0.3, (Number.isFinite(fh.min) ? fh.min : baseY) - 0.35, z - 0.3,
+    x + w + 0.3, baseY + 0.08, z + d + 0.3,
+    C.concrete
+  );
   makeBuilding(sink, {
     x, z, w, d, floors,
     baseY, color: pick(rng, [C.glass, C.glassDark, C.white, 0x8a98a8, 0x5a6870]),
@@ -361,6 +543,15 @@ export function placeBusinessCenter(sink, terrain, x, z, rng) {
   });
   // Kit buildings already have interior stairs — exterior access only (no 2nd elevator)
   addBuildingAccess(sink, x, z, w, d, baseY, floors, BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain);
+  // Office interiors
+  const fhKit = BUILDINGS.FLOOR_HEIGHT;
+  const gh = BUILDINGS.GROUND_FLOOR_HEIGHT;
+  for (let f = 0; f < floors; f++) {
+    const fy = f === 0
+      ? baseY + (BUILDINGS.GROUND_SLAB_LIFT || 0.08) + 0.02
+      : baseY + gh + (f - 1) * fhKit + 0.02;
+    placeOfficeFloorFurniture(sink, x, z, w, d, fy, rng);
+  }
   // Glass ribbon accents per floor
   for (let f = 1; f < floors; f++) {
     const y = baseY + BUILDINGS.GROUND_FLOOR_HEIGHT + (f - 1) * BUILDINGS.FLOOR_HEIGHT + 1.2;
@@ -938,13 +1129,17 @@ export function addBuildingAccess(
 /**
  * Hollow skyline tower: exterior shell + floor slabs, interior elevator + stairs.
  * No exterior fire escapes / ladders (city skyline = internal circulation only).
+ *
+ * Optional size: pass `opts.w` / `opts.d` so downtown blocks never overflow into
+ * the neighbor (default random size is only for free-placed fringe towers).
  */
-export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain = null) {
+export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain = null, opts = null) {
   const fCount = Math.min(24, floors ?? (8 + Math.floor(rng() * 16)));
   const floorH = 3.5;
   const h = fCount * floorH;
-  const bodyW = 12 + rng() * 10;
-  const d = 12 + rng() * 10;
+  // CRITICAL: when downtown passes w/d, honor them — random body used to grow past the street
+  const bodyW = (opts?.w != null && opts.w > 4) ? opts.w : (12 + rng() * 10);
+  const d = (opts?.d != null && opts.d > 4) ? opts.d : (12 + rng() * 10);
   const col = pick(rng, [
     C.glass, C.glassDark, 0x4a5868, 0x2a3848, C.white, 0x6a8090, 0x3a4850, 0xc8d0d8,
   ]);
@@ -953,10 +1148,10 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain
   const seat = baseY - 0.06;
   const T = 0.35; // facade thickness
 
-  // Foundation skirt under tower (covers residual grade variance)
+  // Foundation skirt under tower (covers residual grade variance) — keep tight, no street bleed
   sink.addSpan(
-    x - 0.35, baseY - 0.55, z - 0.35,
-    x + bodyW + 0.35, seat + 0.1, z + d + 0.35,
+    x - 0.2, baseY - 0.55, z - 0.2,
+    x + bodyW + 0.2, seat + 0.1, z + d + 0.2,
     C.concrete
   );
 
@@ -1023,8 +1218,10 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain
     glassFaceZ(z + 0.4, z + d - 0.4, yB, yT, x + bodyW - T, x + bodyW - T * 0.45);
   }
 
-  // Podium / setback — NEVER cover the south entrance or fill the interior
-  const variant = Math.floor(rng() * 3);
+  // Podium / setback — NEVER cover the south entrance or fill the interior.
+  // Skip side wings when size is locked (downtown block) so we don't bleed into the street/neighbor.
+  const sizeLocked = !!(opts?.w || opts?.d);
+  const variant = sizeLocked ? 0 : Math.floor(rng() * 3);
   if (variant === 1) {
     // Side wings only (east/west), leave south clear for doors
     sink.addSpan(x - 1.0, seat, z + 1.5, x - 0.05, seat + floorH * 2.2, z + d - 0.5, C.concrete);
@@ -1095,6 +1292,11 @@ export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain
   const floorYs = [];
   for (let f = 0; f < fCount; f++) {
     floorYs.push(seat + (f === 0 ? 0.2 : f * floorH + 0.18));
+  }
+  // Office desks / chairs / plants on most floors (skip every 3rd for perf + empty conference feel)
+  for (let f = 0; f < fCount; f++) {
+    if (f > 0 && f % 3 === 0) continue;
+    placeOfficeFloorFurniture(sink, x, z, bodyW, d, floorYs[f], rng);
   }
   registerBuilding({
     x, z, w: bodyW, d, floors: fCount, baseY: seat, floorYs, roofY: roof,
@@ -1191,18 +1393,18 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
       }
 
       if (parkingBlocks.has(`${c},${r}`)) {
-        // Open surface lot inside the block
+        // Open surface lot inside the block — claim whole block so scatter can't stack
         const lotX = bx + 3;
         const lotZ = bz + 3;
         const lotW = blockW - 6;
         const lotD = blockD - 6;
-        grid.tryClaim(lotX, lotZ, lotW, lotD, 1);
-        for (let i = 0; i < 5; i++) {
-          const vx = lotX + 2 + (i % 3) * 6;
-          const vz = lotZ + 3 + Math.floor(i / 3) * 10;
-          // Stay inside the open lot only
-          if (vx + 5 > lotX + lotW || vz + 2.5 > lotZ + lotD) continue;
-          if (rng() > 0.4) placeVehicle(sink, vx, vz, blockBase, rng);
+        grid.tryClaim(bx + 1, bz + 1, blockW - 2, blockD - 2, 1.5);
+        // Stall-aligned cars (length along Z, matching painted stalls elsewhere)
+        for (let i = 0; i < 6; i++) {
+          const vx = lotX + 1.5 + (i % 3) * 7.5;
+          const vz = lotZ + 2 + Math.floor(i / 3) * 11;
+          if (vx + 2.2 > lotX + lotW || vz + 5.2 > lotZ + lotD) continue;
+          if (rng() > 0.35) placeVehicle(sink, vx, vz, blockBase, rng, null, true);
         }
         continue;
       }
@@ -1211,19 +1413,19 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
       const waterfront = r >= rows - 2;
       const financial = distCore < 2.0;
 
-      // One tower per block, inset from street corridor
-      const margin = 5;
-      const maxW = blockW - margin * 2;
-      const maxD = blockD - margin * 2;
-      const tw = Math.min(maxW, 12 + rng() * 10);
-      const td = Math.min(maxD, 12 + rng() * 10);
-      // Prefer center-ish seating on the level plate (avoid random dip corners)
-      const ox = margin + (maxW - tw) * 0.35 + rng() * Math.max(0.2, (maxW - tw) * 0.3);
-      const oz = margin + (maxD - td) * 0.35 + rng() * Math.max(0.2, (maxD - td) * 0.3);
+      // ONE tower per block, CENTERED, hard setback so street gap is always clear.
+      // (Previously random offset + placeSkylineTower ignoring size → neighbors clipped.)
+      const setback = 8.5; // m from block edge → ~12m street + 17m total gap between facades
+      const maxW = blockW - setback * 2; // 15
+      const maxD = blockD - setback * 2; // 13
+      const tw = Math.min(maxW, 12 + rng() * 3); // 12–15
+      const td = Math.min(maxD, 11 + rng() * 2); // 11–13
+      const ox = (blockW - tw) * 0.5;
+      const oz = (blockD - td) * 0.5;
       const tx = bx + ox;
       const tz = bz + oz;
-      // Claim full block footprint so nothing else stacks here
-      if (!grid.tryClaim(tx - 1, tz - 1, tw + 4, td + 3, 1.5)) continue;
+      // Claim full block + half-street so scatter / landmarks cannot nest in
+      if (!grid.tryClaim(bx - 2, bz - 2, blockW + 4, blockD + 4, 1)) continue;
       // Seat on densest max under footprint — never lift above ground (no hover gap)
       const fh = footprintHeights(terrain, tx, tz, tw, td);
       if (!Number.isFinite(fh.max) || fh.max < MIN_DRY) continue;
@@ -1239,8 +1441,8 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
       // Always pour a concrete plinth under the footprint (kills float gaps)
       const plinthBot = Math.min(fh.min, seatY) - 0.2;
       sink.addSpan(
-        tx - 0.25, plinthBot, tz - 0.25,
-        tx + tw + 0.25, seatY + 0.06, tz + td + 0.25,
+        tx - 0.15, plinthBot, tz - 0.15,
+        tx + tw + 0.15, seatY + 0.06, tz + td + 0.15,
         C.concrete
       );
 
@@ -1254,30 +1456,41 @@ export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, 
         });
         // Downtown mid-rises: entrance only, no exterior fire escapes
         addBuildingAccess(sink, tx, tz, tw, td, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, 3, false, terrain, false);
+        // Desks / chairs / plants on walkable floors
+        const fhKit = BUILDINGS.FLOOR_HEIGHT;
+        const gh = BUILDINGS.GROUND_FLOOR_HEIGHT;
+        for (let f = 0; f < floors; f++) {
+          if (f > 0 && f % 2 === 0) continue;
+          const fy = f === 0
+            ? seat + (BUILDINGS.GROUND_SLAB_LIFT || 0.08) + 0.02
+            : seat + gh + (f - 1) * fhKit + 0.02;
+          placeOfficeFloorFurniture(sink, tx, tz, tw, td, fy, rng);
+        }
       } else {
-        placeSkylineTower(sink, tx, tz, seatY, rng, floors, terrain);
+        // Pass locked w/d so tower cannot grow past the block setback
+        placeSkylineTower(sink, tx, tz, seatY, rng, floors, terrain, { w: tw, d: td });
       }
       towers++;
     }
   }
 
-  // Waterfront hotels (south) — spaced, occupancy checked; seat on terrain max
-  for (let i = 0; i < 4; i++) {
-    const hx = originX + 18 + i * 42;
-    const hz = originZ + rows * stepZ + 12;
-    const tw = 16;
-    const td = 14;
-    if (!grid.tryClaim(hx, hz, tw + 3, td + 1, 3)) continue;
+  // Waterfront hotels (south of grid) — spaced further, locked size, hard ground seat
+  for (let i = 0; i < 3; i++) {
+    const tw = 14;
+    const td = 12;
+    const hx = originX + 24 + i * 52;
+    const hz = originZ + rows * stepZ + 22; // further south so not jammed on last row
+    if (!grid.tryClaim(hx - 4, hz - 4, tw + 8, td + 8, 3)) continue;
     const fh = footprintHeights(terrain, hx, hz, tw, td);
     if (!Number.isFinite(fh.max) || fh.max < MIN_DRY) continue;
-    if (fh.delta > 2.5) continue;
+    if (fh.delta > 1.6) continue;
     const seatY = fh.max;
     sink.addSpan(
-      hx - 0.3, fh.min - 0.25, hz - 0.3,
-      hx + tw + 0.3, seatY + 0.06, hz + td + 0.3,
+      hx - 0.25, Math.min(fh.min, seatY) - 0.5, hz - 0.25,
+      hx + tw + 0.25, seatY + 0.08, hz + td + 0.25,
       C.concrete
     );
-    placeSkylineTower(sink, hx, hz, seatY, rng, 12 + Math.floor(rng() * 6), terrain);
+    placeSkylineTower(sink, hx, hz, seatY, rng, 12 + Math.floor(rng() * 6), terrain, { w: tw, d: td });
     towers++;
   }
 

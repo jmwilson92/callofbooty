@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { BOTS, WORLD, PLAYER } from '../config.js';
+import { BOTS, WORLD, PLAYER, BR, ARMOR } from '../config.js';
 import { makeBotParts } from './Targets.js';
 import { worldBuildings } from '../world/BuildingRegistry.js';
 import { rayAABB } from './Hitscan.js';
 
 /**
- * World bots — wander, approach buildings, some engage the player with gunfire.
+ * World bots — fireteams of 4, share aggro, rotate from gas, ramp difficulty.
  */
 
 const _cand = [];
@@ -32,6 +32,11 @@ export class BotSystem {
     this.scene.add(this.group);
     this.bots = [];
     this._live = [];
+    // BR pressure multipliers (updated by Match/Zone)
+    this._pressure = { damage: 1, accuracy: 1, aggro: 1, speed: 1, rampIndex: 0 };
+    this._zone = null; // latest zone snapshot
+    /** When false, AI is driven by network snapshots from the room authority */
+    this.authority = true;
   }
 
   setLoot(loot) {
@@ -39,15 +44,41 @@ export class BotSystem {
   }
 
   /**
-   * Spawn bots in squads of 4–5 around the map.
+   * @param {number} rampIndex
+   * @param {object|null} zoneSnap
+   */
+  setBrPressure(rampIndex = 0, zoneSnap = null) {
+    const ramp = BR.botRamp || {};
+    const i = Math.max(0, Math.min((ramp.damage?.length ?? 1) - 1, rampIndex | 0));
+    this._pressure = {
+      damage: ramp.damage?.[i] ?? 1,
+      accuracy: ramp.accuracy?.[i] ?? 1,
+      aggro: ramp.aggro?.[i] ?? 1,
+      speed: ramp.speed?.[i] ?? 1,
+      rampIndex: i,
+    };
+    this._zone = zoneSnap;
+  }
+
+  /**
+   * Spawn bots in squads of 4 around the map.
    * Teams share aggro and stick together.
    */
   spawn(count = BOTS.COUNT) {
+    // BR: exact botCount if set, else squads × size
+    if (BR.enabled) {
+      if (BR.botCount != null && BR.botCount > 0) {
+        count = BR.botCount | 0;
+      } else if (BR.botSquads && BR.squadSizeMin) {
+        const size = BR.squadSizeMax ?? BR.squadSizeMin ?? 4;
+        count = BR.botSquads * size;
+      }
+    }
     this.clear();
     const cx = PLAYER.SPAWN.x;
     const cz = PLAYER.SPAWN.z;
-    const tMin = BOTS.TEAM_SIZE_MIN ?? 4;
-    const tMax = BOTS.TEAM_SIZE_MAX ?? 5;
+    const tMin = BR.enabled ? (BR.squadSizeMin ?? 4) : (BOTS.TEAM_SIZE_MIN ?? 4);
+    const tMax = BR.enabled ? (BR.squadSizeMax ?? tMin) : (BOTS.TEAM_SIZE_MAX ?? 5);
     const spacing = BOTS.TEAM_SPACING ?? 4.5;
     let placed = 0;
     let teamId = 0;
@@ -139,6 +170,8 @@ export class BotSystem {
       aimYaw: 0,
       suppressT: 0,
       flankSide: hash2(id, 31) > 0.5 ? 1 : -1,
+      // Minimap fog-of-war: only visible while recently firing (or aerial spot)
+      revealT: 0,
     };
     bot.applyDamage = (dmg, part) => this.applyDamage(bot, dmg, part);
     this._pickWaypoint(bot, id * 17 + 1);
@@ -146,17 +179,93 @@ export class BotSystem {
     return bot;
   }
 
-  /** Share aggro across squad when one member spots the player. */
-  _alertTeam(teamId, exceptId = -1) {
+  /** Share aggro + threat across squad. */
+  _alertTeam(teamId, exceptId = -1, threat = null) {
     if (!BOTS.TEAM_SHARE_AGGRO) return;
     for (const b of this.bots) {
       if (b.dead || b.teamId !== teamId || b.id === exceptId) continue;
-      if (b.state === 'wander') {
+      if (threat) b._threat = threat;
+      if (b.state === 'wander' || !b._threat) {
         b.state = 'engage';
         b.aggroT = BOTS.REACTION_TIME ?? 0.45;
         b.pauseT = 0;
       }
     }
+  }
+
+  /**
+   * Nearest hostile: player (if vulnerable) or other bot squads.
+   * @returns {{ kind:'player'|'bot', x:number, y:number, z:number, bot?:object }|null}
+   */
+  _findThreat(bot, playerPos, playerVitals, playerAirborne, aggroRange) {
+    let best = null;
+    let bestD = aggroRange;
+    const eyeY = bot.y + 1.55;
+
+    // Player
+    if (
+      playerPos
+      && playerVitals
+      && (playerVitals.health ?? 0) > 0
+      && !playerVitals.downed
+      && !playerVitals.dead
+      && !playerAirborne
+    ) {
+      const dx = playerPos.x - bot.x;
+      const dz = playerPos.z - bot.z;
+      const d = Math.hypot(dx, dz);
+      const dy = (playerPos.y ?? 0) - bot.y;
+      if (d < bestD && dy < 9) {
+        if (this._hasLOS(bot.x, eyeY, bot.z, playerPos.x, playerPos.y + 1.4, playerPos.z)) {
+          bestD = d;
+          best = {
+            kind: 'player',
+            x: playerPos.x,
+            y: playerPos.y,
+            z: playerPos.z,
+          };
+        }
+      }
+    }
+
+    // Other bot teams
+    if (BOTS.BOT_VS_BOT !== false) {
+      for (const o of this.bots) {
+        if (o.dead || o.id === bot.id || o.teamId === bot.teamId) continue;
+        const dx = o.x - bot.x;
+        const dz = o.z - bot.z;
+        const d = Math.hypot(dx, dz);
+        if (d >= bestD) continue;
+        if (!this._hasLOS(bot.x, eyeY, bot.z, o.x, o.y + 1.4, o.z)) continue;
+        bestD = d;
+        best = { kind: 'bot', x: o.x, y: o.y, z: o.z, bot: o };
+      }
+    }
+    return best;
+  }
+
+  /** Shoot another bot (team fights). */
+  _botShootBot(attacker, target, dist) {
+    if (!target || target.dead) return;
+    const acc = Math.max(0.55, this._pressure.accuracy || 1);
+    const spread = ((BOTS.FIRE_SPREAD_DEG ?? 5.5) / acc) * (1 + dist / 38);
+    const miss = Math.abs(hash2(attacker.id + target.id, (performance.now() * 0.1) | 0) - 0.5) * 2 * spread;
+    if (miss > 2.8) return;
+    let dmg = (BOTS.FIRE_DAMAGE ?? 7) * (this._pressure.damage || 1) * 0.92;
+    if (dist > 28) dmg *= Math.max(0.4, 1 - (dist - 28) / 45);
+    this.applyDamage(target, dmg, 'chest', { source: 'bot' });
+    // Muzzle flash
+    const gun = attacker.mesh?.userData?.gun;
+    if (gun) {
+      gun.traverse((o) => {
+        if (o.isMesh && o.material?.emissive) {
+          o.material.emissive.setHex(0xffaa40);
+          o.material.emissiveIntensity = 1.2;
+        }
+      });
+      attacker._muzzleT = 0.06;
+    }
+    attacker.revealT = Math.max(attacker.revealT || 0, BOTS.MAP_REVEAL_FIRE ?? 2.8);
   }
 
   /**
@@ -395,8 +504,18 @@ export class BotSystem {
     bot.parts = makeBotParts(bot.x, bot.y, bot.z);
   }
 
-  applyDamage(bot, dmg, part) {
+  /**
+   * @param {object} bot
+   * @param {number} dmg
+   * @param {string} [part]
+   * @param {{ remote?: boolean, skipLoot?: boolean, source?: string }} [opts]
+   *   source: 'player' | 'bot' | 'gas' | 'remote' | 'env'  (default player)
+   */
+  applyDamage(bot, dmg, part, opts = null) {
     if (bot.dead) return { killed: false, applied: 0 };
+    const remote = !!opts?.remote;
+    const source = opts?.source
+      || (remote ? 'remote' : (part === 'gas' ? 'gas' : 'player'));
     let remaining = dmg;
     if (bot.armor > 0) {
       const absorbed = Math.min(bot.armor, remaining);
@@ -429,12 +548,20 @@ export class BotSystem {
           }
         }
       });
-      // Drop loot around the body once
-      if (this.loot?.spawnBotDrop) {
+      // Drop loot around the body once (local player kills only)
+      if (source === 'player' && !remote && !opts?.skipLoot && this.loot?.spawnBotDrop) {
         this.loot.spawnBotDrop(bot.x, bot.z, bot.id * 9973 + 17);
         bot.droppedLoot = true;
       }
-      this.bus?.emit?.('bot:killed', { id: bot.id, part, x: bot.x, z: bot.z });
+      this.bus?.emit?.('bot:killed', {
+        id: bot.id,
+        part,
+        x: bot.x,
+        z: bot.z,
+        y: bot.y,
+        remote,
+        source,
+      });
       return { killed: true, applied: dmg };
     }
     // Flinch tint
@@ -445,16 +572,222 @@ export class BotSystem {
       }
     });
     bot._flinchT = 0.12;
+    // Only sync player-dealt damage over party (not bot-vs-bot spam)
+    if (!remote && source === 'player') {
+      this.bus?.emit?.('bot:damaged', {
+        id: bot.id,
+        dmg: remaining,
+        health: bot.health,
+        armor: bot.armor,
+        part,
+        x: bot.x,
+        z: bot.z,
+        source,
+      });
+    }
     return { killed: false, applied: dmg };
+  }
+
+  /**
+   * Apply a kill from a party peer so both clients see the same corpse.
+   * Bot ids are deterministic from seed, so id match works across friends.
+   * @param {{ botId?:number, id?:number, x?:number, z?:number, part?:string }} msg
+   */
+  applyRemoteKill(msg) {
+    if (!msg) return false;
+    // msg.id is often the peer id string — never use that as botId
+    const id = Number(msg.botId);
+    let bot = Number.isFinite(id) ? this.bots.find((b) => b.id === id) : null;
+    // Fallback: nearest live bot to reported death point (AI desync)
+    if ((!bot || bot.dead) && msg.x != null && msg.z != null) {
+      let best = null;
+      let bestD = 40; // wide — bots wander independently per client
+      for (const b of this.bots) {
+        if (b.dead) continue;
+        const d = Math.hypot(b.x - msg.x, b.z - msg.z);
+        if (d < bestD) {
+          bestD = d;
+          best = b;
+        }
+      }
+      bot = best;
+    }
+    if (!bot || bot.dead) return false;
+    // Snap corpse to reported death point so both players see the same pile
+    if (msg.x != null && msg.z != null) {
+      bot.x = msg.x;
+      bot.z = msg.z;
+      if (msg.y != null) bot.y = msg.y;
+      else bot.y = this.terrain.heightAt(bot.x, bot.z);
+      bot.mesh.position.set(bot.x, bot.y + 0.15, bot.z);
+    }
+    this.applyDamage(bot, 9999, msg.part || 'remote', { remote: true, skipLoot: true });
+    return true;
+  }
+
+  /**
+   * Apply damage from a party peer (partial health sync).
+   * @param {{ botId?:number, id?:number, dmg?:number, health?:number, armor?:number, x?:number, z?:number, part?:string }} msg
+   */
+  applyRemoteDamage(msg) {
+    if (!msg) return false;
+    const id = Number(msg.botId);
+    const bot = Number.isFinite(id) ? this.bots.find((b) => b.id === id && !b.dead) : null;
+    if (!bot) return false;
+    if (msg.health != null && msg.health < bot.health) {
+      bot.health = msg.health;
+      if (msg.armor != null) bot.armor = msg.armor;
+      if (bot.health <= 0) {
+        return this.applyRemoteKill({ ...msg, botId: bot.id });
+      }
+      // Flinch
+      bot.mesh.traverse((o) => {
+        if (o.isMesh && o.material && o.material.emissive) {
+          o.material.emissive.setHex(0x440000);
+          o.material.emissiveIntensity = 0.6;
+        }
+      });
+      bot._flinchT = 0.12;
+      return true;
+    }
+    if (msg.dmg > 0) {
+      this.applyDamage(bot, msg.dmg, msg.part || 'remote', { remote: true, skipLoot: true });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Compact snapshot for party authority → clients (same bot ids on all machines).
+   * @returns {Array<Array<number>>}
+   */
+  getNetSnapshot() {
+    const out = [];
+    for (const b of this.bots) {
+      out.push([
+        b.id | 0,
+        Math.round(b.x * 4) / 4,
+        Math.round(b.y * 4) / 4,
+        Math.round(b.z * 4) / 4,
+        Math.round((b.yaw || 0) * 50) / 50,
+        b.dead ? 1 : 0,
+        b.dead ? 0 : Math.max(0, Math.round(b.health || 0)),
+        b.revealT > 0 ? 1 : 0,
+      ]);
+    }
+    return out;
+  }
+
+  /**
+   * Apply host bot world so all friends see the same enemies.
+   * @param {Array<Array<number>>|null} snap
+   * @param {number} dt
+   */
+  applyNetSnapshot(snap, dt = 1 / 20) {
+    if (!Array.isArray(snap) || !snap.length) return;
+    const byId = new Map();
+    for (const b of this.bots) byId.set(b.id, b);
+    const k = 1 - Math.exp(-12 * Math.max(0.001, dt));
+
+    for (const row of snap) {
+      if (!row || row.length < 6) continue;
+      const id = row[0] | 0;
+      const x = +row[1];
+      const y = +row[2];
+      const z = +row[3];
+      const yaw = +row[4];
+      const dead = !!row[5];
+      const health = row[6] | 0;
+      const reveal = !!row[7];
+      const b = byId.get(id);
+      if (!b) continue;
+
+      if (dead) {
+        if (!b.dead) {
+          b.x = x; b.y = y; b.z = z; b.yaw = yaw;
+          this.applyDamage(b, 9999, 'remote', { remote: true, source: 'remote', skipLoot: true });
+        } else {
+          b.x = x; b.y = y; b.z = z;
+          if (b.mesh) b.mesh.position.set(x, y + 0.15, z);
+        }
+        continue;
+      }
+
+      // Snap hard if far (desync), else soft-follow
+      const err = Math.hypot(x - b.x, z - b.z);
+      if (err > 3) {
+        b.x = x; b.y = y; b.z = z; b.yaw = yaw;
+      } else {
+        b.x += (x - b.x) * k;
+        b.y += (y - b.y) * k;
+        b.z += (z - b.z) * k;
+        let dy = yaw - (b.yaw || 0);
+        while (dy > Math.PI) dy -= Math.PI * 2;
+        while (dy < -Math.PI) dy += Math.PI * 2;
+        b.yaw = (b.yaw || 0) + dy * k;
+      }
+      b.health = health;
+      if (reveal) b.revealT = Math.max(b.revealT || 0, 0.6);
+      if (b.mesh) {
+        b.mesh.position.set(b.x, b.y, b.z);
+        b.mesh.rotation.y = b.yaw;
+        b.mesh.visible = true;
+      }
+      this._syncParts(b);
+    }
+  }
+
+  /** Visual-only tick when another peer is bot authority. */
+  _tickNonAuthority(dt) {
+    for (const bot of this.bots) {
+      if (bot.revealT > 0) bot.revealT = Math.max(0, bot.revealT - dt);
+      if (bot._flinchT > 0) {
+        bot._flinchT -= dt;
+        if (bot._flinchT <= 0) {
+          bot.mesh?.traverse?.((o) => {
+            if (o.isMesh && o.material?.emissive) {
+              o.material.emissive.setHex(0x000000);
+              o.material.emissiveIntensity = 0;
+            }
+          });
+        }
+      }
+      if (bot.dead) {
+        bot.respawnT = (bot.respawnT || 0) - dt;
+        if (bot.mesh) {
+          bot.mesh.position.set(bot.x, bot.y + 0.15, bot.z);
+          if (bot.respawnT < 8 && bot.mesh) {
+            const a = Math.max(0.15, bot.respawnT / 8);
+            bot.mesh.traverse((o) => {
+              if (o.isMesh && o.material && o.material.opacity != null) {
+                o.material.transparent = true;
+                o.material.opacity = a;
+              }
+            });
+          }
+        }
+        if (bot.respawnT <= 0 && bot.noRespawn && bot.mesh) bot.mesh.visible = false;
+      }
+    }
   }
 
   /**
    * @param {number} dt
    * @param {{x:number,y:number,z:number}|null} playerPos
    * @param {{ health:number, armor:number }|null} playerVitals  WeaponSystem vitals
+   * @param {{ inVehicle?: boolean, rideType?: string|null, airborne?: boolean }} [opts]
    */
-  update(dt, playerPos = null, playerVitals = null) {
+  update(dt, playerPos = null, playerVitals = null, opts = null) {
+    // Non-authority clients only render + interpolate from host snapshot
+    if (!this.authority) {
+      this._tickNonAuthority(dt);
+      return;
+    }
+    // Heli players were getting silent hitscan with no tracers — don't snipe aircraft
+    const playerAirborne = !!(opts?.airborne || opts?.rideType === 'helicopter'
+      || (opts?.inVehicle && opts?.rideType === 'helicopter'));
     for (const bot of this.bots) {
+      if (bot.revealT > 0) bot.revealT = Math.max(0, bot.revealT - dt);
       if (bot.dead) {
         // Corpse linger — fade slightly near the end
         bot.respawnT -= dt;
@@ -492,48 +825,72 @@ export class BotSystem {
         }
       }
 
-      // --- Combat awareness ---
-      if (bot.aggressive && playerPos && playerVitals && playerVitals.health > 0) {
-        const pdx = playerPos.x - bot.x;
-        const pdz = playerPos.z - bot.z;
-        const pDist = Math.hypot(pdx, pdz);
-        const eyeY = bot.y + 1.55;
-        const pEyeY = playerPos.y + 1.5;
+      // --- Combat: player + other bot squads ---
+      const aggroRange = (BOTS.AGGRO_RANGE ?? 62) * (this._pressure.aggro || 1);
+      const loseRange = (BOTS.LOSE_RANGE ?? 90) * (this._pressure.aggro || 1);
+      const fireRange = (BOTS.FIRE_RANGE ?? 48) * Math.min(1.15, this._pressure.aggro || 1);
+      const react = (BOTS.REACTION_TIME ?? 0.45) / Math.max(0.7, this._pressure.aggro || 1);
+      const moveSpeed = bot.speed * (this._pressure.speed || 1);
+      const eyeY = bot.y + 1.55;
 
-        if (bot.state === 'wander' && pDist < (BOTS.AGGRO_RANGE ?? 62)) {
-          if (this._hasLOS(bot.x, eyeY, bot.z, playerPos.x, pEyeY, playerPos.z)) {
-            bot.aggroT += dt;
-            if (bot.aggroT >= (BOTS.REACTION_TIME ?? 0.45)) {
+      if (bot.aggressive) {
+        // Shared squad threat, or acquire new
+        let threat = bot._threat;
+        if (threat?.kind === 'bot' && (threat.bot?.dead || threat.bot?.teamId === bot.teamId)) {
+          threat = null;
+          bot._threat = null;
+        }
+        if (threat?.kind === 'player' && (playerAirborne || !playerPos || (playerVitals?.health ?? 0) <= 0 || playerVitals?.downed || playerVitals?.dead)) {
+          threat = null;
+          bot._threat = null;
+        }
+        if (!threat || bot.state === 'wander') {
+          threat = this._findThreat(bot, playerPos, playerVitals, playerAirborne, aggroRange);
+          if (threat) {
+            bot.aggroT = (bot.aggroT || 0) + dt;
+            if (bot.aggroT >= react || bot._threat) {
+              bot._threat = threat;
               bot.state = 'engage';
               bot.pauseT = 0;
-              this._alertTeam(bot.teamId, bot.id);
+              this._alertTeam(bot.teamId, bot.id, threat);
             }
           } else {
-            bot.aggroT = Math.max(0, bot.aggroT - dt * 0.5);
+            bot.aggroT = Math.max(0, (bot.aggroT || 0) - dt * 0.5);
           }
-        } else if (bot.state === 'engage' || bot.state === 'flank') {
-          if (pDist > (BOTS.LOSE_RANGE ?? 90)) {
+        }
+
+        threat = bot._threat;
+        if ((bot.state === 'engage' || bot.state === 'flank') && threat) {
+          const tx = threat.x;
+          const ty = threat.y;
+          const tz = threat.z;
+          const pdx = tx - bot.x;
+          const pdz = tz - bot.z;
+          const pDist = Math.hypot(pdx, pdz);
+          const dy = ty - bot.y;
+          const tooHigh = dy > 9;
+          const hasLos = this._hasLOS(bot.x, eyeY, bot.z, tx, ty + 1.4, tz);
+
+          if (pDist > loseRange || tooHigh || (threat.kind === 'bot' && threat.bot?.dead)) {
             bot.state = 'wander';
             bot.aggroT = 0;
+            bot._threat = null;
             this._pickWaypoint(bot, (performance.now() * 0.01) | 0);
           } else {
-            const hasLos = this._hasLOS(bot.x, eyeY, bot.z, playerPos.x, pEyeY, playerPos.z);
             bot.yaw = Math.atan2(pdx, pdz);
             bot.mesh.rotation.y = bot.yaw;
-
-            // Tactics: flank / close / hold
             if (bot.suppressT > 0) bot.suppressT -= dt;
+
             const wantFlank = bot.state === 'flank'
               || (pDist > 14 && hash2(bot.id, (performance.now() * 0.05) | 0) < (BOTS.FLANK_CHANCE ?? 0.4));
-            if (wantFlank && pDist > 12 && pDist < (BOTS.FIRE_RANGE ?? 48) + 10) {
+            if (wantFlank && pDist > 12 && pDist < fireRange + 10) {
               bot.state = 'flank';
-              // Strafe perpendicular while edging closer
               const nx = pdx / Math.max(0.01, pDist);
               const nz = pdz / Math.max(0.01, pDist);
               const fx = -nz * bot.flankSide;
               const fz = nx * bot.flankSide;
-              const step = bot.speed * 0.7 * dt;
-              const close = pDist > 16 ? 0.35 : 0.1;
+              const step = moveSpeed * 0.75 * dt;
+              const close = pDist > 16 ? 0.4 : 0.12;
               const nx2 = bot.x + fx * step + nx * step * close;
               const nz2 = bot.z + fz * step + nz * step * close;
               if (this._isWalkable(nx2, nz2) && !this._blocked(nx2, this.terrain.heightAt(nx2, nz2), nz2)) {
@@ -541,11 +898,10 @@ export class BotSystem {
                 bot.z = nz2;
                 bot.y = this.terrain.heightAt(bot.x, bot.z);
               }
-            } else if (pDist > 20 && pDist < (BOTS.FIRE_RANGE ?? 48) && hasLos) {
-              // Slow advance
-              const nx = pdx / pDist;
-              const nz = pdz / pDist;
-              const step = bot.speed * 0.45 * dt;
+            } else if (pDist > 18 && pDist < fireRange + 8) {
+              const nx = pdx / Math.max(0.01, pDist);
+              const nz = pdz / Math.max(0.01, pDist);
+              const step = moveSpeed * 0.5 * dt;
               const nx2 = bot.x + nx * step;
               const nz2 = bot.z + nz * step;
               if (this._isWalkable(nx2, nz2) && !this._blocked(nx2, this.terrain.heightAt(nx2, nz2), nz2)) {
@@ -556,17 +912,17 @@ export class BotSystem {
             }
 
             bot.fireCd -= dt;
-            if (
-              bot.suppressT <= 0
-              && bot.fireCd <= 0
-              && pDist < (BOTS.FIRE_RANGE ?? 48)
-              && hasLos
-            ) {
-              this._botShoot(bot, playerPos, playerVitals, pDist);
+            if (bot.suppressT <= 0 && bot.fireCd <= 0 && pDist < fireRange && hasLos && !tooHigh) {
+              if (threat.kind === 'player') {
+                this._botShoot(bot, playerPos, playerVitals, pDist);
+              } else if (threat.kind === 'bot' && threat.bot) {
+                this._botShootBot(bot, threat.bot, pDist);
+              }
               bot.fireCd = (BOTS.FIRE_COOLDOWN ?? 0.22)
-                * (0.9 + hash2(bot.id, (performance.now() * 0.01) | 0) * 0.35);
+                * (0.85 + hash2(bot.id, (performance.now() * 0.01) | 0) * 0.3)
+                / Math.max(0.85, this._pressure.aggro || 1);
               bot.suppressT = (BOTS.SUPPRESS_PAUSE ?? 0.55)
-                * (0.7 + hash2(bot.id, 71) * 0.6);
+                * (0.65 + hash2(bot.id, 71) * 0.5);
             }
             bot.mesh.position.set(bot.x, bot.y, bot.z);
             this._idleAnim(bot, dt);
@@ -580,17 +936,59 @@ export class BotSystem {
         }
       }
 
-      // Squad cohesion: non-leaders pull toward leader home / leader pos while wandering
+      // Squad cohesion — followers stick to leader (tighter when not fighting)
       if (bot.state === 'wander' && !bot.isLeader) {
         const leader = this.bots.find((b) => b.teamId === bot.teamId && b.isLeader && !b.dead);
         if (leader) {
           const dx = leader.x - bot.x;
           const dz = leader.z - bot.z;
           const d = Math.hypot(dx, dz);
-          if (d > 14) {
-            bot.waypoint.x = leader.x + (hash2(bot.id, 3) - 0.5) * 6;
-            bot.waypoint.z = leader.z + (hash2(bot.id, 5) - 0.5) * 6;
+          const follow = BOTS.SQUAD_FOLLOW_DIST ?? 7.5;
+          const maxSp = BOTS.SQUAD_MAX_SPREAD ?? 14;
+          if (d > follow) {
+            bot.waypoint.x = leader.x + (hash2(bot.id, 3) - 0.5) * 5;
+            bot.waypoint.z = leader.z + (hash2(bot.id, 5) - 0.5) * 5;
+            // If leader is fighting, sprint toward them
+            if (leader.state === 'engage' || leader.state === 'flank') {
+              bot.pauseT = 0;
+            }
           }
+          if (d > maxSp) bot.pauseT = 0;
+          // Mirror leader threat for team awareness
+          if (leader._threat && !bot._threat) {
+            bot._threat = leader._threat;
+            bot.state = 'engage';
+            bot.aggroT = react;
+          }
+        }
+      }
+
+      // Gas rotate — leaders pull fireteam into the safe circle
+      if (
+        bot.state === 'wander'
+        && BOTS.ZONE_ROTATE
+        && this._zone?.active
+        && this._zone.radius > 1
+      ) {
+        const margin = BOTS.ZONE_EDGE_MARGIN ?? 18;
+        const dx = bot.x - this._zone.cx;
+        const dz = bot.z - this._zone.cz;
+        const dist = Math.hypot(dx, dz);
+        const safeR = Math.max(8, this._zone.radius - margin);
+        if (dist > safeR) {
+          // Aim inside the circle (or toward next circle during hold)
+          let tx = this._zone.cx;
+          let tz = this._zone.cz;
+          if (this._zone.mode === 'hold' && this._zone.nextRadius > 20) {
+            tx = this._zone.nextCx;
+            tz = this._zone.nextCz;
+          }
+          // Offset per bot so squad fans out instead of stacking
+          const ang = hash2(bot.id, 91) * Math.PI * 2;
+          const rad = 4 + hash2(bot.id, 93) * 10;
+          bot.waypoint.x = tx + Math.cos(ang) * rad;
+          bot.waypoint.z = tz + Math.sin(ang) * rad;
+          bot.pauseT = 0;
         }
       }
 
@@ -615,7 +1013,7 @@ export class BotSystem {
 
       const nx = wx / dist;
       const nz = wz / dist;
-      const step = bot.speed * dt;
+      const step = bot.speed * (this._pressure.speed || 1) * dt;
       let nextX = bot.x + nx * step;
       let nextZ = bot.z + nz * step;
 
@@ -653,21 +1051,56 @@ export class BotSystem {
   }
 
   _botShoot(bot, playerPos, vitals, dist) {
-    // Cone miss chance — worse at range (they're accurate enough, not snipers)
-    const spread = (BOTS.FIRE_SPREAD_DEG ?? 5.5) * (1 + dist / 38);
-    const miss = Math.abs(hash2(bot.id, (performance.now() * 0.1) | 0) - 0.5) * 2 * spread;
+    if (!vitals || (vitals.health ?? 0) <= 0 || vitals.downed || vitals.dead) return;
+    // Cone miss chance — worse at range; BR ramp tightens accuracy
+    const acc = Math.max(0.55, this._pressure.accuracy || 1);
+    const spread = ((BOTS.FIRE_SPREAD_DEG ?? 5.5) / acc) * (1 + dist / 38);
+    const roll = hash2(bot.id, (performance.now() * 0.1) | 0);
+    const miss = Math.abs(roll - 0.5) * 2 * spread;
     if (miss > 2.5) return; // wide miss
 
-    let dmg = BOTS.FIRE_DAMAGE ?? 7;
+    let dmg = (BOTS.FIRE_DAMAGE ?? 7) * (this._pressure.damage || 1);
     if (dist > 28) dmg *= Math.max(0.4, 1 - (dist - 28) / 45);
-    let remaining = dmg;
-    if (vitals.armor > 0) {
+
+    // Headshots: higher damage; Kevlar helmet soaks head damage only
+    const headChance = ARMOR.HEAD_HIT_CHANCE ?? 0.2;
+    const isHead = hash2(bot.id * 17 + 3, ((performance.now() * 0.07) | 0) + bot.id) < headChance;
+    if (isHead) {
+      dmg *= ARMOR.HEAD_DAMAGE_MULT ?? 1.85;
+      const helm = vitals.helmet ?? 0;
+      if (helm > 0) {
+        const absorbFrac = ARMOR.HELMET?.absorb ?? 1;
+        const soak = Math.min(helm, dmg * absorbFrac);
+        vitals.helmet = Math.max(0, helm - soak);
+        dmg -= soak;
+      }
+    }
+
+    let remaining = Math.max(0, dmg);
+    // Body plates / vest armor
+    if (vitals.armor > 0 && remaining > 0) {
       const absorbed = Math.min(vitals.armor, remaining);
       vitals.armor -= absorbed;
       remaining -= absorbed;
     }
+    const applied = remaining;
     vitals.health = Math.max(0, vitals.health - remaining);
-    this.bus?.emit?.('bot:shot', { id: bot.id, dmg, dist });
+    // Firing reveals on minimap briefly
+    bot.revealT = Math.max(bot.revealT || 0, BOTS.MAP_REVEAL_FIRE ?? 2.8);
+    this.bus?.emit?.('bot:shot', {
+      id: bot.id, dmg: applied, total: dmg, dist, head: isHead, x: bot.x, z: bot.z,
+    });
+    // Always announce player damage so HUD can flash (was silent before)
+    if (applied > 0 || isHead) {
+      this.bus?.emit?.('player:damage', {
+        amount: Math.max(applied, isHead && applied <= 0 ? 0 : applied),
+        source: isHead ? 'bot_head' : 'bot',
+        id: bot.id,
+        dist,
+        head: isHead,
+        blocked: isHead && applied <= 0,
+      });
+    }
     // Muzzle flash tint on gun
     const gun = bot.mesh.userData?.gun;
     if (gun) {
@@ -678,6 +1111,13 @@ export class BotSystem {
         }
       });
       bot._muzzleT = 0.06;
+    }
+    // World tracer toward player so you can see the fire
+    if (this.bus && playerPos) {
+      this.bus.emit('bot:tracer', {
+        from: { x: bot.x, y: bot.y + 1.4, z: bot.z },
+        to: { x: playerPos.x, y: playerPos.y + 1.2, z: playerPos.z },
+      });
     }
   }
 
@@ -792,5 +1232,41 @@ export class BotSystem {
       if (!b.dead) this._live.push(b);
     }
     return this._live;
+  }
+
+  /**
+   * Bots visible on the map: currently/recently firing only.
+   * Aerial LOS reveals are handled separately by SpottingSystem.
+   */
+  getFiringRevealed() {
+    const out = [];
+    for (const b of this.bots) {
+      if (b.dead || !(b.revealT > 0)) continue;
+      out.push({
+        id: b.id,
+        x: b.x,
+        y: b.y,
+        z: b.z,
+        teamId: b.teamId,
+        revealT: b.revealT,
+        reason: 'fire',
+        target: b,
+      });
+    }
+    return out;
+  }
+
+  /** Live bots filtered to those the map is allowed to show (fire + optional id set). */
+  getMapVisibleTargets(extraIds = null) {
+    const extra = extraIds instanceof Set ? extraIds : null;
+    const out = [];
+    for (const b of this.bots) {
+      if (b.dead) continue;
+      const id = String(b.id);
+      if ((b.revealT > 0) || (extra && extra.has(id))) {
+        out.push(b);
+      }
+    }
+    return out;
   }
 }

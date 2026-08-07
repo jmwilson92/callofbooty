@@ -236,6 +236,34 @@ export class BuyCacheSystem {
       });
       row.innerHTML = `<span>${def.label}</span><span style="color:#ffe080">$${def.cost}</span>`;
       row.onclick = () => {
+        if (def.kind === 'deploy_flare') {
+          if (loadout.cash < def.cost) {
+            cashEl.textContent = `$${loadout.cash | 0} — can't afford`;
+            cashEl.style.color = '#ff8080';
+            setTimeout(() => {
+              cashEl.style.color = '#ffe080';
+              this._renderPanel(loadout);
+            }, 900);
+            return;
+          }
+          // Handler in main sets success if someone dead can be brought back
+          this._deployOk = false;
+          this.bus?.emit?.('shop:deploy_flare', { loadout, cache: this });
+          if (this._deployOk) {
+            loadout.cash -= def.cost;
+            this._renderPanel(loadout);
+            this.bus?.emit?.('shop:buy', { id, def });
+            this.closeShop();
+          } else {
+            cashEl.textContent = `$${loadout.cash | 0} — nobody waiting for flare`;
+            cashEl.style.color = '#ff8080';
+            setTimeout(() => {
+              cashEl.style.color = '#ffe080';
+              this._renderPanel(loadout);
+            }, 1200);
+          }
+          return;
+        }
         const ok = loadout.buy?.(id, def);
         if (ok) {
           this._renderPanel(loadout);

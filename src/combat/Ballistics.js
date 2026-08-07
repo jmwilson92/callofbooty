@@ -6,12 +6,13 @@ import { breakGlassBox } from '../world/Glass.js';
 /**
  * Ballistic projectiles: velocity, gravity drop, travel time (lead),
  * and range/caliber damage falloff. Targets preferred near walls.
+ *
+ * Drop is intentionally flat inside ~300 m so CQC / mid-range aim is laser-true;
+ * gravity only ramps in for long shots.
  */
 
 const _tmp = new THREE.Vector3();
 const _cand = [];
-// Game-readable drop (real 9.81 is almost invisible at 800+ m/s)
-const GRAVITY = 18.5;
 
 export class Ballistics {
   constructor(hash, effects, bus) {
@@ -74,8 +75,19 @@ export class Ballistics {
         continue;
       }
 
-      // Gravity (bullet drop) — stronger so sniper arcs are visible
-      p.vel.y -= GRAVITY * (p.def.dropScale ?? 1) * dt;
+      // Gravity only past long range (default 300 m+) — close/mid stay flat
+      {
+        const dropStart = COMBAT.BULLET_DROP_START_M ?? 300;
+        const dropFull = COMBAT.BULLET_DROP_FULL_M ?? 420;
+        const g = COMBAT.BULLET_GRAVITY ?? 14;
+        let gScale = 0;
+        if (p.pathDist > dropStart) {
+          gScale = Math.min(1, (p.pathDist - dropStart) / Math.max(1, dropFull - dropStart));
+        }
+        if (gScale > 0) {
+          p.vel.y -= g * (p.def.dropScale ?? 1) * gScale * dt;
+        }
+      }
 
       let remaining = dt;
       let hitSomething = false;

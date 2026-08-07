@@ -61,6 +61,11 @@ function dryLand(terrain, x, z, maxSlope = 22) {
   return true;
 }
 
+/** True if point sits on the leveled downtown city plate (skyline grid). */
+function onDowntownPlate(terrain, x, z) {
+  return !!(terrain.onDowntownPlate?.(x, z));
+}
+
 export function scatterStructures(sink, terrain, rng) {
   const S = STRUCTURES;
   const stats = {
@@ -104,11 +109,12 @@ export function scatterStructures(sink, terrain, rng) {
     });
   }
 
-  // --- Gas stations along arterials (near roads) ---
+  // --- Gas stations along arterials (near roads) — not inside downtown blocks ---
   for (let n = 0; n < S.GAS; n++) {
     tryPlace(terrain, rng, 100, (x, z, t) => {
       if (!dryLand(t, x, z, 14)) return false;
       if (tooCloseToPoiCore(x, z, 1.0)) return false;
+      if (onDowntownPlate(t, x, z)) return false;
       // Prefer near roads
       let nearRoad = t.roadAt(x, z) > 0.05;
       for (let k = 0; k < 8 && !nearRoad; k++) {
@@ -117,7 +123,7 @@ export function scatterStructures(sink, terrain, rng) {
       }
       return nearRoad;
     }, (x, z) => {
-      if (!claimFoot(x, z, 28, 24)) return;
+      if (!claimFoot(x, z, 30, 26)) return;
       placeGasStation(sink, terrain, x, z, rng);
       stats.gas++;
     });
@@ -128,6 +134,7 @@ export function scatterStructures(sink, terrain, rng) {
     tryPlace(terrain, rng, 70, (x, z, t) => {
       if (!dryLand(t, x, z, 16)) return false;
       if (tooCloseToPoiCore(x, z, 0.8)) return false;
+      if (onDowntownPlate(t, x, z)) return false;
       return t.heightAt(x, z) < 50;
     }, (x, z) => {
       if (!claimFoot(x, z, 22, 18)) return;
@@ -138,50 +145,70 @@ export function scatterStructures(sink, terrain, rng) {
 
   // --- Auto repair ---
   for (let n = 0; n < S.AUTO; n++) {
-    tryPlace(terrain, rng, 60, (x, z, t) => dryLand(t, x, z, 16) && !tooCloseToPoiCore(x, z, 0.85) && t.heightAt(x, z) < 55,
-      (x, z) => {
-        if (!claimFoot(x, z, 24, 20)) return;
-        placeAutoRepair(sink, terrain, x, z, rng);
-        stats.auto++;
-      });
+    tryPlace(terrain, rng, 60, (x, z, t) => {
+      if (!dryLand(t, x, z, 16)) return false;
+      if (tooCloseToPoiCore(x, z, 0.85)) return false;
+      if (onDowntownPlate(t, x, z)) return false;
+      return t.heightAt(x, z) < 55;
+    }, (x, z) => {
+      if (!claimFoot(x, z, 24, 20)) return;
+      placeAutoRepair(sink, terrain, x, z, rng);
+      stats.auto++;
+    });
   }
 
-  // --- Fire stations ---
+  // --- Fire stations (never on downtown plate / into skyline blocks) ---
   for (let n = 0; n < S.FIRE; n++) {
-    tryPlace(terrain, rng, 80, (x, z, t) => dryLand(t, x, z, 14) && !tooCloseToPoiCore(x, z, 1.0),
-      (x, z) => {
-        if (!claimFoot(x, z, 36, 24)) return;
-        placeFireStation(sink, terrain, x, z, rng);
-        stats.fire++;
-      });
+    tryPlace(terrain, rng, 80, (x, z, t) => {
+      if (!dryLand(t, x, z, 14)) return false;
+      if (tooCloseToPoiCore(x, z, 1.05)) return false;
+      if (onDowntownPlate(t, x, z)) return false;
+      // Keep clear of west fringe that was clipping city hall / grid (~35–100, 310–430)
+      if (x > 10 && x < 120 && z > 280 && z < 450) return false;
+      return true;
+    }, (x, z) => {
+      if (!claimFoot(x, z, 40, 28)) return;
+      placeFireStation(sink, terrain, x, z, rng);
+      stats.fire++;
+    });
   }
 
-  // --- Business centers (mid density) ---
+  // --- Business centers (mid density) — not on downtown plate ---
   for (let n = 0; n < S.BUSINESS; n++) {
     tryPlace(terrain, rng, 70, (x, z, t) => {
       if (!dryLand(t, x, z, 14)) return false;
-      if (tooCloseToPoiCore(x, z, 0.7)) return false;
+      if (tooCloseToPoiCore(x, z, 0.85)) return false;
+      if (onDowntownPlate(t, x, z)) return false;
+      // Ban orphan "city hall" pads that were stacking west of skyline
+      if (x > 15 && x < 110 && z > 300 && z < 460) return false;
       return (Math.abs(x) < 280 && z > -200 && z < 400) || (x > 50 && x < 250 && z < -100);
     }, (x, z) => {
-      if (!claimFoot(x, z, 28, 24)) return;
+      if (!claimFoot(x, z, 30, 26)) return;
       placeBusinessCenter(sink, terrain, x, z, rng);
       stats.business++;
     });
   }
 
-  // --- Extra towers on downtown fringe (district itself is built in Buildings.js) ---
+  // Extra towers: east/north rim of downtown only — never west orphans (~35,433)
   const dt = poi('downtown');
   if (dt) {
     let attempts = 0;
-    while (stats.sky < S.SKY && attempts < S.SKY * 40) {
+    while (stats.sky < S.SKY && attempts < S.SKY * 60) {
       attempts++;
-      const a = rng() * Math.PI * 2;
-      const r = 100 + rng() * 160;
+      // East or north only (angle ~ -0.4π .. 0.4π east, or north band)
+      const east = rng() > 0.35;
+      const a = east
+        ? (rng() - 0.5) * 0.9 // mostly +X
+        : -Math.PI * 0.5 + (rng() - 0.5) * 0.7; // mostly -Z (north in our map)
+      const r = 155 + rng() * 50; // outside the 6×5 grid, not inside blocks
       const x = dt.x + Math.cos(a) * r;
       const z = dt.z + Math.sin(a) * r;
-      if (terrain.heightAt(x, z) < 3 || terrain.slopeDegAt(x, z) > 16) continue;
-      if (terrain.roadAt(x, z) > 0.25) continue;
-      if (!claimFoot(x - 8, z - 8, 20, 18)) continue;
+      // Kill west side completely (user: three towers around 35, 433)
+      if (x < dt.x - 40) continue;
+      if (x < 80) continue;
+      if (terrain.heightAt(x, z) < 3 || terrain.slopeDegAt(x, z) > 12) continue;
+      if (terrain.roadAt(x, z) > 0.2) continue;
+      if (!claimFoot(x - 8, z - 8, 24, 22)) continue;
       const samples = [
         terrain.heightAt(x, z),
         terrain.heightAt(x + 14, z),
@@ -191,12 +218,14 @@ export function scatterStructures(sink, terrain, rng) {
       ];
       const lo = Math.min(...samples);
       const hi = Math.max(...samples);
-      if (hi - lo > 1.25) continue; // skip dips / uneven fringe lots
-      let by = hi;
-      if (terrain.downtownPlateY != null) {
-        by = Math.max(by, terrain.downtownPlateY - 0.15);
-      }
-      placeSkylineTower(sink, x - 8, z - 8, by, rng, 12 + Math.floor(rng() * 12), terrain);
+      if (hi - lo > 1.0) continue;
+      const by = hi;
+      const tw = 12 + rng() * 4;
+      const td = 12 + rng() * 4;
+      placeSkylineTower(sink, x - tw * 0.5, z - td * 0.5, by, rng, 12 + Math.floor(rng() * 10), terrain, {
+        w: tw,
+        d: td,
+      });
       stats.sky++;
     }
   }
@@ -311,20 +340,49 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
     }
   }
 
-  // Downtown civic + strip
+  // Downtown civic + strip — MUST stay outside the skyline grid / plate core.
+  // Old fixed offsets (fire @ 60,310 · city-hall @ 80,410 · gas @ 40,385) were
+  // ramming straight into grid towers and parking pads. Place only on free land
+  // well outside the block grid with occupancy claims.
   if (dt) {
-    placeFireStation(sink, terrain, dt.x - 80, dt.z - 50, rng);
-    placeBusinessCenter(sink, terrain, dt.x + 70, dt.z - 55, rng);
-    placeBusinessCenter(sink, terrain, dt.x - 60, dt.z + 50, rng);
-    placeGasStation(sink, terrain, dt.x - 100, dt.z + 25, rng);
-    placeRestaurant(sink, terrain, dt.x + 85, dt.z + 30, rng, true);
-    placeRestaurant(sink, terrain, dt.x + 40, dt.z - 70, rng, false);
-    placeBillboard(sink, terrain, dt.x - 50, dt.z + 70, rng);
-    stats.fire++;
-    stats.business += 2;
-    stats.gas++;
-    stats.restaurant += 2;
-    stats.billboard++;
+    const civic = [
+      // fire — north of plate, not into west grid edge
+      { kind: 'fire', x: dt.x - 40, z: dt.z - 200, w: 40, d: 28 },
+      // city hall / business — east of plate
+      { kind: 'biz', x: dt.x + 200, z: dt.z - 30, w: 30, d: 26 },
+      // second business — south-east, clear of waterfront hotels
+      { kind: 'biz', x: dt.x + 190, z: dt.z + 160, w: 30, d: 26 },
+      // gas — west of plate, clear of parking under buildings
+      { kind: 'gas', x: dt.x - 200, z: dt.z + 10, w: 30, d: 26 },
+      // restaurants — north / east rim
+      { kind: 'restF', x: dt.x + 200, z: dt.z + 40, w: 22, d: 18 },
+      { kind: 'restS', x: dt.x + 30, z: dt.z - 200, w: 22, d: 18 },
+      { kind: 'bill', x: dt.x + 170, z: dt.z + 100, w: 8, d: 6 },
+    ];
+    for (const s of civic) {
+      // Hard ban anything still inside the skyline plate core
+      if (Math.abs(s.x - dt.x) < 150 && Math.abs(s.z - dt.z) < 140) continue;
+      if (!claimFoot(s.x, s.z, s.w, s.d)) continue;
+      if (s.kind === 'fire') {
+        placeFireStation(sink, terrain, s.x, s.z, rng);
+        stats.fire++;
+      } else if (s.kind === 'biz') {
+        placeBusinessCenter(sink, terrain, s.x, s.z, rng);
+        stats.business++;
+      } else if (s.kind === 'gas') {
+        placeGasStation(sink, terrain, s.x, s.z, rng);
+        stats.gas++;
+      } else if (s.kind === 'restF') {
+        placeRestaurant(sink, terrain, s.x, s.z, rng, true);
+        stats.restaurant++;
+      } else if (s.kind === 'restS') {
+        placeRestaurant(sink, terrain, s.x, s.z, rng, false);
+        stats.restaurant++;
+      } else if (s.kind === 'bill') {
+        placeBillboard(sink, terrain, s.x, s.z, rng);
+        stats.billboard++;
+      }
+    }
   }
 
   // Balboa food + signs

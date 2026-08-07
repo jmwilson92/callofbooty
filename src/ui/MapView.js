@@ -464,7 +464,10 @@ export class MapView {
     });
 
     this._drawBuildings(ctx, toPx, { minPx: 1.5, stroke: false, alpha: 0.55 });
+    this._drawZone(ctx, toPx, false);
     this._drawRearmPads(ctx, toPx, false);
+    // Enemies only when firing or aerial-spotted (never free wallhacks)
+    this._drawEnemyContacts(ctx, toPx, false);
     this._drawSpotPings(ctx, toPx, false);
     this._drawVehicles(ctx, toPx, 4.5 * dpr, false);
     this._drawPois(ctx, toPx, 3.2 * dpr, false);
@@ -499,10 +502,14 @@ export class MapView {
     });
     this._drawVehicles(ctx, toPx, Math.max(5, 6 * dpr * Math.min(1.8, Math.sqrt(this.zoom))), true);
     this._drawPois(ctx, toPx, Math.max(3, 4.5 * dpr * Math.min(2, Math.sqrt(this.zoom))), true);
+    this._drawZone(ctx, toPx, true);
+    this._drawEnemyContacts(ctx, toPx, true);
 
-    // Gunner target icons
+    // Gunner target icons — only contacts already revealed (fire / aerial LOS)
     if (this.gunnerMode && this._mapTargets?.length) {
       for (const t of this._mapTargets) {
+        // Helis always targetable; bots only if revealed
+        if (t.kind === 'bot' && !t.revealed) continue;
         const { px, py } = toPx(t.x, t.z);
         if (px < -10 || py < -10 || px > side + 10 || py > side + 10) continue;
         ctx.fillStyle = t.kind === 'heli' ? 'rgba(255,80,80,0.95)' : 'rgba(255,180,40,0.9)';
@@ -558,6 +565,128 @@ export class MapView {
    */
   setSpotPings(pings) {
     this._spotPings = pings || [];
+  }
+
+  /**
+   * Enemy contacts for fog-of-war map:
+   * [{ x, z, reason:'fire'|'spot', life?, max? }]
+   * Fire = recently shooting; spot = heli/UAV LOS from above.
+   */
+  setEnemyContacts(contacts) {
+    this._enemyContacts = contacts || [];
+  }
+
+  _drawEnemyContacts(ctx, toPx, detailed) {
+    const list = this._enemyContacts;
+    if (!list?.length) return;
+    const dpr = detailed ? (this.fullDpr || 1) : (this.miniDpr || 1);
+    const t = performance.now() * 0.001;
+    for (const c of list) {
+      const { px, py } = toPx(c.x, c.z);
+      if (px < -20 || py < -20 || px > 5000 || py > 5000) continue;
+      const fire = c.reason === 'fire';
+      const pulse = 0.7 + 0.3 * Math.sin(t * (fire ? 14 : 7) + (c.x + c.z) * 0.02);
+      const r = (detailed ? 5.5 : 4) * dpr * pulse;
+      // Firing = hot orange; aerial spot = red radar
+      ctx.fillStyle = fire
+        ? `rgba(255, 160, 40, ${0.85 * pulse})`
+        : `rgba(255, 50, 50, ${0.7 * pulse})`;
+      ctx.strokeStyle = fire
+        ? 'rgba(255, 220, 120, 0.95)'
+        : 'rgba(255, 100, 80, 0.9)';
+      ctx.lineWidth = 1.4 * dpr;
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      if (fire) {
+        // Muzzle tick
+        ctx.beginPath();
+        ctx.moveTo(px, py - r * 1.6);
+        ctx.lineTo(px, py + r * 1.6);
+        ctx.moveTo(px - r * 1.6, py);
+        ctx.lineTo(px + r * 1.6, py);
+        ctx.strokeStyle = `rgba(255, 200, 80, ${0.7 * pulse})`;
+        ctx.lineWidth = 1.2 * dpr;
+        ctx.stroke();
+      }
+    }
+  }
+
+  /** @param {object|null} zone snapshot from ZoneSystem */
+  setZone(zone) {
+    this._zone = zone;
+  }
+
+  _drawZone(ctx, toPx, detailed) {
+    const z = this._zone;
+    if (!z?.active) return;
+    const dpr = detailed ? (this.fullDpr || 1) : (this.miniDpr || 1);
+
+    // Final zone: whole map contaminated — red wash, no safe circle
+    if (z.finalContamination || z.mode === 'done' || !(z.radius > 0.5)) {
+      if (detailed) {
+        ctx.fillStyle = 'rgba(120, 20, 20, 0.22)';
+        ctx.fillRect(0, 0, 10000, 10000);
+      } else {
+        ctx.fillStyle = 'rgba(140, 30, 30, 0.28)';
+        ctx.fillRect(0, 0, 10000, 10000);
+      }
+      return;
+    }
+
+    // Current safe circle
+    const c = toPx(z.cx, z.cz);
+    const edge = toPx(z.cx + z.radius, z.cz);
+    const rPx = Math.abs(edge.px - c.px);
+    if (rPx > 0.5) {
+      ctx.save();
+      // Dim outside gas
+      if (detailed) {
+        ctx.beginPath();
+        ctx.rect(-4, -4, 10000, 10000);
+        ctx.arc(c.px, c.py, rPx, 0, Math.PI * 2, true);
+        ctx.fillStyle = 'rgba(20, 80, 110, 0.18)';
+        ctx.fill('evenodd');
+      }
+      ctx.beginPath();
+      ctx.arc(c.px, c.py, rPx, 0, Math.PI * 2);
+      ctx.strokeStyle = z.mode === 'shrink' ? 'rgba(100, 220, 255, 0.95)' : 'rgba(127, 212, 255, 0.85)';
+      ctx.lineWidth = (detailed ? 2.5 : 2) * dpr;
+      ctx.setLineDash(z.mode === 'shrink' ? [6 * dpr, 4 * dpr] : []);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    // Next zone (hold only) — gold ring, or pin if final collapse to 0
+    if (z.mode === 'hold') {
+      if (z.nextRadius > 1) {
+        const nc = toPx(z.nextCx, z.nextCz);
+        const ne = toPx(z.nextCx + z.nextRadius, z.nextCz);
+        const nr = Math.abs(ne.px - nc.px);
+        if (nr > 0.5) {
+          ctx.beginPath();
+          ctx.arc(nc.px, nc.py, nr, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(255, 192, 64, 0.9)';
+          ctx.lineWidth = (detailed ? 2 : 1.5) * dpr;
+          ctx.setLineDash([4 * dpr, 3 * dpr]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      } else if (z.nextRadius <= 1 && z.displayZone >= (z.phaseCount || 5)) {
+        // Zone 5 next: collapse point
+        const nc = toPx(z.nextCx, z.nextCz);
+        ctx.strokeStyle = 'rgba(255, 80, 60, 0.95)';
+        ctx.lineWidth = 2 * dpr;
+        ctx.beginPath();
+        ctx.moveTo(nc.px - 8 * dpr, nc.py);
+        ctx.lineTo(nc.px + 8 * dpr, nc.py);
+        ctx.moveTo(nc.px, nc.py - 8 * dpr);
+        ctx.lineTo(nc.px, nc.py + 8 * dpr);
+        ctx.stroke();
+      }
+    }
   }
 
   _drawRearmPads(ctx, toPx, withLabels) {
@@ -735,6 +864,7 @@ export class MapView {
   }
 
   _headingLabel(yaw) {
+    // Match world forward (-sin(yaw), -cos(yaw)) and north-up map (see _drawPlayer).
     let deg = ((-yaw) * 180 / Math.PI) % 360;
     if (deg < 0) deg += 360;
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -770,13 +900,18 @@ export class MapView {
   _drawPlayer(ctx, px, py, yaw, r) {
     ctx.save();
     ctx.translate(px, py);
-    // Map is north-up (+Y down in canvas = +Z world). Player yaw 0 faces -Z (north = up).
-    ctx.rotate(yaw);
+    // North-up map: canvas +X = world +X, canvas +Y = world +Z.
+    // World look/walk forward is (-sin(yaw), -cos(yaw)) in (x,z) — same as Controller.
+    // Arrow mesh points "up" (0,-1) at identity = world -Z = north when yaw=0.
+    // Canvas rotate() is clockwise-positive; forward angle needs -yaw so
+    // W / look direction matches the chevron (was mirrored with +yaw).
+    ctx.rotate(-yaw);
     ctx.beginPath();
-    ctx.moveTo(0, -r * 1.4);
-    ctx.lineTo(r * 0.9, r * 1.1);
-    ctx.lineTo(0, r * 0.45);
-    ctx.lineTo(-r * 0.9, r * 1.1);
+    // Tip = facing direction
+    ctx.moveTo(0, -r * 1.45);
+    ctx.lineTo(r * 0.95, r * 1.05);
+    ctx.lineTo(0, r * 0.4);
+    ctx.lineTo(-r * 0.95, r * 1.05);
     ctx.closePath();
     ctx.fillStyle = MAP.PLAYER;
     ctx.fill();

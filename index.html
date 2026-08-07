@@ -36,6 +36,79 @@
       #hint td:first-child { color: #7fd4ff; text-align: right; white-space: nowrap; }
       #hint td:last-child { opacity: 0.75; }
 
+      /* Friends lobby — on start/pause menu only (hidden while playing with the menu) */
+      #party-ui {
+        pointer-events: auto;
+        width: min(420px, 92vw);
+        margin: 0.4rem 0 1.1rem;
+        padding: 12px 14px;
+        text-align: left;
+        background: rgba(8, 14, 20, 0.92);
+        border: 1px solid rgba(127, 212, 255, 0.35);
+        border-radius: 10px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+        color: #d8e0e8;
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      #party-ui .party-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 0.75rem;
+        margin-bottom: 4px;
+        color: #7fd4ff;
+        letter-spacing: 0.08em;
+      }
+      #party-ui .party-status { opacity: 0.75; font-size: 11px; letter-spacing: 0; color: #e8ecf0; }
+      #party-ui .party-hint {
+        opacity: 0.65;
+        font-size: 11px;
+        margin-bottom: 10px;
+      }
+      #party-ui .party-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      #party-ui input {
+        pointer-events: auto;
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 5px;
+        color: #e8ecf0;
+        padding: 7px 9px;
+        font: inherit;
+        min-width: 0;
+      }
+      #party-ui .party-name { width: 7.5rem; }
+      #party-ui .party-code {
+        width: 5.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+      #party-ui button {
+        pointer-events: auto;
+        cursor: pointer;
+        border: none;
+        border-radius: 5px;
+        padding: 7px 12px;
+        font: 700 11px/1 ui-monospace, Menlo, Consolas, monospace;
+        letter-spacing: 0.08em;
+        color: #0d1116;
+        background: linear-gradient(180deg, #9ae0ff, #7fd4ff);
+      }
+      #party-ui button.party-join {
+        background: linear-gradient(180deg, #c8d4e0, #a8b4c0);
+      }
+      #party-ui button:hover { filter: brightness(1.08); }
+      #party-ui .party-peers {
+        margin-top: 8px;
+        min-height: 1em;
+        opacity: 0.85;
+        font-size: 11px;
+      }
+
       #crosshair { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 10; }
       #crosshair span {
         position: absolute; left: 50%; top: 50%; background: #e8ecf0;

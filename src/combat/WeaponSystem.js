@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WEAPONS, RARITY, COMBAT, AMMO } from '../config.js';
+import { WEAPONS, RARITY, COMBAT, AMMO, ARMOR } from '../config.js';
 import { buildViewModel } from './ViewModels.js';
 import { classToModelKey } from './WeaponAssets.js';
 import { Ballistics } from './Ballistics.js';
@@ -46,6 +46,8 @@ export class WeaponSystem {
     this.health = COMBAT.BASE_HEALTH;
     this.armor = 0;
     this.armorLevel = 0;
+    /** Kevlar helmet durability (0 = none). Only absorbs headshot damage. */
+    this.helmet = 0;
 
     // Mount viewmodel on the dedicated overlay scene (not world camera) so it
     // never depth-fights walls and is always lit/visible.
@@ -63,6 +65,13 @@ export class WeaponSystem {
 
     // Give starter sidearm so player can shoot before finding loot
     this.giveWeapon('sidearm', 'common');
+
+    /**
+     * While downed: only the pistol is usable. Main guns stay in inventory but
+     * are holstered until revive.
+     */
+    this.downedOnly = false;
+    this._preDownedSlot = 0;
   }
 
   /** Attach to WeaponOverlay mount after construction. */
@@ -161,9 +170,9 @@ export class WeaponSystem {
   }
 
   selectSlot(i) {
+    if (this.downedOnly) return; // pistol only while downed
     if (i !== 0 && i !== 1) return;
     if (!this.slots[i] || i === this.active) return;
-    const def = this.def;
     this.prevSlot = this.active;
     this.active = i;
     this.swapDur = (this.def?.swapTime ?? 0.4);
@@ -174,11 +183,86 @@ export class WeaponSystem {
   }
 
   quickSwap() {
+    if (this.downedOnly) return;
     const other = this.active === 0 ? 1 : 0;
     if (this.slots[other]) this.selectSlot(other);
     else if (this.slots[this.prevSlot] && this.prevSlot !== this.active) {
       this.selectSlot(this.prevSlot);
     }
+  }
+
+  /**
+   * Holster primary, pull sidearm (give one if missing). Call on setDowned.
+   */
+  enterDowned() {
+    if (this.downedOnly) return;
+    this.downedOnly = true;
+    this._preDownedSlot = this.active;
+    this.wantAds = false;
+    this.ads = 0;
+    this.reloading = false;
+
+    // Prefer an existing sidearm / pistol in either slot
+    let pistolSlot = -1;
+    for (let i = 0; i < 2; i++) {
+      const s = this.slots[i];
+      if (!s) continue;
+      const d = WEAPONS[s.weaponId];
+      if (d && (d.class === 'pistol' || s.weaponId === 'sidearm')) {
+        pistolSlot = i;
+        break;
+      }
+    }
+    if (pistolSlot < 0) {
+      // No pistol in bag — force sidearm into free slot or temporarily replace
+      const inst = WeaponSystem.makeInstance('sidearm', 'common');
+      if (!this.slots[0]) {
+        this.slots[0] = inst;
+        pistolSlot = 0;
+      } else if (!this.slots[1]) {
+        this.slots[1] = inst;
+        pistolSlot = 1;
+      } else {
+        // Both full: stash primary in prevSlot memory, put sidearm in active
+        this._stashedForDowned = this.slots[this.active];
+        this.slots[this.active] = inst;
+        pistolSlot = this.active;
+      }
+    }
+    if (pistolSlot >= 0 && pistolSlot !== this.active) {
+      this.active = pistolSlot;
+    }
+    // Full mag for the clutch pistol fight
+    const c = this.current;
+    if (c && (WEAPONS[c.weaponId]?.class === 'pistol' || c.weaponId === 'sidearm')) {
+      c.mag = c.magSize;
+      const ammoType = c.ammoType || WEAPONS[c.weaponId]?.ammo || 'light';
+      this.ammo[ammoType] = Math.max(this.ammo[ammoType] ?? 0, c.magSize * 2);
+    }
+    this.swapT = 0;
+    this.shotIndex = 0;
+    this.shotCooldown = 0;
+    this._rebuildView();
+  }
+
+  /** Restore pre-downed weapon after self-revive / redeploy. */
+  exitDowned() {
+    if (!this.downedOnly) return;
+    this.downedOnly = false;
+    if (this._stashedForDowned) {
+      // Put stashed primary back if we temporarily replaced it
+      const cur = this.current;
+      if (cur && (cur.weaponId === 'sidearm' || WEAPONS[cur.weaponId]?.class === 'pistol')) {
+        this.slots[this.active] = this._stashedForDowned;
+      }
+      this._stashedForDowned = null;
+    }
+    const restore = this._preDownedSlot;
+    if (this.slots[restore]) this.active = restore;
+    else if (this.slots[0]) this.active = 0;
+    else if (this.slots[1]) this.active = 1;
+    this.swapT = 0;
+    this._rebuildView();
   }
 
   startReload() {
@@ -209,12 +293,12 @@ export class WeaponSystem {
   }
 
   _rebuildView() {
-    // Keep point light if present
+    // Keep point light + FP hands (attached outside viewmodel rebuild)
     const keep = [];
     while (this.viewGroup.children.length) {
       const c = this.viewGroup.children[0];
       this.viewGroup.remove(c);
-      if (c.isLight) {
+      if (c.isLight || c.name === 'fpArms' || c.userData?.isFpArms) {
         keep.push(c);
         continue;
       }
@@ -349,6 +433,10 @@ export class WeaponSystem {
     const def = this.def;
     const c = this.current;
     if (!def || !c) return false;
+    // Downed: only pistol / sidearm
+    if (this.downedOnly && def.class !== 'pistol' && c.weaponId !== 'sidearm') {
+      return false;
+    }
     if (this.reloading || this.swapT > 0) return false;
     if (this.shotCooldown > 0) return false;
     if (def.fireMode === 'bolt' && !this.boltReady) return false;
@@ -586,6 +674,9 @@ export class WeaponSystem {
       slot1: this.slots[1] ? WEAPONS[this.slots[1].weaponId]?.name : null,
       health: this.health,
       armor: this.armor,
+      armorLevel: this.armorLevel,
+      helmet: this.helmet,
+      helmetMax: ARMOR.HELMET?.max ?? 100,
     };
   }
 }

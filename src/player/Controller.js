@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLAYER, SLIDE, MANTLE, LADDER, COLLISION } from '../config.js';
+import { PLAYER, SLIDE, MANTLE, LADDER, COLLISION, PARACHUTE, DOWNED } from '../config.js';
 import { resolveCapsule, makeCollisionResult } from '../world/Collision.js';
 import { supportTop, spanClear, groundProbe, findMantleTarget } from './Probes.js';
 import { clamp, lerp } from '../core/Noise.js';
@@ -48,8 +48,20 @@ export class Controller {
     this.onRappel = false;
     this.ladders = worldLadders;
 
+    // Parachute (building freefall / redeploy)
+    this.parachute = false;
+    this.chuteCutsLeft = PARACHUTE.MAX_CUTS ?? 2;
+    this._airborneSession = false;
+
     this.speed = 0; // horizontal speed, for camera bob and FOV
     this.distanceTravelled = 0;
+    /** Temporary move multiplier (stim, etc.). Reset externally each use window. */
+    this.speedMult = 1;
+    /**
+     * Forced prone crawl (downed / dead). Lowers capsule + camera and caps move
+     * speed — set from main when loadout.downed / dead.
+     */
+    this.crawlMode = false;
 
     this._candidates = [];
     this._result = makeCollisionResult();
@@ -60,6 +72,7 @@ export class Controller {
   }
 
   get eyeHeight() {
+    if (this.crawlMode) return DOWNED.EYE_HEIGHT ?? 0.32;
     if (this.sliding) return SLIDE.CAMERA_HEIGHT;
     const t = (this.height - PLAYER.HEIGHT_CROUCH) / (PLAYER.HEIGHT_STAND - PLAYER.HEIGHT_CROUCH);
     return lerp(PLAYER.EYE_CROUCH, PLAYER.EYE_STAND, clamp(t, 0, 1));
@@ -213,17 +226,27 @@ export class Controller {
     );
     if (this._wish.lengthSq() > 1e-6) this._wish.normalize();
 
-    const wantSprint = input.action('sprint') && fwd > 0 && !this.crouching;
-    const wantCrouch = input.action('crouch');
+    const crawl = !!this.crawlMode;
+    const wantSprint = !crawl && input.action('sprint') && fwd > 0 && !this.crouching;
+    const wantCrouch = crawl || input.action('crouch');
 
     if (this.jumpBuffer > 0) this.jumpBuffer -= dt;
-    if (input.actionPressed('jump')) this.jumpBuffer = PLAYER.JUMP_BUFFER;
+    // Only buffer jumps when grounded/coyote/ladder — freefall Space is for parachute
+    // Crawl (downed): no jump / mantle
+    if (!crawl && input.actionPressed('jump')) {
+      if (this.grounded || this.coyote > 0 || this.onLadder) {
+        this.jumpBuffer = PLAYER.JUMP_BUFFER;
+      } else {
+        // Stash for parachute toggle later in the tick
+        this._chuteJumpPressed = true;
+      }
+    }
     if (this.slideCooldown > 0) this.slideCooldown -= dt;
 
     const horizSpeed = Math.hypot(this.vel.x, this.vel.z);
 
     // --- slide entry: crouch while sprinting on the ground ---
-    if (!this.sliding && wantCrouch && this.sprinting && this.grounded &&
+    if (!crawl && !this.sliding && wantCrouch && this.sprinting && this.grounded &&
         this.slideCooldown <= 0 && horizSpeed > PLAYER.SPEED_WALK) {
       this.sliding = true;
       this.slideTimer = 0;
@@ -237,7 +260,7 @@ export class Controller {
     }
 
     // --- jump, with coyote time and input buffering ---
-    const canJump = this.grounded || this.coyote > 0;
+    const canJump = !crawl && (this.grounded || this.coyote > 0);
     if (this.jumpBuffer > 0 && canJump) {
       // Mantle takes priority when there is a ledge in front of us.
       if (!this._tryMantle(yaw)) {
@@ -254,7 +277,7 @@ export class Controller {
         this.jumpBuffer = 0;
         return;
       }
-    } else if (this.jumpBuffer > 0 && !this.grounded) {
+    } else if (this.jumpBuffer > 0 && !this.grounded && !crawl) {
       // Airborne mantle onto a ledge.
       if (this._tryMantle(yaw)) {
         this.jumpBuffer = 0;
@@ -264,8 +287,11 @@ export class Controller {
 
     this.sprinting = wantSprint && !this.sliding;
 
-    // --- crouch height, blocked by low ceilings ---
-    const targetHeight = (wantCrouch || this.sliding) ? PLAYER.HEIGHT_CROUCH : PLAYER.HEIGHT_STAND;
+    // --- crouch / prone height, blocked by low ceilings ---
+    const proneH = DOWNED.HEIGHT ?? 0.55;
+    const targetHeight = crawl
+      ? proneH
+      : ((wantCrouch || this.sliding) ? PLAYER.HEIGHT_CROUCH : PLAYER.HEIGHT_STAND);
     if (targetHeight > this.height) {
       let headroom = this._spanClear(
         this.pos.x, this.pos.z,
@@ -274,7 +300,7 @@ export class Controller {
       );
       // If stuck crouching under a lip (elevator jamb / slab edge), try a few
       // short offsets so releasing crouch can stand again once clear.
-      if (!headroom && !wantCrouch) {
+      if (!headroom && !wantCrouch && !crawl) {
         const offs = [[0.35, 0], [-0.35, 0], [0, 0.35], [0, -0.35], [0.45, 0.45], [-0.45, 0.45]];
         for (const [ox, oz] of offs) {
           if (this._spanClear(
@@ -293,18 +319,22 @@ export class Controller {
         this.height = Math.min(targetHeight, this.height + PLAYER.CROUCH_LERP * dt);
       }
     } else {
-      this.height = Math.max(targetHeight, this.height - PLAYER.CROUCH_LERP * dt);
+      // Drop into prone faster so camera dips immediately when downed
+      const dropRate = crawl ? PLAYER.CROUCH_LERP * 2.2 : PLAYER.CROUCH_LERP;
+      this.height = Math.max(targetHeight, this.height - dropRate * dt);
     }
     this.crouching = this.height < PLAYER.HEIGHT_STAND - 0.05;
 
     // --- horizontal acceleration ---
-    if (this.sliding) {
+    if (this.sliding && !crawl) {
       this._tickSlide(dt);
     } else {
       let target = PLAYER.SPEED_WALK;
-      if (this.sprinting) target = PLAYER.SPEED_SPRINT;
+      if (crawl) target = DOWNED.CRAWL_SPEED ?? 1.05;
+      else if (this.sprinting) target = PLAYER.SPEED_SPRINT;
       else if (this.crouching) target = PLAYER.SPEED_CROUCH;
-      if (this.ads) target *= PLAYER.ADS_MOVE_MULT;
+      if (!crawl && this.ads) target *= PLAYER.ADS_MOVE_MULT;
+      if (!crawl && this.speedMult > 0 && this.speedMult !== 1) target *= this.speedMult;
 
       if (this.grounded) {
         // Friction first, then acceleration toward the wish direction.
@@ -318,6 +348,15 @@ export class Controller {
         this._accelerate(this._wish, target, PLAYER.ACCEL_GROUND, dt);
       } else {
         this._accelerate(this._wish, target, PLAYER.ACCEL_AIR, dt, PLAYER.AIR_CONTROL);
+      }
+      // Hard cap while crawling so residual sprint velocity dies immediately
+      if (crawl) {
+        const hs = Math.hypot(this.vel.x, this.vel.z);
+        const cap = DOWNED.CRAWL_SPEED ?? 1.05;
+        if (hs > cap) {
+          this.vel.x *= cap / hs;
+          this.vel.z *= cap / hs;
+        }
       }
     }
 
@@ -363,8 +402,54 @@ export class Controller {
       }
     }
 
-    // --- gravity (off while climbing) ---
-    if (!this.grounded && !this.onLadder) this.vel.y += PLAYER.GRAVITY * dt;
+    // --- parachute deploy / cut (Space while airborne) ---
+    // cutsLeft starts at MAX_CUTS. Cut decrements. After 2 cuts, no more deploys until land.
+    const agl = this.pos.y - this.terrain.heightAt(this.pos.x, this.pos.z);
+    if (!this.grounded && !this.onLadder) {
+      if (!this._airborneSession) {
+        this._airborneSession = true;
+        this.chuteCutsLeft = PARACHUTE.MAX_CUTS ?? 2;
+        this._chuteOpens = 0;
+      }
+      if (this._chuteJumpPressed && agl >= (PARACHUTE.MIN_HEIGHT ?? 7)) {
+        this._chuteJumpPressed = false;
+        if (this.parachute) {
+          if (this.chuteCutsLeft > 0) {
+            this.chuteCutsLeft -= 1;
+            this.parachute = false;
+            this.bus?.emit?.('chute:cut', { left: this.chuteCutsLeft });
+          }
+        } else {
+          const maxCuts = PARACHUTE.MAX_CUTS ?? 2;
+          const cutsUsed = maxCuts - this.chuteCutsLeft;
+          // open → cut → open → cut → freefall only
+          if (cutsUsed < maxCuts) {
+            this.parachute = true;
+            this.bus?.emit?.('chute:open', { left: this.chuteCutsLeft });
+          }
+        }
+      } else {
+        this._chuteJumpPressed = false;
+      }
+    }
+
+    // --- gravity (off while climbing or under canopy) ---
+    if (!this.grounded && !this.onLadder) {
+      if (this.parachute) {
+        // Soft descent + glide
+        const fall = -(PARACHUTE.FALL_SPEED ?? 7.5);
+        this.vel.y = lerp(this.vel.y, fall, 1 - Math.exp(-6 * dt));
+        const glide = PARACHUTE.GLIDE_SPEED ?? 11;
+        const gAcc = PARACHUTE.GLIDE_ACCEL ?? 18;
+        this._accelerate(this._wish, glide, gAcc, dt, 1);
+        // Cap fall near ground for soft landing
+        if (agl < 4 && this.vel.y < -(PARACHUTE.LAND_SOFT ?? 4.5)) {
+          this.vel.y = -(PARACHUTE.LAND_SOFT ?? 4.5);
+        }
+      } else {
+        this.vel.y += PLAYER.GRAVITY * dt;
+      }
+    }
 
     // --- integrate ---
     const horiz = _tmpV.set(this.vel.x * dt, 0, this.vel.z * dt);
@@ -395,7 +480,13 @@ export class Controller {
 
     if (this.grounded) {
       this.coyote = PLAYER.COYOTE_TIME;
-      if (!wasGrounded && !this.onLadder) this.bus.emit('player:land', { speed: this.vel.y });
+      if (!wasGrounded && !this.onLadder) {
+        this.bus.emit('player:land', { speed: this.vel.y, chute: this.parachute });
+      }
+      // Reset chute for next jump
+      this.parachute = false;
+      this._airborneSession = false;
+      this.chuteCutsLeft = PARACHUTE.MAX_CUTS ?? 2;
     } else if (this.coyote > 0) {
       this.coyote -= dt;
     }

@@ -23,8 +23,9 @@ export class SpottingSystem {
    * @param {{ x:number,y:number,z:number }|null} aerialPos  heli / UAV position
    * @param {Array<{id?:number,x:number,y:number,z:number,dead?:boolean}>} people
    * @param {boolean} enabled
+   * @param {{ radius?: number, depth?: number }|null} [opts]  override spot cone (UAV kit)
    */
-  update(dt, aerialPos, people, enabled) {
+  update(dt, aerialPos, people, enabled, opts = null) {
     // Age existing pings
     for (let i = this.pings.length - 1; i >= 0; i--) {
       this.pings[i].life -= dt;
@@ -37,8 +38,8 @@ export class SpottingSystem {
     if (this._acc < interval) return;
     this._acc = 0;
 
-    const R = UAV.spotRadius ?? 55;
-    const depth = UAV.spotDepth ?? 120;
+    const R = opts?.radius ?? UAV.spotRadius ?? 55;
+    const depth = opts?.depth ?? UAV.spotDepth ?? 120;
     const ttl = UAV.pingTtl ?? 2.8;
     const ax = aerialPos.x;
     const ay = aerialPos.y;
