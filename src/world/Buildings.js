@@ -1,6 +1,8 @@
 import { BUILDINGS, POIS } from '../config.js';
 import { makeBuilding, makeShed, slab } from './BuildingKit.js';
 import { placeDowntownDistrict, placeVehicle } from './structures/Catalog.js';
+import { placeMcrdDepot } from './structures/Mcrd.js';
+import { mcrdBounds } from './McrdPlan.js';
 import { Occupancy } from './Occupancy.js';
 import { claimRoadCorridors, placeParkingLotDetails, placeRoadMarkings } from './Roads.js';
 import { worldLadders } from './Ladders.js';
@@ -112,42 +114,13 @@ function buildAirport(sink, terrain, rng) {
   }
 }
 
-// --- MCRD Depot: disciplined barracks grid + drill field ---
+// --- MCRD Depot: Goodhue's parade-deck campus (see structures/Mcrd.js) ---
 function buildMcrd(sink, terrain, rng) {
-  const p = poi('mcrd');
-  const base = seatY(terrain, p, p.x, p.z, 24, 24);
-
-  // Barracks rows — long low buildings in a grid
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 4; c++) {
-      const x = p.x - 55 + c * 30;
-      const z = p.z - 45 + r * 28;
-      makeBuilding(sink, {
-        x, z, w: 24, d: 12, floors: 2,
-        baseY: base,
-        color: pick(rng, [0x6b5943, 0x8a8880, 0x87857f]),
-        rng,
-      });
-    }
-  }
-
-  // HQ / admin
-  makeBuilding(sink, {
-    x: p.x - 14, z: p.z + 50, w: 28, d: 18, floors: 3,
-    baseY: base, color: 0x87857f, rng,
-  });
-
-  // Low perimeter walls / cover on the drill edge
-  for (let i = 0; i < 16; i++) {
-    const fx = p.x - 70 + i * 9;
-    sink.addSpan(fx, base, p.z + 72, fx + 7.5, base + 1.15, p.z + 72.35, 0x6e6c68, 'thin');
-  }
-
-  // Obstacle / crate line for mid-field cover
-  for (let i = 0; i < 8; i++) {
-    const cx = p.x - 40 + i * 11;
-    sink.addSpan(cx, base, p.z + 8, cx + 2.2, base + 1.5, p.z + 10, 0x5c6166);
-  }
+  const stats = placeMcrdDepot(sink, terrain, rng);
+  // Publish the depot footprint so scatter can't drop houses on the grinder.
+  const b = mcrdBounds();
+  worldOcc.claim(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0, 0, true);
+  return stats;
 }
 
 // --- Point Loma: ridge housing + lighthouse tower ---

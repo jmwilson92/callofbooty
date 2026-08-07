@@ -25,7 +25,7 @@ Terrain follows the natural map; buildings seat on local height.
 | `kearnymesa` | **Kearny Mesa** | Industrial/commercial |
 | `missionvalley` | **Mission Valley** | I-8 spawn hub |
 | `airport` | **San Diego International Airport** | Hangars + bay flats |
-| `mcrd` | **MCRD Depot** | Barracks grid |
+| `mcrd` | **MCRD Depot** | Parade deck + arcaded barracks — see below |
 | `downtown` | **Downtown** | Zoned street grid, highest loot — see below |
 | `pointloma` | **Point Loma** | Ridge high ground |
 | `balboa` | **Balboa Park** | Museums, on the mesa NE of downtown across I-5 |
@@ -71,6 +71,34 @@ street plan is the road network, and arterial links land on the ring road
 rather than the city centre. Move a freeway and you must re-check the
 civic-building sites in `structures/Scatter.js`, which are hand-verified
 clear of the corridors.
+
+## MCRD Depot
+
+The other authored POI. Bertram Goodhue's 1921 plan is a Spanish Colonial
+Revival campus — cream stucco, red clay tile, continuous arcades — wrapped
+around one enormous parade deck, and the depot is laid out the same way:
+
+- **The parade deck ("the grinder")** is the organising element. It is paved
+  by `Terrain` through the same stamp the parking lots use, then painted with
+  formation lines and the yellow footprints at receiving.
+- **Barracks** — four two-storey squad bays along the north edge, arcades
+  facing the deck, tile roofs.
+- **South row** — mess hall, chapel (bell tower and cross) and the command
+  museum, all fronting the deck behind arcades.
+- **Command building** closes the west head of the deck; its tower is the
+  landmark you navigate the depot by.
+- **East field** — confidence course, rappel tower and water tower.
+- **Perimeter fence** with a single main gate on the south side.
+
+Geometry comes from `MCRD_DEPOT` in `src/config.js` as `(u, v)` offsets from
+the depot's north-west corner; `src/world/McrdPlan.js` resolves them to world
+space and `src/world/structures/Mcrd.js` builds them.
+
+A parade deck has to be dead flat and nothing on the natural map is — the
+flattest candidate site still had ~20 m of relief — so the depot gets a
+levelled pad (`MCRD_PLATE`) using the same machinery as `DOWNTOWN_PLATE`.
+Freeways and arterials stop at the fence, and every approach road lands on
+the gate, the same way city traffic stops at downtown's ring.
 
 ## Geography (still present under the POIs)
 

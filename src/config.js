@@ -297,10 +297,11 @@ export const POIS = [
   },
   {
     id: 'mcrd', name: 'MCRD Depot',
-    // Nudged north from z 180: the depot's drill-field wall and HQ used to reach
-    // past z 227 into downtown's northern blocks.
-    x: 30, z: 140, loot: 'high',
-    note: 'Barracks grid east of the airport, north of downtown',
+    // North of the airport, on the coastal bluff — the real depot sits directly
+    // north of the runway. The old anchor was on a 24 m-spread hillside with
+    // freeways through it, which a parade deck cannot survive.
+    x: -110, z: -80, loot: 'high',
+    note: 'Recruit depot north of the airport — parade deck + arcaded barracks',
   },
   {
     id: 'downtown', name: 'Downtown',
@@ -462,6 +463,49 @@ export const DOWNTOWN_PLATE = {
   microAmp: 0.35,
   // Max height range under a building footprint before we refuse placement
   maxFootprintDelta: 1.25,
+};
+
+// MCRD Depot pad. A parade deck is only a parade deck if it is dead flat, and
+// nowhere on the natural map is (the flattest candidate site still had ~20 m of
+// relief across it). Same machinery as DOWNTOWN_PLATE.
+export const MCRD_PLATE = {
+  cx: -110,
+  cz: -80,
+  halfW: 110,
+  halfD: 75,
+  blend: 45,
+  targetY: null,
+  minDry: 3.5,
+  // Almost nothing: the grinder should read as poured asphalt, not a field.
+  microAmp: 0.12,
+  maxFootprintDelta: 1.0,
+};
+
+// MCRD Depot layout. Bertram Goodhue's 1921 plan is a Spanish Colonial Revival
+// campus wrapped around one enormous parade deck, so the deck is laid out first
+// and everything else fronts it behind an arcade.
+//
+// Coordinates are (u, v) offsets from the depot's north-west corner, in metres:
+// u runs east, v runs south. Roughly half real scale, matching the city grid.
+export const MCRD_DEPOT = {
+  w: 195, // east–west
+  d: 125, // north–south
+  // "The grinder" — the deck everything else is arranged around.
+  parade: { u0: 30, v0: 38, u1: 152, v1: 86 },
+  // Two-storey squad bays along the north edge, arcades facing the deck.
+  barracks: { v0: 4, d: 20, count: 4, w: 30, gap: 4, u0: 26 },
+  // Support buildings along the south edge, also fronting the deck.
+  south: [
+    { id: 'messhall', u0: 26, w: 42, d: 22, v0: 98, floors: 1 },
+    { id: 'chapel', u0: 78, w: 28, d: 22, v0: 98, floors: 1 },
+    { id: 'museum', u0: 116, w: 40, d: 22, v0: 98, floors: 2 },
+  ],
+  // Command building closes the west head of the deck; the tower is the landmark.
+  command: { u0: 0, w: 22, v0: 30, d: 64, floors: 2, towerH: 20 },
+  // Confidence course, rappel tower and water tower on the open east field.
+  // Kept clear of the barracks row above it and the museum beside it.
+  field: { u0: 158, u1: 193, v0: 30, v1: 112 },
+  fenceGateU: 100, // main gate on the south fence, where the arterials land
 };
 
 // Downtown street grid + neighbourhood zoning — the single source of truth.

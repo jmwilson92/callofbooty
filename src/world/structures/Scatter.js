@@ -49,7 +49,9 @@ function tryPlace(terrain, rng, attempts, pred, placeFn) {
     const x = (rng() * 2 - 1) * half;
     const z = (rng() * 2 - 1) * half;
     if (!pred(x, z, terrain)) continue;
-    placeFn(x, z);
+    // A placeFn that returns false could not claim its footprint — keep looking
+    // rather than burning the whole structure on one contested spot.
+    if (placeFn(x, z) === false) continue;
     return true;
   }
   return false;
@@ -90,7 +92,7 @@ export function scatterStructures(sink, terrain, rng) {
       if (x > 450) return false; // not deep mountains
       return true;
     }, (x, z) => {
-      if (!claimFoot(x, z, 16, 14)) return;
+      if (!claimFoot(x, z, 16, 14)) return false;
       placeSuburbanHome(sink, terrain, x, z, rng);
       stats.suburban++;
     });
@@ -130,7 +132,7 @@ export function scatterStructures(sink, terrain, rng) {
       }
       return nearRoad;
     }, (x, z) => {
-      if (!claimFoot(x, z, 30, 26)) return;
+      if (!claimFoot(x, z, 30, 26)) return false;
       placeGasStation(sink, terrain, x, z, rng);
       stats.gas++;
     });
@@ -144,7 +146,7 @@ export function scatterStructures(sink, terrain, rng) {
       if (onDowntownPlate(t, x, z)) return false;
       return t.heightAt(x, z) < 50;
     }, (x, z) => {
-      if (!claimFoot(x, z, 22, 18)) return;
+      if (!claimFoot(x, z, 22, 18)) return false;
       placeRestaurant(sink, terrain, x, z, rng, rng() > 0.35);
       stats.restaurant++;
     });
@@ -158,7 +160,7 @@ export function scatterStructures(sink, terrain, rng) {
       if (onDowntownPlate(t, x, z)) return false;
       return t.heightAt(x, z) < 55;
     }, (x, z) => {
-      if (!claimFoot(x, z, 24, 20)) return;
+      if (!claimFoot(x, z, 24, 20)) return false;
       placeAutoRepair(sink, terrain, x, z, rng);
       stats.auto++;
     });
@@ -174,7 +176,7 @@ export function scatterStructures(sink, terrain, rng) {
       if (x > 10 && x < 120 && z > 280 && z < 450) return false;
       return true;
     }, (x, z) => {
-      if (!claimFoot(x, z, 40, 28)) return;
+      if (!claimFoot(x, z, 40, 28)) return false;
       placeFireStation(sink, terrain, x, z, rng);
       stats.fire++;
     });
@@ -190,7 +192,7 @@ export function scatterStructures(sink, terrain, rng) {
       if (x > 15 && x < 110 && z > 300 && z < 460) return false;
       return (Math.abs(x) < 280 && z > -200 && z < 400) || (x > 50 && x < 250 && z < -100);
     }, (x, z) => {
-      if (!claimFoot(x, z, 30, 26)) return;
+      if (!claimFoot(x, z, 30, 26)) return false;
       placeBusinessCenter(sink, terrain, x, z, rng);
       stats.business++;
     });
@@ -250,7 +252,7 @@ export function scatterStructures(sink, terrain, rng) {
       const hw = t.heightAt(x - 12, z);
       return hw < 1.5 || t.heightAt(x, z + 12) < 1.5;
     }, (x, z) => {
-      if (!claimFoot(x - 20, z, 30, 14)) return;
+      if (!claimFoot(x - 20, z, 30, 14)) return false;
       placeBoatHouse(sink, terrain, x, z, rng);
       stats.boat++;
     });
@@ -260,7 +262,7 @@ export function scatterStructures(sink, terrain, rng) {
   for (let n = 0; n < S.BILLBOARD; n++) {
     tryPlace(terrain, rng, 40, (x, z, t) => dryLand(t, x, z, 20) && !tooCloseToPoiCore(x, z, 0.5),
       (x, z) => {
-        if (!claimFoot(x - 2, z - 2, 8, 6)) return;
+        if (!claimFoot(x - 2, z - 2, 8, 6)) return false;
         placeBillboard(sink, terrain, x, z, rng);
         stats.billboard++;
       });
@@ -277,7 +279,7 @@ export function scatterStructures(sink, terrain, rng) {
       return nearRoad;
     }, (x, z) => {
       // Claim a car-sized pad so we never stack into towers / props
-      if (!claimFoot(x, z, 5.2, 2.4)) return;
+      if (!claimFoot(x, z, 5.2, 2.4)) return false;
       placeVehicle(sink, x, z, terrain.heightAt(x, z), rng);
       stats.vehicle++;
     });
@@ -393,68 +395,86 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
   }
 
   // Balboa food + signs
+  // Fixed POI extras: claim before placing. Without this, a hand-tuned offset
+  // that happens to land on another structure silently intersects it — which is
+  // how the Kearny Mesa strip ended up with buildings inside each other.
+  // The offsets are hand-placed for composition, so rather than dropping one
+  // that no longer fits, walk it outward in a short spiral until it does.
+  const fixed = (x, z, w, d, place) => {
+    const RINGS = [0, 12, 24, 36];
+    for (const r of RINGS) {
+      const steps = r === 0 ? 1 : 8;
+      for (let i = 0; i < steps; i++) {
+        const a = (i / steps) * Math.PI * 2;
+        const px = x + Math.cos(a) * r;
+        const pz = z + Math.sin(a) * r;
+        // Deliberately no terrain test: these are authored spots and always
+        // were placed unconditionally. The only new rule is that they may not
+        // sit on top of something else.
+        if (insideCity(px, pz, 8)) continue;
+        if (!claimFoot(px, pz, w, d)) continue;
+        place(px, pz);
+        return true;
+      }
+    }
+    return false;
+  };
+
   const bal = poi('balboa');
   if (bal) {
-    placeRestaurant(sink, terrain, bal.x - 40, bal.z + 50, rng, false);
-    placeBillboard(sink, terrain, bal.x + 50, bal.z - 30, rng);
-    stats.restaurant++;
-    stats.billboard++;
+    if (fixed(bal.x - 40, bal.z + 50, 22, 18, (x, z) => placeRestaurant(sink, terrain, x, z, rng, false))) stats.restaurant++;
+    if (fixed(bal.x + 50, bal.z - 30, 8, 6, (x, z) => placeBillboard(sink, terrain, x, z, rng))) stats.billboard++;
   }
 
   // Kearny Mesa commercial strip (dense)
   const km = poi('kearnymesa');
   if (km) {
-    placeBusinessCenter(sink, terrain, km.x + 45, km.z + 35, rng);
-    placeBusinessCenter(sink, terrain, km.x - 55, km.z - 25, rng);
-    placeAutoRepair(sink, terrain, km.x - 55, km.z + 25, rng);
-    placeGasStation(sink, terrain, km.x - 35, km.z - 55, rng);
-    placeRestaurant(sink, terrain, km.x + 60, km.z - 45, rng, true);
-    placeRestaurant(sink, terrain, km.x + 30, km.z + 50, rng, true);
-    placeFireStation(sink, terrain, km.x + 70, km.z + 10, rng);
-    placeBillboard(sink, terrain, km.x - 70, km.z + 40, rng);
-    stats.business += 2;
-    stats.auto++;
-    stats.gas++;
-    stats.restaurant += 2;
-    stats.fire++;
-    stats.billboard++;
+    if (fixed(km.x + 45, km.z + 35, 30, 26, (x, z) => placeBusinessCenter(sink, terrain, x, z, rng))) stats.business++;
+    if (fixed(km.x - 55, km.z - 25, 30, 26, (x, z) => placeBusinessCenter(sink, terrain, x, z, rng))) stats.business++;
+    if (fixed(km.x - 55, km.z + 25, 24, 20, (x, z) => placeAutoRepair(sink, terrain, x, z, rng))) stats.auto++;
+    if (fixed(km.x - 35, km.z - 55, 30, 26, (x, z) => placeGasStation(sink, terrain, x, z, rng))) stats.gas++;
+    if (fixed(km.x + 60, km.z - 45, 22, 18, (x, z) => placeRestaurant(sink, terrain, x, z, rng, true))) stats.restaurant++;
+    if (fixed(km.x + 30, km.z + 50, 22, 18, (x, z) => placeRestaurant(sink, terrain, x, z, rng, true))) stats.restaurant++;
+    if (fixed(km.x + 70, km.z + 10, 40, 28, (x, z) => placeFireStation(sink, terrain, x, z, rng))) stats.fire++;
+    if (fixed(km.x - 70, km.z + 40, 8, 6, (x, z) => placeBillboard(sink, terrain, x, z, rng))) stats.billboard++;
   }
 
   // Mission Valley mall strip
   if (mv) {
-    placeRestaurant(sink, terrain, mv.x + 75, mv.z + 25, rng, true);
-    placeRestaurant(sink, terrain, mv.x - 75, mv.z - 20, rng, false);
-    placeRestaurant(sink, terrain, mv.x + 40, mv.z - 55, rng, true);
-    placeGasStation(sink, terrain, mv.x + 55, mv.z - 55, rng);
-    placeBusinessCenter(sink, terrain, mv.x - 90, mv.z + 30, rng);
-    placeBillboard(sink, terrain, mv.x + 100, mv.z, rng);
-    stats.restaurant += 3;
-    stats.gas++;
-    stats.business++;
-    stats.billboard++;
+    if (fixed(mv.x + 75, mv.z + 25, 22, 18, (x, z) => placeRestaurant(sink, terrain, x, z, rng, true))) stats.restaurant++;
+    if (fixed(mv.x - 75, mv.z - 20, 22, 18, (x, z) => placeRestaurant(sink, terrain, x, z, rng, false))) stats.restaurant++;
+    if (fixed(mv.x + 40, mv.z - 55, 22, 18, (x, z) => placeRestaurant(sink, terrain, x, z, rng, true))) stats.restaurant++;
+    if (fixed(mv.x + 55, mv.z - 55, 30, 26, (x, z) => placeGasStation(sink, terrain, x, z, rng))) stats.gas++;
+    if (fixed(mv.x - 90, mv.z + 30, 30, 26, (x, z) => placeBusinessCenter(sink, terrain, x, z, rng))) stats.business++;
+    if (fixed(mv.x + 100, mv.z, 8, 6, (x, z) => placeBillboard(sink, terrain, x, z, rng))) stats.billboard++;
   }
 
-  // MCRD / Airport support
+  // MCRD support — outside the wire. These offsets used to land inside the
+  // depot, and being unguarded they punched a fire station through the barracks.
   const mcrd = poi('mcrd');
   if (mcrd) {
-    placeFireStation(sink, terrain, mcrd.x + 55, mcrd.z - 35, rng);
-    placeBillboard(sink, terrain, mcrd.x - 40, mcrd.z + 40, rng);
-    stats.fire++;
-    stats.billboard++;
+    const fx = mcrd.x - 5;
+    const fz = mcrd.z - 100;
+    if (!insideCity(fx, fz) && claimFoot(fx, fz, 40, 28)) {
+      placeFireStation(sink, terrain, fx, fz, rng);
+      stats.fire++;
+    }
+    const bx = mcrd.x;
+    const bz = mcrd.z - 80;
+    if (claimFoot(bx, bz, 8, 6)) {
+      placeBillboard(sink, terrain, bx, bz, rng);
+      stats.billboard++;
+    }
   }
   if (ap) {
-    placeAutoRepair(sink, terrain, ap.x + 75, ap.z - 25, rng);
-    placeGasStation(sink, terrain, ap.x + 40, ap.z - 60, rng);
-    placeHarborPier(sink, terrain, ap.x - 120, ap.z + 20, rng);
-    stats.auto++;
-    stats.gas++;
+    if (fixed(ap.x + 75, ap.z - 25, 24, 20, (x, z) => placeAutoRepair(sink, terrain, x, z, rng))) stats.auto++;
+    if (fixed(ap.x + 40, ap.z - 60, 30, 26, (x, z) => placeGasStation(sink, terrain, x, z, rng))) stats.gas++;
+    fixed(ap.x - 120, ap.z + 20, 60, 20, (x, z) => placeHarborPier(sink, terrain, x, z, rng));
   }
 
   // Coronado resort extras
   if (cor) {
-    placeRestaurant(sink, terrain, cor.x + 40, cor.z - 30, rng, false);
-    placeBoatHouse(sink, terrain, cor.x - 40, cor.z + 20, rng);
-    stats.restaurant++;
-    stats.boat++;
+    if (fixed(cor.x + 40, cor.z - 30, 22, 18, (x, z) => placeRestaurant(sink, terrain, x, z, rng, false))) stats.restaurant++;
+    if (fixed(cor.x - 40, cor.z + 20, 30, 14, (x, z) => placeBoatHouse(sink, terrain, x, z, rng))) stats.boat++;
   }
 }

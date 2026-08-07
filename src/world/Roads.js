@@ -1,5 +1,6 @@
 import { POIS, FREEWAYS, ROAD_LINKS, ROADS } from '../config.js';
 import { downtownPlan, downtownStreetLines } from './DowntownPlan.js';
+import { mcrdPlan } from './McrdPlan.js';
 
 // Road network = heightfield corridors only (smooth asphalt via vertex colors).
 // No stacked box-decks. Ramps are short polylines off the main freeways.
@@ -131,11 +132,13 @@ export function buildRoadPolylines() {
     }
   }
 
-  // Downtown arterials terminate where they meet the ring road. Running them to
-  // the POI anchor pointed every link at the middle of the street grid.
+  // Arterials into a built-up POI stop at its edge instead of its anchor.
+  // Downtown they meet the ring road; MCRD they all land on the depot gate,
+  // which is how you actually get onto a base.
   const RING_HW = 172;
   const RING_HD = 158;
   const ringEndpoint = (poi, fromX, fromZ) => {
+    if (poi.id === 'mcrd') return mcrdPlan().gate;
     if (poi.id !== 'downtown') return { x: poi.x, z: poi.z };
     const dx = fromX - poi.x;
     const dz = fromZ - poi.z;
@@ -343,8 +346,8 @@ export function defaultParkingLots() {
   // Balboa / Zoo
   add('balboa', 40, 50, 40, 35);
   add('zoo', -30, 40, 45, 40);
-  // MCRD / Coronado
-  add('mcrd', 50, 40, 40, 35);
+  // MCRD motor pool — outside the wire, on the approach to the main gate
+  add('mcrd', 3, 95, 40, 35);
   add('coronado', 40, -25, 50, 35);
   // La Jolla
   add('lajolla', 30, 25, 40, 32);

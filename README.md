@@ -71,6 +71,11 @@ Click the page to lock the pointer.
   East Village, plus a ballpark, convention centre, rail depot and a crowned
   signature tower. The whole layout is the `DOWNTOWN_GRID` block in
   `src/config.js` — including an ASCII map you can edit to rezone it.
+- **MCRD is the real recruit depot** — Goodhue's Spanish Colonial Revival
+  campus around the parade deck: arcaded squad bays under red tile, the
+  command tower closing the head of the grinder, chapel, mess hall, museum,
+  confidence course, rappel and water towers, and the yellow footprints.
+  Layout lives in `MCRD_DEPOT`.
 - **Detail structures** — suburban homes, trailers, gas stations, restaurants,
   fast food, auto shops, fire stations, business centers, skyscrapers, boat
   houses, harbors, bridges, billboards, parked vehicles, and abstract zoo
@@ -97,6 +102,7 @@ src/
     BoxSink.js       batches boxes into InstancedMesh + collision AABBs
     BuildingKit.js   walls, slabs, stairs, parametric buildings
     DowntownPlan.js  downtown block/street plan — one source for roads + buildings
+    McrdPlan.js      MCRD depot plan (parade deck, barracks, gate)
     Buildings.js     the POI layouts
     Props.js         Poisson-disc cover scatter
   player/

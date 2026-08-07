@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import {
-  WORLD, TERRAIN_COLORS, ROADS, DOWNTOWN_PLATE,
+  WORLD, TERRAIN_COLORS, ROADS, DOWNTOWN_PLATE, MCRD_PLATE,
 } from '../config.js';
 import { Simplex, smoothstep, clamp, lerp } from '../core/Noise.js';
 import {
   buildRoadPolylines, polylinesToSegments, stampParkingLots, defaultParkingLots,
 } from './Roads.js';
 import { downtownPlan } from './DowntownPlan.js';
+import { mcrdBounds, mcrdPlan } from './McrdPlan.js';
 
 // San Diego heightfield shaped from satellite_view.png + terrain_map.png.
 // Same array backs render mesh and collision.
@@ -24,10 +25,13 @@ export class Terrain {
     this.heights = new Float32Array(this.n * this.n);
     this.roadMask = new Float32Array(this.n * this.n);
     this.downtownPlateY = null;
+    this.mcrdPlateY = null;
 
     this._generateBase();
-    // Level downtown first so towers sit on a city plate, not canyon noise.
+    // Level the built-up pads first so towers and the parade deck sit on flat
+    // ground rather than canyon noise.
     this._applyDowntownPlate();
+    this._applyMcrdPlate();
     // Connected freeways + arterials; flatten into heightfield.
     this.roadLines = buildRoadPolylines();
     this.roads = polylinesToSegments(this.roadLines).map((s) => ({
@@ -44,10 +48,15 @@ export class Terrain {
     // Final plate pass: roads may re-grade through the core — flatten again.
     // _applyRoads then only paints asphalt mask on the hard plate (no height carve).
     this._applyDowntownPlate({ reassert: true });
+    this._applyMcrdPlate({ reassert: true });
     this._applyRoads({ maskOnlyOnPlate: true });
     // Parking lots (smooth asphalt plates in the heightfield / road mask)
     this.parkingLots = defaultParkingLots();
     stampParkingLots(this, this.parkingLots);
+    // The parade deck is paved the same way, but kept out of `parkingLots` so
+    // the stall-and-cars pass never paints parking bays on the grinder.
+    this.paradeDeck = mcrdPlan().parade;
+    stampParkingLots(this, [this.paradeDeck]);
   }
 
   idx(ix, iz) {
@@ -279,7 +288,19 @@ export class Terrain {
    * reassert: keep existing plate Y, only re-level (after roads/water).
    */
   _applyDowntownPlate(opts = {}) {
-    const P = DOWNTOWN_PLATE;
+    this._applyPlate(DOWNTOWN_PLATE, 'downtownPlateY', opts);
+  }
+
+  _applyMcrdPlate(opts = {}) {
+    this._applyPlate(MCRD_PLATE, 'mcrdPlateY', opts);
+  }
+
+  /**
+   * Level a rectangular pad into the heightfield with a soft blend at the rim.
+   * `heightKey` caches the chosen elevation on the terrain so a second
+   * (reassert) pass reuses it instead of re-sampling already-flattened ground.
+   */
+  _applyPlate(P, heightKey, opts = {}) {
     if (!P) return;
 
     const minIX = Math.max(0, Math.floor((P.cx - P.halfW - P.blend + this.half) / this.cell));
@@ -288,7 +309,7 @@ export class Terrain {
     const maxIZ = Math.min(this.n - 1, Math.ceil((P.cz + P.halfD + P.blend + this.half) / this.cell));
 
     // Sample dry heights in the hard core to pick a stable plate elevation
-    let target = this.downtownPlateY ?? P.targetY;
+    let target = this[heightKey] ?? P.targetY;
     if (target == null || !opts.reassert) {
       const samples = [];
       const coreW = P.halfW * 0.7;
@@ -308,7 +329,7 @@ export class Terrain {
       target = samples[Math.floor(samples.length * 0.62)];
       target = Math.max(P.minDry + 2, target);
     }
-    this.downtownPlateY = target;
+    this[heightKey] = target;
 
     for (let iz = minIZ; iz <= maxIZ; iz++) {
       const z = this.gx(iz);
@@ -348,6 +369,18 @@ export class Terrain {
     const P = DOWNTOWN_PLATE;
     if (!P) return false;
     return Math.abs(x - P.cx) <= P.halfW && Math.abs(z - P.cz) <= P.halfD;
+  }
+
+  /** True if (x,z) is on the hard MCRD pad. */
+  onMcrdPlate(x, z) {
+    const P = MCRD_PLATE;
+    if (!P) return false;
+    return Math.abs(x - P.cx) <= P.halfW && Math.abs(z - P.cz) <= P.halfD;
+  }
+
+  /** On any levelled pad — roads paint asphalt here but must not re-grade it. */
+  onLevelledPad(x, z) {
+    return this.onDowntownPlate(x, z) || this.onMcrdPlate(x, z);
   }
 
   // Water cuts; protect only authored land masses (Point Loma / Coronado).
@@ -417,11 +450,11 @@ export class Terrain {
     const minH = ROADS.MIN_HEIGHT ?? 2.5;
     const maskOnlyOnPlate = !!opts.maskOnlyOnPlate;
     const plateY = this.downtownPlateY;
-    // Freeways and arterials stop at the edge of the downtown blocks: inside the
-    // district the street grid is the road network. Without this, any corridor
-    // clipping the grid paints asphalt straight through the buildings that now
-    // fill their lots.
-    const cityBounds = downtownPlan().bounds;
+    // Freeways and arterials stop at the edge of the built-up POIs. Inside the
+    // city the street grid is the road network, and the depot is fenced ground
+    // reached through its gate. Without this, any corridor clipping either one
+    // paints asphalt straight through the buildings.
+    const keepOut = [downtownPlan().bounds, mcrdBounds()];
 
     for (const seg of this.roads) {
       const cityStreet = seg.kind === 'street' || seg.kind === 'alley';
@@ -480,9 +513,9 @@ export class Terrain {
           const cz = lerp(az, bz, t);
           const d = Math.hypot(x - cx, z - cz);
           if (d > reach) continue;
-          if (!cityStreet
-            && x > cityBounds.x0 && x < cityBounds.x1
-            && z > cityBounds.z0 && z < cityBounds.z1) continue;
+          if (!cityStreet && keepOut.some((k) => (
+            x > k.x0 && x < k.x1 && z > k.z0 && z < k.z1
+          ))) continue;
 
           let roadH = prof[Math.round(t * samples)];
           // Slight crown so pavement reads above soft shoulders
@@ -494,7 +527,7 @@ export class Terrain {
           // Never drag land under water with a road
           if (this.heights[i] < minH * 0.5 && w < 0.9) continue;
 
-          const onPlate = plateY != null && this.onDowntownPlate(x, z);
+          const onPlate = plateY != null && this.onLevelledPad(x, z);
           if (onPlate && maskOnlyOnPlate) {
             // Keep the city plate level — asphalt mask only (sharper curb edge)
             if (d <= halfW) this.roadMask[i] = 1;
