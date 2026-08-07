@@ -2,6 +2,7 @@ import { POIS, FREEWAYS, ROAD_LINKS, ROADS } from '../config.js';
 import { smoothstep, lerp } from '../core/Noise.js';
 import { downtownPlan, downtownStreetLines } from './DowntownPlan.js';
 import { mcrdPlan } from './McrdPlan.js';
+import { airportPlan } from './AirportPlan.js';
 import { kearnyStreetLines, kearnyParkingLots, kearnyPlan } from './KearnyPlan.js';
 
 // Road network = heightfield corridors only (smooth asphalt via vertex colors).
@@ -153,7 +154,11 @@ export function buildRoadPolylines() {
     },
   };
   const ringEndpoint = (poi, fromX, fromZ) => {
+    // A base and an airport both have exactly one way in. Land every approach
+    // on the depot gate and the terminal kerb rather than driving an arterial
+    // across the parade deck or down the runway.
     if (poi.id === 'mcrd') return mcrdPlan().gate;
+    if (poi.id === 'airport') return airportPlan().gate;
     const e = EDGE[poi.id];
     if (!e) return { x: poi.x, z: poi.z };
     const cx = e.cx ?? poi.x;
@@ -375,15 +380,18 @@ export function defaultParkingLots() {
     if (!p) return;
     lots.push(parkingLotFootprint(p.x + ox, p.z + oz, w, d));
   };
-  // Airport long term
-  add('airport', 40, -40, 80, 45);
-  add('airport', -30, 50, 60, 40);
+  // The airport's two hand-placed lots are gone: at the anchor they landed on
+  // the apron and across the runway threshold. Lindbergh's car park comes from
+  // AIRPORT_FIELD now, so it moves with the field instead of drifting off it.
+  lots.push(airportPlan().carPark);
   // Kearny mesa strip malls
   add('kearnymesa', 50, 30, 55, 45);
   add('kearnymesa', -60, -20, 50, 40);
   // Mission Valley mall
   add('missionvalley', 70, -30, 70, 50);
-  add('missionvalley', -80, 20, 55, 40);
+  // Was at -80: that offset is inside the airfield now that the valley district
+  // has moved east of it.
+  add('missionvalley', 10, 20, 55, 40);
   // Balboa / Zoo
   add('balboa', 40, 50, 40, 35);
   add('zoo', -30, 40, 45, 40);

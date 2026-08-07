@@ -48,7 +48,12 @@ const POI_SHOTS = {
     ['pointloma-ballast', -300, 70, 500, -0.38, 0],
   ],
   balboa: [['balboa-air', 385, 150, 380, -0.60, 0]],
-  airport: [['airport-air', -120, 150, 260, -0.60, 0]],
+  airport: [
+    ['airport-air', -127, 165, 300, -0.60, 0],
+    ['airport-apron', -127, 60, 205, -0.35, 0],
+    ['airport-kerb', -127, 20, 20, -0.04, Math.PI],
+    ['airport-runway', -190, 16, 145, -0.01, -Math.PI / 2],
+  ],
 };
 
 function resolveShots() {

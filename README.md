@@ -65,6 +65,9 @@ Click the page to lock the pointer.
   Airport, MCRD Depot, Downtown (highest loot), Point Loma, Balboa Park,
   San Diego Zoo, Coronado, Radio Tower. Spaced for readability; clearer fog and
   terrain definition. See `docs/04-san-diego-map.md`.
+- **San Diego International is Lindbergh Field** — one runway with piano-key
+  thresholds and a parallel taxiway, a linear terminal with gates straight off
+  its airside face, the control tower, a cargo ramp and parked airliners.
 - **Coronado is NAS North Island, a village and the Hotel del**, with a carrier
   and two destroyers moored on the bay side. The flight deck is a registered
   floor, so it is somewhere you can fight.

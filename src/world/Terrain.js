@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  WORLD, TERRAIN_COLORS, ROADS, DOWNTOWN_PLATE, MCRD_PLATE,
+  WORLD, TERRAIN_COLORS, ROADS, DOWNTOWN_PLATE, MCRD_PLATE, AIRPORT_PLATE,
 } from '../config.js';
 import { Simplex, smoothstep, clamp, lerp } from '../core/Noise.js';
 import {
@@ -9,6 +9,7 @@ import {
 import { downtownPlan } from './DowntownPlan.js';
 import { mcrdBounds, mcrdPlan } from './McrdPlan.js';
 import { kearnyBounds } from './KearnyPlan.js';
+import { airportBounds, airportPavement } from './AirportPlan.js';
 import { isFlying } from './Interchanges.js';
 
 // San Diego heightfield shaped from satellite_view.png + terrain_map.png.
@@ -28,12 +29,14 @@ export class Terrain {
     this.roadMask = new Float32Array(this.n * this.n);
     this.downtownPlateY = null;
     this.mcrdPlateY = null;
+    this.airportPlateY = null;
 
     this._generateBase();
     // Level the built-up pads first so towers and the parade deck sit on flat
     // ground rather than canyon noise.
     this._applyDowntownPlate();
     this._applyMcrdPlate();
+    this._applyAirportPlate();
     // Connected freeways + arterials; flatten into heightfield.
     this.roadLines = buildRoadPolylines();
     this.roads = polylinesToSegments(this.roadLines).map((s) => ({
@@ -52,6 +55,7 @@ export class Terrain {
     // _applyRoads then only paints asphalt mask on the hard plate (no height carve).
     this._applyDowntownPlate({ reassert: true });
     this._applyMcrdPlate({ reassert: true });
+    this._applyAirportPlate({ reassert: true });
     this._applyRoads({ maskOnlyOnPlate: true });
     // Parking lots (smooth asphalt plates in the heightfield / road mask)
     this.parkingLots = defaultParkingLots();
@@ -60,6 +64,12 @@ export class Terrain {
     // the stall-and-cars pass never paints parking bays on the grinder.
     this.paradeDeck = mcrdPlan().parade;
     stampParkingLots(this, [this.paradeDeck]);
+    // Runway, taxiway and apron are graded into the heightfield too, for the
+    // same reason: they have to be ground you can run and land on, not a deck
+    // laid on top of one. Kept out of `parkingLots` so the stall-and-cars pass
+    // never paints parking bays across the runway.
+    this.airfield = airportPavement();
+    stampParkingLots(this, this.airfield);
   }
 
   idx(ix, iz) {
@@ -298,6 +308,10 @@ export class Terrain {
     this._applyPlate(MCRD_PLATE, 'mcrdPlateY', opts);
   }
 
+  _applyAirportPlate(opts = {}) {
+    this._applyPlate(AIRPORT_PLATE, 'airportPlateY', opts);
+  }
+
   /**
    * Level a rectangular pad into the heightfield with a soft blend at the rim.
    * `heightKey` caches the chosen elevation on the terrain so a second
@@ -381,9 +395,16 @@ export class Terrain {
     return Math.abs(x - P.cx) <= P.halfW && Math.abs(z - P.cz) <= P.halfD;
   }
 
+  /** True if (x,z) is on the hard airfield pad. */
+  onAirportPlate(x, z) {
+    const P = AIRPORT_PLATE;
+    if (!P) return false;
+    return Math.abs(x - P.cx) <= P.halfW && Math.abs(z - P.cz) <= P.halfD;
+  }
+
   /** On any levelled pad — roads paint asphalt here but must not re-grade it. */
   onLevelledPad(x, z) {
-    return this.onDowntownPlate(x, z) || this.onMcrdPlate(x, z);
+    return this.onDowntownPlate(x, z) || this.onMcrdPlate(x, z) || this.onAirportPlate(x, z);
   }
 
   // Water cuts; protect only authored land masses (Point Loma / Coronado).
@@ -457,7 +478,7 @@ export class Terrain {
     // city the street grid is the road network, and the depot is fenced ground
     // reached through its gate. Without this, any corridor clipping either one
     // paints asphalt straight through the buildings.
-    const keepOut = [downtownPlan().bounds, mcrdBounds(), kearnyBounds()];
+    const keepOut = [downtownPlan().bounds, mcrdBounds(), kearnyBounds(), airportBounds()];
 
     for (const seg of this.roads) {
       const cityStreet = seg.kind === 'street' || seg.kind === 'alley';

@@ -24,7 +24,7 @@ Terrain follows the natural map; buildings seat on local height.
 | `lajolla` | **La Jolla** | NW coastal cliffs / village |
 | `kearnymesa` | **Kearny Mesa** | Suburbs + big-box retail + business park |
 | `missionvalley` | **Mission Valley** | I-8 spawn hub |
-| `airport` | **San Diego International Airport** | Hangars + bay flats |
+| `airport` | **San Diego International (SAN)** | Lindbergh Field — runway, terminal, tower |
 | `mcrd` | **MCRD Depot** | Parade deck + arcaded barracks — see below |
 | `downtown` | **Downtown** | Zoned street grid, highest loot — see below |
 | `pointloma` | **Point Loma** | Lighthouse, Fort Rosecrans, submarine base |
@@ -134,6 +134,45 @@ already-flat ground, which is what lets a suburb sit on rolling mesa.
 
 Arterials stop at the district edge, the same rule downtown and MCRD use — five
 of them converged on the anchor and paved the quadrants flat before that.
+
+## San Diego International (Lindbergh Field)
+
+Everything about SAN follows from having exactly one runway on a strip of land
+too narrow for a second, and the model follows the same constraint:
+
+- **The terminal is a single linear block** with its gates coming straight off
+  the airside face. Concourse piers were built first and thrown away: on a 134 m
+  frontage three piers give a 27 m pitch, an airliner is 22 m across the wings,
+  and every aircraft parked between two piers flew through both of them. The
+  real Lindbergh has a linear terminal for the same reason.
+- **Cargo and general aviation** are squeezed onto the west end, where the field
+  runs out of width.
+- **One runway**, with a parallel taxiway and turn-offs, marked with piano-key
+  thresholds, centreline dashes, touchdown-zone bars and edge lights.
+- **The control tower** closes the east end, next to the terminal kerb.
+
+The airfield gets its own levelled plate (`AIRPORT_PLATE`) because a runway is
+flat by definition. Its west edge stops at x −194, short of the bay inlet
+reaching into the valley mouth, so the plate is never asked to lift water into a
+mesa; its east edge stops at x −60, where Mission Valley's own district begins.
+
+Runway, taxiway and apron are graded into the heightfield through the same stamp
+the parking lots use, so they are ground you can run and land on rather than a
+deck laid over one. The **car park is deliberately not** in that set — it goes
+through `defaultParkingLots()` so the normal stall-and-cars pass dresses it. Put
+the airside surfaces in there instead and that pass paints parking bays down the
+runway, which is exactly what two stale hand-placed lots at the old anchor were
+already doing.
+
+Layout is `AIRPORT_FIELD` in `src/config.js`, resolved by
+`src/world/AirportPlan.js`, which the road pass reads too — arterials land on
+the terminal kerb rather than driving down the runway, the same rule the depot
+gate and the downtown ring use.
+
+Mission Valley's malls and hotels moved east of the field. They used to be laid
+out west of their anchor, which put them on the only flat ground in the valley
+mouth — the ground the airport now occupies — and that is also where the real
+Mission Valley sits relative to Lindbergh.
 
 ## Coronado
 

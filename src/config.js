@@ -481,6 +481,54 @@ export const MCRD_PLATE = {
   maxFootprintDelta: 1.0,
 };
 
+// San Diego International (Lindbergh Field). A runway is flat by definition, so
+// the airfield gets the same plate treatment as the parade deck. The natural
+// site here is a ~14 m bench between the bay inlet to the west and rising ground
+// to the east; the plate is kept clear of both so it never has to lift water.
+export const AIRPORT_PLATE = {
+  // West edge stops at x -194: beyond that the bay inlet reaches into the
+  // valley mouth and the plate would be asked to lift water into a mesa. East
+  // edge stops at x -60, which is where Mission Valley's own district starts.
+  cx: -127,
+  cz: 103,
+  halfW: 67,
+  halfD: 58,
+  blend: 40,
+  targetY: null,
+  minDry: 3.5,
+  microAmp: 0.08,
+  maxFootprintDelta: 1.0,
+};
+
+// Lindbergh Field's layout, as (u, v) offsets from the field's north-west
+// corner. Everything about SAN follows from having exactly one runway on a
+// strip of land too narrow for a second: the terminals are all on the north
+// side, the cargo and general-aviation ramp is squeezed onto the west end, and
+// the concourses reach south toward the runway rather than spreading out.
+export const AIRPORT_FIELD = {
+  w: 134,
+  d: 116,
+  // Landside: the access loop and the car park in front of the terminal
+  access: { u0: 24, u1: 122, v: 6, width: 9 },
+  carPark: { u0: 35, u1: 110, v0: 12, v1: 21 },
+  // The terminal is a single linear block with its gates straight off the
+  // airside face. Concourse piers were tried and do not fit: with three piers on
+  // a 134 m frontage the pitch is 27 m and an airliner is 22 m across the wings,
+  // so every aircraft parked between two piers flew through both of them. A
+  // linear terminal is also what Lindbergh actually has, for the same reason.
+  terminal: { u0: 27, u1: 118, v0: 23, v1: 40 },
+  // Gates along the airside face: nose-in, wings parallel to the building.
+  gates: { u0: 47, pitch: 30, count: 3 },
+  apron: { u0: 18, u1: 125, v0: 40, v1: 72 },
+  taxiway: { u0: 6, u1: 129, v0: 76, v1: 86 },
+  runway: { u0: 3, u1: 131, v0: 91, v1: 109, markEvery: 14 },
+  tower: { u: 122, v: 24 },
+  // Cargo / GA on the west end, where the field runs out of width
+  cargo: { u0: 3, u1: 24, v0: 20, v1: 40, hangars: 2 },
+  // Where the perimeter road meets the field — the terminal kerb
+  gateU: 73,
+};
+
 // MCRD Depot layout. Bertram Goodhue's 1921 plan is a Spanish Colonial Revival
 // campus wrapped around one enormous parade deck, so the deck is laid out first
 // and everything else fronts it behind an arcade.

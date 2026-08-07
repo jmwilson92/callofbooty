@@ -4,11 +4,13 @@ import { placeDowntownDistrict, placeVehicle } from './structures/Catalog.js';
 import { placeMcrdDepot } from './structures/Mcrd.js';
 import { placeSanDiegoZoo } from './structures/Zoo.js';
 import { placeKearnyMesa } from './structures/KearnyMesa.js';
+import { placeAirport } from './structures/Airport.js';
 import { placeCoronado } from './structures/Coronado.js';
 import { placePointLoma } from './structures/PointLoma.js';
 import { placeOverpasses } from './structures/Overpass.js';
 import { kearnyPlan } from './KearnyPlan.js';
 import { mcrdBounds } from './McrdPlan.js';
+import { airportBounds } from './AirportPlan.js';
 import { Occupancy } from './Occupancy.js';
 import { claimRoadCorridors, placeParkingLotDetails, placeRoadMarkings } from './Roads.js';
 import { worldLadders } from './Ladders.js';
@@ -70,54 +72,13 @@ function claimOrSkip(x, z, w, d) {
   return worldOcc.tryClaim(x, z, w, d, 2);
 }
 
-// --- San Diego International Airport: hangars + container/yard cover ---
+// --- San Diego International: Lindbergh Field (structures/Airport.js) ---
 function buildAirport(sink, terrain, rng) {
-  const p = poi('airport');
-
-  // Terminal / hangar row
-  for (let i = 0; i < 4; i++) {
-    const w = 50, d = 26;
-    const x = p.x - 90 + i * 55;
-    const z = p.z - 48;
-    makeShed(sink, {
-      x, z, w, d, h: 12,
-      baseY: seatY(terrain, p, x, z, w, d),
-      color: pick(rng, [0x8a8880, 0x87857f, 0x9a968c]),
-    });
-  }
-
-  // Control / office block
-  const ox = p.x - 70, oz = p.z + 30;
-  makeBuilding(sink, {
-    x: ox, z: oz, w: 22, d: 16, floors: 3,
-    baseY: seatY(terrain, p, ox, oz, 22, 16), color: PAL[0], rng,
-  });
-
-  // Cargo containers on the apron
-  const CW = 6.06, CH = 2.59, CD = 2.44;
-  const yardX = p.x + 10;
-  const yardZ = p.z + 20;
-  const colors = [0x4a6b7a, 0x7a4a3c, 0x6b7f43, 0x8a8880];
-
-  for (let row = 0; row < 4; row++) {
-    for (let col = 0; col < 6; col++) {
-      const cx = yardX + col * (CW + 2.2);
-      const cz = yardZ + row * (CD + 3.4);
-      const base = seatY(terrain, p, cx, cz, CW, CD);
-      const stack = rng() > 0.55 ? 2 : 1;
-      for (let s = 0; s < stack; s++) {
-        sink.addSpan(
-          cx, base + s * CH, cz,
-          cx + CW, base + (s + 1) * CH, cz + CD,
-          colors[(row + col + s) % colors.length]
-        );
-      }
-      if (rng() > 0.35) {
-        const kx = cx + rng() * (CW - 1.6);
-        sink.addSpan(kx, base, cz - 1.7, kx + 1.5, base + 1.45, cz - 0.2, 0x8e7a5a);
-      }
-    }
-  }
+  const stats = placeAirport(sink, terrain, rng);
+  // Reserve the field so scatter does not drop a trailer park on the runway.
+  const b = airportBounds();
+  worldOcc.claim(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0, 0, true);
+  return stats;
 }
 
 // --- MCRD Depot: Goodhue's parade-deck campus (see structures/Mcrd.js) ---
@@ -140,34 +101,40 @@ function buildPointLoma(sink, terrain, rng) {
 }
 
 // --- Mission Valley: hotel / mall blocks on the valley floor ---
+// Everything here used to be laid out west of the anchor, which put the malls
+// and two hotel towers on the only flat ground in the valley mouth — the ground
+// Lindbergh Field now occupies. The district runs east up the valley instead,
+// which is also where the real one is relative to the airport.
 function buildMissionValley(sink, terrain, rng) {
   const p = poi('missionvalley');
-  const base = seatY(terrain, p, p.x, p.z, 24, 24);
+  const seat = (x, z, w, d) => seatY(terrain, p, x, z, w, d);
 
   // Big box / mall sheds along the valley
   makeShed(sink, {
-    x: p.x - 70, z: p.z - 30, w: 55, d: 32, h: 14,
-    baseY: base, color: 0x8a8880, doorW: 8,
+    x: p.x + 4, z: p.z - 30, w: 55, d: 32, h: 14,
+    baseY: seat(p.x + 4, p.z - 30, 55, 32), color: 0x8a8880, doorW: 8,
   });
   makeShed(sink, {
-    x: p.x + 10, z: p.z - 24, w: 48, d: 28, h: 12,
-    baseY: base, color: 0x9a968c, doorW: 6,
+    x: p.x + 66, z: p.z - 24, w: 48, d: 28, h: 12,
+    baseY: seat(p.x + 66, p.z - 24, 48, 28), color: 0x9a968c, doorW: 6,
   });
 
   // Hotel towers
   for (let i = 0; i < 3; i++) {
+    const hx = p.x + 10 + i * 38;
     makeBuilding(sink, {
-      x: p.x - 50 + i * 40, z: p.z + 30, w: 20, d: 16,
+      x: hx, z: p.z + 30, w: 20, d: 16,
       floors: 4 + Math.floor(rng() * 3),
-      baseY: base, color: pick(rng, PAL), rng,
+      baseY: seat(hx, p.z + 30, 20, 16), color: pick(rng, PAL), rng,
     });
   }
 
   // Parking / low cover
   for (let i = 0; i < 12; i++) {
-    const vx = p.x - 60 + (i % 6) * 22;
+    const vx = p.x + 6 + (i % 6) * 22;
     const vz = p.z + 55 + Math.floor(i / 6) * 14;
-    sink.addSpan(vx, base, vz, vx + 4.8, base + 1.5, vz + 2.0, 0x5c6166);
+    const vy = seat(vx, vz, 4.8, 2);
+    sink.addSpan(vx, vy, vz, vx + 4.8, vy + 1.5, vz + 2.0, 0x5c6166);
   }
 }
 
