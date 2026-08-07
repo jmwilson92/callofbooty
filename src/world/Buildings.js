@@ -4,6 +4,7 @@ import { placeDowntownDistrict, placeVehicle } from './structures/Catalog.js';
 import { placeMcrdDepot } from './structures/Mcrd.js';
 import { placeSanDiegoZoo } from './structures/Zoo.js';
 import { placeKearnyMesa } from './structures/KearnyMesa.js';
+import { placeCoronado } from './structures/Coronado.js';
 import { kearnyPlan } from './KearnyPlan.js';
 import { mcrdBounds } from './McrdPlan.js';
 import { Occupancy } from './Occupancy.js';
@@ -239,34 +240,13 @@ function buildZoo(sink, terrain, rng) {
   return stats;
 }
 
-// --- Coronado: resort strip across the bay ---
+// --- Coronado: NAS North Island + Hotel del (structures/Coronado.js) ---
 function buildCoronado(sink, terrain, rng) {
   const p = poi('coronado');
-  const base = seatY(terrain, p, p.x, p.z, 24, 24);
-
-  // Hotel del–scale block
-  makeBuilding(sink, {
-    x: p.x - 30, z: p.z - 16, w: 40, d: 24, floors: 5,
-    baseY: base, color: 0x9a968c, rng,
-  });
-  makeBuilding(sink, {
-    x: p.x + 18, z: p.z - 12, w: 24, d: 18, floors: 3,
-    baseY: base, color: PAL[5], rng,
-  });
-
-  // Beach cottages / small sheds along the strip
-  for (let i = 0; i < 7; i++) {
-    makeShed(sink, {
-      x: p.x - 45 + i * 14, z: p.z + 24, w: 10, d: 7, h: 3.4,
-      baseY: base, color: pick(rng, PAL),
-    });
-  }
-
-  // Seawall cover
-  for (let i = 0; i < 12; i++) {
-    const wx = p.x - 50 + i * 9;
-    sink.addSpan(wx, base, p.z + 42, wx + 7.5, base + 1.1, p.z + 42.35, 0x9a968c, 'thin');
-  }
+  const stats = placeCoronado(sink, terrain, p, rng);
+  // Reserve the island and its moorings
+  worldOcc.claim(p.x - 130, p.z - 160, 230, 210, 0, true);
+  return stats;
 }
 
 // --- La Jolla: cliffside village on the NW coast ---

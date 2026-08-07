@@ -30,7 +30,7 @@ Terrain follows the natural map; buildings seat on local height.
 | `pointloma` | **Point Loma** | Ridge high ground |
 | `balboa` | **Balboa Park** | Museums, on the mesa NE of downtown across I-5 |
 | `zoo` | **San Diego Zoo** | Canyon-terraced habitats, aviary, Skyfari |
-| `coronado` | **Coronado** | Resort island |
+| `coronado` | **Coronado** | NAS North Island, carrier + destroyer, Hotel del |
 | `radiotower` | **Radio Tower** | East mountain outpost |
 
 ## Downtown district
@@ -134,6 +134,21 @@ already-flat ground, which is what lets a suburb sit on rolling mesa.
 
 Arterials stop at the district edge, the same rule downtown and MCRD use — five
 of them converged on the anchor and paved the quadrants flat before that.
+
+## Coronado
+
+Naval Air Station North Island on the bay side, the Hotel del and its cottages
+on the ocean side (`src/world/structures/Coronado.js`).
+
+The island is a narrow strip — about 120 m of buildable land between two
+stretches of −8 m water — so the base works the way the real one does: hangars,
+ops and the control tower on the land, and the fleet moored out on piers running
+north into the bay. A carrier and a destroyer sit alongside.
+
+The carrier deck is the point of the whole POI: it is the largest flat surface
+on the map, it reads from every approach, and it is a genuinely good fight. Deck
+overhang, angled landing stripe, catapult tracks, island superstructure to
+starboard and parked aircraft clear of the landing lane.
 
 ## Geography (still present under the POIs)
 
