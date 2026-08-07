@@ -1,4 +1,5 @@
 import { POIS, FREEWAYS, ROAD_LINKS, ROADS } from '../config.js';
+import { smoothstep, lerp } from '../core/Noise.js';
 import { downtownPlan, downtownStreetLines } from './DowntownPlan.js';
 import { mcrdPlan } from './McrdPlan.js';
 
@@ -284,9 +285,13 @@ export function parkingLotFootprint(cx, cz, w, d) {
 }
 
 /**
- * Stamp rectangular parking lots into terrain roadMask / heights.
+ * Stamp rectangular parking lots into the terrain heightfield and road mask.
+ *
+ * The lot surface is flat, but the edges are graded out over `blend` metres.
+ * Writing the bare rect left a vertical wall wherever a lot sat on a slope —
+ * the drop outside MCRD's gate was a 71 degree cliff.
  */
-export function stampParkingLots(terrain, lots) {
+export function stampParkingLots(terrain, lots, blend = 16) {
   let n = 0;
   const minH = ROADS.MIN_HEIGHT ?? 2.5;
   for (const lot of lots) {
@@ -307,15 +312,31 @@ export function stampParkingLots(terrain, lots) {
     }
     if (cnt < 4) continue;
     const target = Math.max(minH, sum / cnt);
-    const minIX = Math.max(0, Math.floor((x0 + terrain.half) / terrain.cell));
-    const maxIX = Math.min(terrain.n - 1, Math.ceil((x1 + terrain.half) / terrain.cell));
-    const minIZ = Math.max(0, Math.floor((z0 + terrain.half) / terrain.cell));
-    const maxIZ = Math.min(terrain.n - 1, Math.ceil((z1 + terrain.half) / terrain.cell));
+
+    const reach = blend;
+    const minIX = Math.max(0, Math.floor((x0 - reach + terrain.half) / terrain.cell));
+    const maxIX = Math.min(terrain.n - 1, Math.ceil((x1 + reach + terrain.half) / terrain.cell));
+    const minIZ = Math.max(0, Math.floor((z0 - reach + terrain.half) / terrain.cell));
+    const maxIZ = Math.min(terrain.n - 1, Math.ceil((z1 + reach + terrain.half) / terrain.cell));
+
     for (let iz = minIZ; iz <= maxIZ; iz++) {
+      const z = terrain.gx(iz);
       for (let ix = minIX; ix <= maxIX; ix++) {
+        const x = terrain.gx(ix);
+        // How far outside the lot rectangle this sample sits
+        const ox = Math.max(0, x0 - x, x - x1);
+        const oz = Math.max(0, z0 - z, z - z1);
+        const out = Math.hypot(ox, oz);
+        if (out > reach) continue;
         const i = terrain.idx(ix, iz);
-        terrain.heights[i] = target;
-        terrain.roadMask[i] = 1;
+        const h = terrain.heights[i];
+        // Never drag water up into a shelf
+        if (h < minH * 0.45) continue;
+        const w = 1 - smoothstep(0, reach, out);
+        terrain.heights[i] = lerp(h, target, w);
+        // Asphalt only on the lot proper, with a one-cell feather at the kerb
+        if (out <= 0.01) terrain.roadMask[i] = 1;
+        else terrain.roadMask[i] = Math.max(terrain.roadMask[i], 1 - smoothstep(0, 3.0, out));
       }
     }
     n++;
@@ -346,8 +367,13 @@ export function defaultParkingLots() {
   // Balboa / Zoo
   add('balboa', 40, 50, 40, 35);
   add('zoo', -30, 40, 45, 40);
-  // MCRD motor pool — outside the wire, on the approach to the main gate
-  add('mcrd', 3, 95, 40, 35);
+  // MCRD motor pool — inside the wire, in the depot's north-east corner. It used
+  // to sit outside the gate on a 30 degree bluff, which read as a shelf with a
+  // straight drop off both sides no matter how the edges were graded.
+  {
+    const m = mcrdPlan();
+    lots.push({ x: m.ox + 159, z: m.oz + 5, w: 32, d: 22 });
+  }
   add('coronado', 40, -25, 50, 35);
   // La Jolla
   add('lajolla', 30, 25, 40, 32);

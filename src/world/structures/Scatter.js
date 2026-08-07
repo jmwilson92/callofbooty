@@ -292,11 +292,20 @@ export function scatterStructures(sink, terrain, rng) {
 }
 
 function placeLandmarkStructures(sink, terrain, rng, stats) {
-  // Harbor at airport / bay
+  // Harbor Island: a marina on the bay shore west of the airport. This used to
+  // be two container terminals with gantry cranes, which — now that MCRD sits
+  // just north of here — made the whole approach to the depot read as a
+  // shipyard. The real waterfront on this stretch is pleasure craft.
   const ap = poi('airport');
   if (ap) {
-    placeHarborPier(sink, terrain, ap.x - 90, ap.z + 40, rng);
-    placeHarborPier(sink, terrain, ap.x - 50, ap.z + 70, rng);
+    for (let i = 0; i < 5; i++) {
+      const bx = ap.x - 120 + i * 26;
+      const bz = ap.z + 34 + (i % 2) * 16;
+      if (claimFoot(bx - 20, bz, 30, 14)) {
+        placeBoatHouse(sink, terrain, bx, bz, rng);
+        stats.boat++;
+      }
+    }
   }
 
   // Coronado bridge-style span (island → downtown approach)
@@ -469,7 +478,10 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
   if (ap) {
     if (fixed(ap.x + 75, ap.z - 25, 24, 20, (x, z) => placeAutoRepair(sink, terrain, x, z, rng))) stats.auto++;
     if (fixed(ap.x + 40, ap.z - 60, 30, 26, (x, z) => placeGasStation(sink, terrain, x, z, rng))) stats.gas++;
-    fixed(ap.x - 120, ap.z + 20, 60, 20, (x, z) => placeHarborPier(sink, terrain, x, z, rng));
+    // Harbor pier moved off the airport's west side: gantry cranes and stacked
+    // containers 200 m from MCRD made the whole approach read as a shipyard.
+    // San Diego's working terminal is on the bay south of downtown anyway.
+    fixed(-150, 470, 60, 20, (x, z) => placeHarborPier(sink, terrain, x, z, rng));
   }
 
   // Coronado resort extras
