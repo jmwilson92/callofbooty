@@ -44,6 +44,7 @@ import { SpottingSystem } from './combat/Spotting.js';
 import { ThrowableSystem } from './combat/Throwables.js';
 import { MatchController } from './game/Match.js';
 import { ZoneSystem } from './game/Zone.js';
+import { isExplore, MODES, getMode, setMode } from './game/Mode.js';
 import { THROWABLES } from './config.js';
 import { EndScreen } from './ui/EndScreen.js';
 
@@ -150,6 +151,10 @@ async function start() {
   const playerCam = new PlayerCamera(window.innerWidth / window.innerHeight);
   const input = new Input(renderer.domElement, bus);
   const hud = createHud();
+  hud.setModePicker?.(getMode(), (m) => setMode(m), {
+    [MODES.BR]: 'Zones close, 90 bots, last squad standing.',
+    [MODES.EXPLORE]: 'No zone, no bots — the map, a gun and a helicopter.',
+  });
   const combatHud = new CombatHud();
   const debug = new DebugOverlay(renderer);
   const mapView = new MapView(terrain);
@@ -325,7 +330,10 @@ async function start() {
   const cacheCount = buyCaches.spawn();
   const testRange = new TargetRange(scene, terrain);
   const bots = new BotSystem(scene, terrain, hash, bus, loot);
-  const botCount = bots.spawn();
+  // Free explore is for looking at the map. Ninety hostiles is the opposite of
+  // that, so nothing spawns — the rest of the sandbox (loot, vehicles, weapons,
+  // the heli) stays, so you can still shoot and fly around.
+  const botCount = isExplore() ? 0 : bots.spawn();
   // ── Shared combat: same state channel as heli (rk / bs / bk) ────────
   bus.on('vehicle:rocket_net', (payload) => {
     if (!party.connected) {
@@ -431,15 +439,21 @@ async function start() {
   };
   const zone = new ZoneSystem(scene, terrain, WORLD.SEED ^ 0xb07a);
   const match = new MatchController(bus, bots, party, zone);
+  const brActive = BR.enabled && !isExplore();
+  if (!brActive) {
+    // Never started, so it never ticks or damages — but the meshes are built in
+    // the constructor and start out visible, so the wall has to be told to hide.
+    zone.stop();
+  }
   match.prepareBots();
-  if (BR.enabled) {
+  if (brActive) {
     match.setHardcore(true); // no bot respawn during BR
     match.start();
   }
   // Friends: shared zone seed + vehicle peer id for co-op heli seats
   party.onRoom = (room) => {
     vehicles.setLocalPeerId(party.peerId);
-    if (!BR.enabled || !room) return;
+    if (!brActive || !room) return;
     match.start(ZoneSystem.seedFromRoom(room));
     match.setHardcore(true);
   };
@@ -926,7 +940,7 @@ async function start() {
             bots.applyNetSnapshot(party.latestBotSnap, dt);
           }
         }
-        match.update(dt, weapons, loadout, controller.pos, { inHeli });
+        if (brActive) match.update(dt, weapons, loadout, controller.pos, { inHeli });
         combatTargets.length = 0;
         const liveBots = bots.getLiveTargets();
         for (let i = 0; i < liveBots.length; i++) combatTargets.push(liveBots[i]);
@@ -1222,7 +1236,7 @@ async function start() {
       loadout.cash,
       loadout.gearHud
     );
-    if (BR.enabled) {
+    if (brActive) {
       combatHud.setBr?.(match.hudState());
       mapView.setZone?.(zone.snapshot());
     }

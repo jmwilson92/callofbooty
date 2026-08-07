@@ -2,8 +2,9 @@
 
 A browser-based battle royale FPS, built in phases from the specs in `docs/`.
 
-**Current state: Phase 1 complete** — movement, camera, collision, and the map.
-No weapons, loot, bots, or match loop yet.
+**Current state:** movement, camera, collision and the map, plus weapons, loot,
+bots, vehicles, a co-op party and a battle-royale match loop. The heading below
+still says "Phase 1" because that is the spec the map work traces back to.
 
 ## Play (public URL for friends)
 
@@ -31,6 +32,23 @@ Vite listens on **0.0.0.0:5173** so GitHub Codespaces can forward the port.
 
 Click the page to lock the pointer.
 
+## Modes
+
+Pick one on the start screen, above **CLICK TO PLAY**:
+
+| Mode | What you get |
+|---|---|
+| **Battle Royale** | Zones close, 90 bots in fireteams, last squad standing. |
+| **Free Explore** | No zone, no bots — the map, a gun and a helicopter. |
+
+Free explore exists because the world is the thing most of the work goes into,
+and you cannot look at it properly while a gas wall is closing on you.
+
+The choice is stored in `localStorage` and resolved once at boot, so switching
+reloads the page — bots, loot, the zone and the match controller are all built
+during startup. A URL can pin a mode for a session: `?mode=explore` or
+`?mode=br` (the URL wins over the stored choice).
+
 | Input | Action |
 |---|---|
 | `WASD` | move |
@@ -38,7 +56,7 @@ Click the page to lock the pointer.
 | `Space` | jump / mantle |
 | `C` or `Ctrl` | crouch |
 | Sprint + `C` | slide — jump to cancel and keep your horizontal speed |
-| Right mouse | ADS stance (movement/bob only; no weapons yet) |
+| Right mouse | ADS |
 | `M` | open / close tactical map (shows your location) |
 | `F3` | performance overlay |
 | `Esc` | release pointer (also closes the map) |

@@ -297,3 +297,10 @@ Moving those two passes ahead of the small fill restored them at no other cost.
 ## Spawn
 
 Mission Valley `(0, 70)`, facing south toward Downtown / MCRD.
+
+## Looking at the map
+
+Free explore (`?mode=explore`, or the picker on the start screen) turns off the
+zone and the bots and leaves everything else. It exists for exactly the reason
+this document keeps giving: most of the defects in here were only ever found by
+looking at the thing, and you cannot look at it while a gas wall is closing.

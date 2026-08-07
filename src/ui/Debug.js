@@ -98,6 +98,11 @@ export function createHud() {
     <h1>Call of Booty <small>— Phase 1</small></h1>
     <p class="lead">Click below (or anywhere) to lock the pointer and drop in.</p>
     <p class="lead" style="opacity:0.55;font-size:0.8rem;margin-top:-0.5rem">Esc pauses and returns here. Opening the map does not.</p>
+    <div id="hint-mode" class="hint-mode">
+      <button type="button" data-mode="br">BATTLE ROYALE</button>
+      <button type="button" data-mode="explore">FREE EXPLORE</button>
+      <p class="hint-mode-note"></p>
+    </div>
     <button type="button" id="hint-play" class="hint-play">CLICK TO PLAY</button>
     <table>
       <tr><td>WASD</td><td>move</td></tr>
@@ -157,6 +162,47 @@ export function createHud() {
     });
   }
 
+  // Mode picker. Styled inline for the same reason the play button is — so it
+  // still works if the stylesheet is stale.
+  const modeBox = hint.querySelector('#hint-mode');
+  const modeNote = modeBox?.querySelector('.hint-mode-note');
+  if (modeBox) {
+    Object.assign(modeBox.style, {
+      pointerEvents: 'auto',
+      display: 'flex',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: '10px',
+      margin: '0.4rem 0 -0.2rem',
+      zIndex: '50',
+    });
+    for (const b of modeBox.querySelectorAll('button')) {
+      Object.assign(b.style, {
+        pointerEvents: 'auto',
+        cursor: 'pointer',
+        padding: '9px 16px',
+        font: '700 12px/1 ui-monospace, Menlo, Consolas, monospace',
+        letterSpacing: '0.1em',
+        color: '#cfe6f4',
+        background: 'rgba(10,16,22,0.75)',
+        border: '1px solid rgba(127,212,255,0.35)',
+        borderRadius: '7px',
+      });
+      b.addEventListener('click', (e) => e.stopPropagation());
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+    }
+  }
+  if (modeNote) {
+    Object.assign(modeNote.style, {
+      flexBasis: '100%',
+      margin: '2px 0 0',
+      font: '400 11px/1.4 ui-monospace, Menlo, Consolas, monospace',
+      opacity: '0.6',
+      letterSpacing: '0',
+    });
+  }
+
   /** Once you've entered play, only Esc brings the menu back (not map unlock). */
   let hasEnteredPlay = false;
   let menuVisible = true;
@@ -173,6 +219,7 @@ export function createHud() {
         hasEnteredPlay = true;
         menuVisible = false;
         hint.style.display = 'none';
+        if (modeBox) modeBox.style.display = 'none';
         cross.style.display = 'block';
         err.textContent = '';
         return;
@@ -197,6 +244,36 @@ export function createHud() {
     },
     setError(msg) {
       err.textContent = msg || '';
+    },
+    /**
+     * Wire the mode picker. `current` highlights the active mode; `onPick` is
+     * called with the other one. Switching reloads, so the buttons are hidden
+     * once you are in play — changing mode mid-match would mean tearing down
+     * bots, loot and the zone that were built at boot.
+     * @param {'br'|'explore'} current
+     * @param {(mode: 'br'|'explore') => void} onPick
+     * @param {Record<string,string>} [notes] per-mode caption
+     */
+    setModePicker(current, onPick, notes = {}) {
+      if (!modeBox) return;
+      for (const b of modeBox.querySelectorAll('button')) {
+        const active = b.dataset.mode === current;
+        b.style.color = active ? '#0d1116' : '#cfe6f4';
+        b.style.background = active
+          ? 'linear-gradient(180deg, #9ae0ff, #7fd4ff)'
+          : 'rgba(10,16,22,0.75)';
+        b.style.borderColor = active ? 'transparent' : 'rgba(127,212,255,0.35)';
+        b.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (b.dataset.mode !== current) onPick(b.dataset.mode);
+        };
+      }
+      if (modeNote) modeNote.textContent = notes[current] || '';
+    },
+    /** Hide the picker once play has started (switching requires a reload). */
+    setModePickerVisible(visible) {
+      if (modeBox) modeBox.style.display = visible ? 'flex' : 'none';
     },
     setPrompt(text) {
       if (!text) {
