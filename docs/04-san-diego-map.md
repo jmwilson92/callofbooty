@@ -175,6 +175,20 @@ Pacific west, Point Loma peninsula, San Diego Bay, Mission Bay lagoon,
 Mission Valley trench, mesa/canyon relief, freeways
 (I-5 / I-8 / I-15 / I-805 / SR-52 / SR-163).
 
+### Freeway grade separation
+
+Every corridor is painted into the heightfield, so where two crossed they used
+to merge into one wide patch of asphalt with nothing to tell you which road you
+were on. `src/world/Interchanges.js` works out where the corridors actually
+intersect, clusters the duplicate hits that shared vertices produce, and decides
+which road flies — priority runs `i5 < i8 < i15 < i805 < sr52 < sr163`, so the
+state routes go over the interstates, which is what SR-163 does over I-8.
+
+The flying road stops carving the ground for the length of its deck (`isFlying`
+is checked in `_applyRoads`) and `structures/Overpass.js` carries it instead:
+a ramped deck on piers, Jersey barriers, a centre stripe, two quadrant connector
+ramps peeling down to the road below, and a sign gantry on the approach.
+
 ### Far-eastern mountain system
 
 Stylized BR wall on the east rim (`WORLD.EAST_MOUNTAINS`) — **not GIS-accurate**,

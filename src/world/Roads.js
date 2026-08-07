@@ -253,6 +253,7 @@ export function polylinesToSegments(lines) {
         width: line.width,
         blend: line.blend,
         kind: line.kind,
+        id: line.id,
       });
     }
   }

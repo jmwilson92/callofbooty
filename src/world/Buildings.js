@@ -6,6 +6,7 @@ import { placeSanDiegoZoo } from './structures/Zoo.js';
 import { placeKearnyMesa } from './structures/KearnyMesa.js';
 import { placeCoronado } from './structures/Coronado.js';
 import { placePointLoma } from './structures/PointLoma.js';
+import { placeOverpasses } from './structures/Overpass.js';
 import { kearnyPlan } from './KearnyPlan.js';
 import { mcrdBounds } from './McrdPlan.js';
 import { Occupancy } from './Occupancy.js';
@@ -336,6 +337,8 @@ export function buildAllStructures(sink, terrain, rng) {
   buildCoronado(sink, terrain, rng);
   buildRadioTower(sink, terrain, rng);
   buildLaJolla(sink, terrain, rng);
+  // Freeway grade separations — decks, piers, barriers, connector ramps
+  placeOverpasses(sink, terrain);
   // Lane lines, curbs, downtown sidewalks
   if (terrain.roadLines) placeRoadMarkings(sink, terrain, terrain.roadLines);
   // Parking lot curbs + white stalls + cars (skip stalls that hit buildings)

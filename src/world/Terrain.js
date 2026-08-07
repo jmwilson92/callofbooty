@@ -9,6 +9,7 @@ import {
 import { downtownPlan } from './DowntownPlan.js';
 import { mcrdBounds, mcrdPlan } from './McrdPlan.js';
 import { kearnyBounds } from './KearnyPlan.js';
+import { isFlying } from './Interchanges.js';
 
 // San Diego heightfield shaped from satellite_view.png + terrain_map.png.
 // Same array backs render mesh and collision.
@@ -41,6 +42,7 @@ export class Terrain {
       width: s.width,
       blend: s.blend,
       kind: s.kind, // _applyRoads needs this to tell city streets from freeways
+      id: s.id,     // ...and which freeway, so flying sections skip the carve
     }));
     this._applyRoads();
     this._reapplyWaterCuts();
@@ -459,6 +461,9 @@ export class Terrain {
 
     for (const seg of this.roads) {
       const cityStreet = seg.kind === 'street' || seg.kind === 'alley';
+      // A freeway that flies over an interchange must not also carve the ground
+      // underneath it — the deck carries the road there.
+      const canFly = seg.kind === 'freeway';
       const halfW = (seg.width ?? ROADS.WIDTH) / 2;
       const blend = seg.blend ?? ROADS.BLEND;
       const reach = halfW + blend;
@@ -517,6 +522,7 @@ export class Terrain {
           if (!cityStreet && keepOut.some((k) => (
             x > k.x0 && x < k.x1 && z > k.z0 && z < k.z1
           ))) continue;
+          if (canFly && isFlying(seg.id, x, z)) continue;
 
           let roadH = prof[Math.round(t * samples)];
           // Slight crown so pavement reads above soft shoulders
