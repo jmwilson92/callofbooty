@@ -1,4 +1,5 @@
 import { POIS, FREEWAYS, ROAD_LINKS, ROADS } from '../config.js';
+import { downtownPlan, downtownStreetLines } from './DowntownPlan.js';
 
 // Road network = heightfield corridors only (smooth asphalt via vertex colors).
 // No stacked box-decks. Ramps are short polylines off the main freeways.
@@ -62,84 +63,11 @@ function rampCurve(ax, az, bx, bz, cx, cz, steps = 5) {
 }
 
 /**
- * Downtown street grid as heightfield polylines (matches satellite block structure).
- * Must match placeDowntownDistrict layout constants.
+ * Downtown street grid as heightfield polylines. Geometry comes from
+ * DowntownPlan so pavement and buildings cannot drift apart.
  */
-export function downtownGridParams(cx = null, cz = null) {
-  const by = Object.fromEntries(POIS.map((p) => [p.id, p]));
-  const dt = by.downtown;
-  const ox = cx ?? dt?.x ?? 140;
-  const oz = cz ?? dt?.z ?? 360;
-  return {
-    cx: ox,
-    cz: oz,
-    cols: 6,
-    rows: 5,
-    streetW: 12,
-    blockW: 32,
-    blockD: 30,
-  };
-}
-
 export function buildDowntownGridLines(cx, cz) {
-  const g = downtownGridParams(cx, cz);
-  const stepX = g.blockW + g.streetW;
-  const stepZ = g.blockD + g.streetW;
-  const originX = g.cx - (g.cols * stepX - g.streetW) / 2;
-  const originZ = g.cz - (g.rows * stepZ - g.streetW) / 2;
-  const lines = [];
-
-  // N–S avenues
-  for (let c = 0; c <= g.cols; c++) {
-    const x = originX + c * stepX - g.streetW / 2;
-    const z0 = originZ - g.streetW / 2;
-    const z1 = originZ + g.rows * stepZ - g.streetW / 2;
-    lines.push({
-      id: `dt-ns-${c}`,
-      width: g.streetW,
-      blend: 5,
-      kind: 'street',
-      pts: [
-        { x, z: z0 },
-        { x, z: z1 },
-      ],
-    });
-  }
-  // E–W streets
-  for (let r = 0; r <= g.rows; r++) {
-    const z = originZ + r * stepZ - g.streetW / 2;
-    const x0 = originX - g.streetW / 2;
-    const x1 = originX + g.cols * stepX - g.streetW / 2;
-    lines.push({
-      id: `dt-ew-${r}`,
-      width: g.streetW,
-      blend: 5,
-      kind: 'street',
-      pts: [
-        { x: x0, z },
-        { x: x1, z },
-      ],
-    });
-  }
-
-  // A few mid-block alleys only (not every third block — that painted lots as asphalt)
-  const alleyCells = [[1, 1], [3, 2], [2, 3]];
-  for (const [c, r] of alleyCells) {
-    const bx = originX + c * stepX;
-    const bz = originZ + r * stepZ;
-    lines.push({
-      id: `dt-alley-${r}-${c}`,
-      width: 5,
-      blend: 3,
-      kind: 'alley',
-      pts: [
-        { x: bx + g.blockW / 2, z: bz + 2 },
-        { x: bx + g.blockW / 2, z: bz + g.blockD - 2 },
-      ],
-    });
-  }
-
-  return lines;
+  return downtownStreetLines(cx, cz);
 }
 
 /**
@@ -203,11 +131,30 @@ export function buildRoadPolylines() {
     }
   }
 
+  // Downtown arterials terminate where they meet the ring road. Running them to
+  // the POI anchor pointed every link at the middle of the street grid.
+  const RING_HW = 172;
+  const RING_HD = 158;
+  const ringEndpoint = (poi, fromX, fromZ) => {
+    if (poi.id !== 'downtown') return { x: poi.x, z: poi.z };
+    const dx = fromX - poi.x;
+    const dz = fromZ - poi.z;
+    if (Math.abs(dx) < 1e-3 && Math.abs(dz) < 1e-3) return { x: poi.x, z: poi.z };
+    // Scale the approach direction out to whichever ring face it hits first.
+    const t = Math.min(
+      Math.abs(dx) > 1e-3 ? RING_HW / Math.abs(dx) : Infinity,
+      Math.abs(dz) > 1e-3 ? RING_HD / Math.abs(dz) : Infinity
+    );
+    return { x: poi.x + dx * t, z: poi.z + dz * t };
+  };
+
   // Arterials between POIs — multi-bend toward dry land
   for (const [a, b] of ROAD_LINKS) {
-    const A = by[a];
-    const B = by[b];
-    if (!A || !B) continue;
+    const A0 = by[a];
+    const B0 = by[b];
+    if (!A0 || !B0) continue;
+    const A = ringEndpoint(A0, B0.x, B0.z);
+    const B = ringEndpoint(B0, A0.x, A0.z);
     const dx = B.x - A.x;
     const dz = B.z - A.z;
     const len = Math.hypot(dx, dz);
@@ -243,11 +190,13 @@ export function buildRoadPolylines() {
     });
   }
 
-  // Downtown ring arterial — outer circulation only (grid fills the interior)
+  // Downtown ring arterial — outer circulation only (grid fills the interior).
+  // Sits between the grid edge and the plate rim; widen with the district or the
+  // pavement will cut through the outer blocks.
   const dt = by.downtown;
   if (dt) {
-    const hw = 160;
-    const hd = 140;
+    const hw = RING_HW;
+    const hd = RING_HD;
     lines.push({
       id: 'downtown-ring',
       width: 14,
@@ -382,13 +331,6 @@ export function defaultParkingLots() {
     if (!p) return;
     lots.push(parkingLotFootprint(p.x + ox, p.z + oz, w, d));
   };
-  // Downtown fringe lots — well outside the skyline grid (no buildings on asphalt)
-  // Grid spans roughly x 14–266, z 261–459. Keep lots outside that core.
-  add('downtown', -160, -30, 40, 32);   // west of plate
-  add('downtown', 130, -120, 44, 36);  // north-east of plate
-  add('downtown', 120, 200, 40, 32);   // south-east (was under ~164,489)
-  add('downtown', -40, -140, 42, 34);  // north of plate
-  add('downtown', 160, 40, 40, 30);    // far east
   // Airport long term
   add('airport', 40, -40, 80, 45);
   add('airport', -30, 50, 60, 40);
@@ -407,27 +349,19 @@ export function defaultParkingLots() {
   // La Jolla
   add('lajolla', 30, 25, 40, 32);
 
-  // Surface lots only on the plate rim — NOT under tower blocks / waterfront hotels
-  const g = downtownGridParams();
-  // Far west rim (was under building ~30,405 — moved further west)
-  lots.push(parkingLotFootprint(g.cx - 200, g.cz + 20, 40, 36));
-  // Far east rim
-  lots.push(parkingLotFootprint(g.cx + 200, g.cz - 10, 44, 40));
-  // North rim
-  lots.push(parkingLotFootprint(g.cx + 20, g.cz - 190, 50, 34));
-  // South rim — was (cx+40, cz+165) under ~164,489 / floating pad ~186,548
-  lots.push(parkingLotFootprint(g.cx + 100, g.cz + 210, 48, 34));
-  // Interior lots matching placeDowntownDistrict parkingBlocks 0,0 and 5,4 only
-  const stepX = g.blockW + g.streetW;
-  const stepZ = g.blockD + g.streetW;
-  const originX = g.cx - (g.cols * stepX - g.streetW) / 2;
-  const originZ = g.cz - (g.rows * stepZ - g.streetW) / 2;
-  for (const [c, r] of [[0, 0], [5, 4]]) {
+  // Downtown surface parking is inside the district, not ringed around it: the
+  // grid now fills the plate, and real downtown lots sit on P-coded blocks and
+  // between the East Village warehouses. Stamping them here gets them flattened
+  // terrain, painted stalls and parked cars from the existing lot machinery.
+  const plan = downtownPlan();
+  for (const b of plan.blocks) {
+    if (b.landmark) continue;
+    if (b.code !== 'P') continue;
     lots.push({
-      x: originX + c * stepX + 3,
-      z: originZ + r * stepZ + 3,
-      w: g.blockW - 6,
-      d: g.blockD - 6,
+      x: b.x + plan.setback,
+      z: b.z + plan.setback,
+      w: b.w - plan.setback * 2,
+      d: b.d - plan.setback * 2,
     });
   }
   return lots;
@@ -486,13 +420,8 @@ export function placeParkingLotDetails(sink, terrain, lots, rng, placeVehicleFn,
  */
 export function placeRoadMarkings(sink, terrain, _lines) {
   if (!sink || !terrain) return 0;
-  const g = downtownGridParams();
-  const stepX = g.blockW + g.streetW;
-  const stepZ = g.blockD + g.streetW;
-  const originX = g.cx - (g.cols * stepX - g.streetW) / 2;
-  const originZ = g.cz - (g.rows * stepZ - g.streetW) / 2;
-  const halfW = g.streetW * 0.5;
-  const sw = 1.65; // sidewalk width
+  const plan = downtownPlan();
+  const sw = 1.65; // sidewalk width — DOWNTOWN_GRID.setback is sized to fit this
   const curbT = 0.22;
   const curbH = 0.12;
   const CURB = 0xb0aea8;
@@ -504,70 +433,36 @@ export function placeRoadMarkings(sink, terrain, _lines) {
     return Number.isFinite(h) && h >= MIN_DRY ? h + 0.02 : null;
   };
 
-  // N–S avenues: sidewalks only along block faces (gap at E–W streets)
-  for (let c = 0; c <= g.cols; c++) {
-    const roadX = originX + c * stepX - halfW; // centerline of street strip
-    for (let r = 0; r < g.rows; r++) {
-      const z0 = originZ + r * stepZ + 0.4; // inset from south intersection
-      const z1 = originZ + r * stepZ + g.blockD - 0.4; // inset from north intersection
-      if (z1 <= z0 + 1) continue;
+  const strip = (x0, z0, x1, z1, curb) => {
+    if (x1 - x0 < 1 || z1 - z0 < 1) return;
+    const y = slabY(x0, z0, x1, z1);
+    if (y == null) return;
+    sink.addSpan(x0, y, z0, x1, y + 0.07, z1, SIDEWALK, 'thin');
+    // Curb lip on the street side of the walk
+    if (curb === 'w') sink.addSpan(x0 - 0.02, y, z0, x0 + curbT, y + curbH, z1, CURB, 'thin');
+    else if (curb === 'e') sink.addSpan(x1 - curbT, y, z0, x1 + 0.02, y + curbH, z1, CURB, 'thin');
+    else if (curb === 'n') sink.addSpan(x0, y, z0 - 0.02, x1, y + curbH, z0 + curbT, CURB, 'thin');
+    else sink.addSpan(x0, y, z1 - curbT, x1, y + curbH, z1 + 0.02, CURB, 'thin');
+    n += 2;
+  };
 
-      // West sidewalk (skip exterior outer ring slightly optional — keep all)
-      {
-        const x1 = roadX - halfW;
-        const x0 = x1 - sw;
-        const y = slabY(x0, z0, x1, z1);
-        if (y != null) {
-          sink.addSpan(x0, y, z0, x1, y + 0.07, z1, SIDEWALK, 'thin');
-          sink.addSpan(x1 - curbT, y, z0, x1 + 0.02, y + curbH, z1, CURB, 'thin');
-          n += 2;
-        }
-      }
-      // East sidewalk
-      {
-        const x0 = roadX + halfW;
-        const x1 = x0 + sw;
-        const y = slabY(x0, z0, x1, z1);
-        if (y != null) {
-          sink.addSpan(x0, y, z0, x1, y + 0.07, z1, SIDEWALK, 'thin');
-          sink.addSpan(x0 - 0.02, y, z0, x0 + curbT, y + curbH, z1, CURB, 'thin');
-          n += 2;
-        }
-      }
-    }
-  }
+  // One sidewalk ring per lot: ordinary blocks, plus each landmark as a single
+  // merged lot so the walk goes around the ballpark rather than through it.
+  const lots = plan.blocks
+    .filter((b) => !b.landmark)
+    .map((b) => ({ x: b.x, z: b.z, w: b.w, d: b.d }))
+    .concat(plan.landmarks.map((lm) => ({ x: lm.x, z: lm.z, w: lm.w, d: lm.d })));
 
-  // E–W streets: sidewalks only along block faces (gap at N–S avenues)
-  for (let r = 0; r <= g.rows; r++) {
-    const roadZ = originZ + r * stepZ - halfW;
-    for (let c = 0; c < g.cols; c++) {
-      const x0 = originX + c * stepX + 0.4;
-      const x1 = originX + c * stepX + g.blockW - 0.4;
-      if (x1 <= x0 + 1) continue;
-
-      // South sidewalk
-      {
-        const z1 = roadZ - halfW;
-        const z0 = z1 - sw;
-        const y = slabY(x0, z0, x1, z1);
-        if (y != null) {
-          sink.addSpan(x0, y, z0, x1, y + 0.07, z1, SIDEWALK, 'thin');
-          sink.addSpan(x0, y, z1 - curbT, x1, y + curbH, z1 + 0.02, CURB, 'thin');
-          n += 2;
-        }
-      }
-      // North sidewalk
-      {
-        const z0 = roadZ + halfW;
-        const z1 = z0 + sw;
-        const y = slabY(x0, z0, x1, z1);
-        if (y != null) {
-          sink.addSpan(x0, y, z0, x1, y + 0.07, z1, SIDEWALK, 'thin');
-          sink.addSpan(x0, y, z0 - 0.02, x1, y + curbH, z0 + curbT, CURB, 'thin');
-          n += 2;
-        }
-      }
-    }
+  for (const lot of lots) {
+    const x0 = lot.x;
+    const z0 = lot.z;
+    const x1 = lot.x + lot.w;
+    const z1 = lot.z + lot.d;
+    const i = 0.4; // inset so corners don't z-fight at intersections
+    strip(x0, z0 + i, x0 + sw, z1 - i, 'w');
+    strip(x1 - sw, z0 + i, x1, z1 - i, 'e');
+    strip(x0 + i, z0, x1 - i, z0 + sw, 'n');
+    strip(x0 + i, z1 - sw, x1 - i, z1, 's');
   }
 
   return n;

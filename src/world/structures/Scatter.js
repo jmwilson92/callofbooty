@@ -1,6 +1,7 @@
 import { WORLD, POIS, STRUCTURES } from '../../config.js';
 import { poiContains } from '../Poi.js';
 import { worldOcc } from '../Buildings.js';
+import { downtownPlan } from '../DowntownPlan.js';
 import {
   placeSuburbanHome,
   placeTrailer,
@@ -30,6 +31,12 @@ function tooCloseToPoiCore(x, z, scale = 0.85) {
 
 function claimFoot(x, z, w = 18, d = 16) {
   return worldOcc.tryClaim(x, z, w, d, 2.5);
+}
+
+/** Inside the downtown block grid (with optional padding), where nothing scatters. */
+function insideCity(x, z, pad = 0) {
+  const b = downtownPlan().bounds;
+  return x > b.x0 - pad && x < b.x1 + pad && z > b.z0 - pad && z < b.z1 + pad;
 }
 
 function poi(id) {
@@ -200,11 +207,14 @@ export function scatterStructures(sink, terrain, rng) {
       const a = east
         ? (rng() - 0.5) * 0.9 // mostly +X
         : -Math.PI * 0.5 + (rng() - 0.5) * 0.7; // mostly -Z (north in our map)
-      const r = 155 + rng() * 50; // outside the 6×5 grid, not inside blocks
+      // Outside the block grid and clear of the ring road, so these read as the
+      // fringe towers beyond the district rather than strays inside it.
+      const r = 195 + rng() * 45;
       const x = dt.x + Math.cos(a) * r;
       const z = dt.z + Math.sin(a) * r;
       // Kill west side completely (user: three towers around 35, 433)
       if (x < dt.x - 40) continue;
+      if (insideCity(x, z, 12)) continue;
       if (x < 80) continue;
       if (terrain.heightAt(x, z) < 3 || terrain.slopeDegAt(x, z) > 12) continue;
       if (terrain.roadAt(x, z) > 0.2) continue;
@@ -340,28 +350,25 @@ function placeLandmarkStructures(sink, terrain, rng, stats) {
     }
   }
 
-  // Downtown civic + strip — MUST stay outside the skyline grid / plate core.
-  // Old fixed offsets (fire @ 60,310 · city-hall @ 80,410 · gas @ 40,385) were
-  // ramming straight into grid towers and parking pads. Place only on free land
-  // well outside the block grid with occupancy claims.
+  // Downtown civic + strip — the approach roads into the district, outside the
+  // block grid. Every offset here is a site verified clear of the freeway
+  // corridors and the grid; if you move a freeway, re-check them.
   if (dt) {
     const civic = [
-      // fire — north of plate, not into west grid edge
-      { kind: 'fire', x: dt.x - 40, z: dt.z - 200, w: 40, d: 28 },
-      // city hall / business — east of plate
-      { kind: 'biz', x: dt.x + 200, z: dt.z - 30, w: 30, d: 26 },
-      // second business — south-east, clear of waterfront hotels
-      { kind: 'biz', x: dt.x + 190, z: dt.z + 160, w: 30, d: 26 },
-      // gas — west of plate, clear of parking under buildings
-      { kind: 'gas', x: dt.x - 200, z: dt.z + 10, w: 30, d: 26 },
-      // restaurants — north / east rim
-      { kind: 'restF', x: dt.x + 200, z: dt.z + 40, w: 22, d: 18 },
-      { kind: 'restS', x: dt.x + 30, z: dt.z - 200, w: 22, d: 18 },
-      { kind: 'bill', x: dt.x + 170, z: dt.z + 100, w: 8, d: 6 },
+      // Southern approach strip, along the road in from Coronado / the bay
+      { kind: 'fire', x: dt.x - 10, z: dt.z + 170, w: 40, d: 28 },
+      { kind: 'restF', x: dt.x - 50, z: dt.z + 170, w: 22, d: 18 },
+      { kind: 'restS', x: dt.x - 90, z: dt.z + 170, w: 22, d: 18 },
+      { kind: 'biz', x: dt.x - 150, z: dt.z + 170, w: 30, d: 26 },
+      { kind: 'bill', x: dt.x + 50, z: dt.z + 170, w: 8, d: 6 },
+      // Northern approach off the valley
+      { kind: 'biz', x: dt.x - 120, z: dt.z - 150, w: 30, d: 26 },
+      // Eastern approach toward Balboa
+      { kind: 'gas', x: dt.x + 250, z: dt.z + 120, w: 30, d: 26 },
     ];
     for (const s of civic) {
-      // Hard ban anything still inside the skyline plate core
-      if (Math.abs(s.x - dt.x) < 150 && Math.abs(s.z - dt.z) < 140) continue;
+      // Hard ban anything that would land inside the block grid
+      if (insideCity(s.x, s.z, 10)) continue;
       if (!claimFoot(s.x, s.z, s.w, s.d)) continue;
       if (s.kind === 'fire') {
         placeFireStation(sink, terrain, s.x, s.z, rng);

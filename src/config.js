@@ -297,8 +297,10 @@ export const POIS = [
   },
   {
     id: 'mcrd', name: 'MCRD Depot',
-    x: 30, z: 180, loot: 'high',
-    note: 'Barracks grid east of the airport',
+    // Nudged north from z 180: the depot's drill-field wall and HQ used to reach
+    // past z 227 into downtown's northern blocks.
+    x: 30, z: 140, loot: 'high',
+    note: 'Barracks grid east of the airport, north of downtown',
   },
   {
     id: 'downtown', name: 'Downtown',
@@ -313,8 +315,11 @@ export const POIS = [
   },
   {
     id: 'balboa', name: 'Balboa Park',
-    x: 240, z: 320, loot: 'high',
-    note: 'Park / museum area NE of downtown',
+    // Was (240, 320) — which sat *inside* the downtown block grid, so the museum
+    // halls intersected the city's towers. Now genuinely north-east of downtown,
+    // across I-5 and just south of the zoo, as on the real map.
+    x: 385, z: 260, loot: 'high',
+    note: 'Park / museum mesa NE of downtown, south of the zoo',
   },
   {
     id: 'zoo', name: 'San Diego Zoo',
@@ -365,12 +370,16 @@ export const ROAD_LINKS = [
 
 // Freeways routed through current POI anchors (dry land). Continuous corridors.
 export const FREEWAYS = [
-  // I-5-ish: La Jolla → airport → west of downtown core → south
+  // I-5-ish: La Jolla → airport → around downtown's EAST flank → south.
+  // The old route ran straight down the middle of the downtown blocks; on the
+  // real map I-5 skirts the east side of the city, which is also what keeps the
+  // corridor out of the street grid.
   {
     id: 'i5', width: 16,
     pts: [
       [-480, -620], [-480, -480], [-360, -200], [-200, 40],
-      [-120, 100], [20, 200], [40, 300], [30, 420], [40, 560],
+      [-120, 100], [20, 195], [150, 205], [265, 216],
+      [325, 310], [338, 420], [300, 505], [210, 558], [130, 585],
     ],
   },
   // I-8-ish: west → Mission Valley → east foothills (north of downtown)
@@ -381,20 +390,22 @@ export const FREEWAYS = [
       [300, 40], [480, 20], [640, 0],
     ],
   },
-  // I-15-ish: Kearny Mesa → valley → east of downtown → south
+  // I-15-ish: Kearny Mesa → valley → ends at the I-5 junction north-east of
+  // downtown, the way the real I-15 terminates rather than paralleling I-5 south
   {
     id: 'i15', width: 14,
     pts: [
       [140, -500], [140, -380], [100, -160], [60, 40],
-      [100, 200], [200, 280], [260, 360], [280, 460], [260, 560],
+      [110, 195], [200, 212], [275, 228],
     ],
   },
-  // I-805-ish: north mesa → west edge of city core → south (skirts downtown)
+  // I-805-ish: the inland bypass. Runs well east through the foothill toe so the
+  // corridor between it and I-5 stays open for Balboa Park.
   {
     id: 'i805', width: 14,
     pts: [
       [40, -520], [60, -300], [20, -80], [0, 40],
-      [20, 180], [50, 280], [60, 360], [80, 460], [100, 540],
+      [80, 120], [240, 130], [420, 160], [490, 270], [495, 410], [450, 530], [350, 600],
     ],
   },
   // SR-52: La Jolla → Kearny → east
@@ -405,20 +416,20 @@ export const FREEWAYS = [
       [320, -300], [500, -200], [640, -80],
     ],
   },
-  // SR-163: Kearny → Balboa → approaches downtown from north (stops at ring)
+  // SR-163: Kearny → Balboa → dies on downtown's northern edge, as it really does
   {
     id: 'sr163', width: 12,
     pts: [
-      [140, -380], [160, -200], [180, 40], [200, 180],
-      [210, 260], [180, 300], [140, 320],
+      [140, -380], [160, -200], [180, 40], [200, 180], [210, 215], [190, 222],
     ],
   },
-  // Harbor / bay frontage: Point Loma → airport → south of downtown → Coronado
+  // Harbor Drive / Pacific Highway: the bay frontage. Runs down the *west* bluff
+  // past the city — the old route cut diagonally through the downtown blocks.
   {
     id: 'harbor', width: 12,
     pts: [
-      [-420, 400], [-300, 280], [-160, 160], [-80, 200],
-      [20, 300], [40, 380], [60, 460], [20, 500], [-80, 520], [-200, 520],
+      [-420, 400], [-300, 280], [-160, 160], [-95, 205], [-70, 290],
+      [-62, 380], [-72, 462], [-110, 515], [-200, 525],
     ],
   },
 ];
@@ -435,10 +446,13 @@ export const ROADS = {
 // Soft blend at the rim so freeways/terrain still connect naturally.
 // Structures skip residual dips (see Catalog.footprintOk).
 export const DOWNTOWN_PLATE = {
-  // Matches POI downtown anchor; half-extents cover grid + ring + fringe lots
-  cx: 140,
+  // Offset east of the downtown anchor: the same coastal mesa carries both the
+  // block grid and Balboa Park, with I-5 running down the seam between them —
+  // which is how the two sit on the real map. The west edge is unchanged so the
+  // bay bluff and Harbor Drive keep their shape.
+  cx: 175,
   cz: 360,
-  halfW: 185,
+  halfW: 220,
   halfD: 165,
   blend: 55,       // metres of soft falloff outside the hard plate
   // Target height: null = sample median of dry land in the core
@@ -448,6 +462,49 @@ export const DOWNTOWN_PLATE = {
   microAmp: 0.35,
   // Max height range under a building footprint before we refuse placement
   maxFootprintDelta: 1.25,
+};
+
+// Downtown street grid + neighbourhood zoning — the single source of truth.
+// world/DowntownPlan.js turns this into block rectangles and street polylines;
+// Roads.js (pavement) and structures/Catalog.js (buildings) both read that plan,
+// so the two can no longer drift out of sync.
+export const DOWNTOWN_GRID = {
+  cols: 6,
+  rows: 6,
+  // Horton's grid is 200 ft (N–S) × 300 ft (E–W). Roughly halved for BR pacing,
+  // keeping the ~1:1.4 proportion that makes avenues read differently to streets.
+  blockW: 38, // east–west extent (the long, "300 ft" side)
+  blockD: 30, // north–south extent (the "200 ft" side)
+  streetW: 11,
+  // Two wide corridors give the district an axis you can navigate by, the way
+  // Broadway and Harbor Drive do downtown.
+  spineStreet: 3, // index into the (rows + 1) E–W street lines — Broadway
+  spineStreetW: 20,
+  spineAvenue: 0, // index into the (cols + 1) N–S avenue lines — bayfront Harbor Dr
+  spineAvenueW: 16,
+  // Buildings meet the lot line. This is the sidewalk, not a plaza: it is sized
+  // to exactly fit placeRoadMarkings' 1.65 m walk so facades front the pavement.
+  setback: 1.8,
+  alleyW: 5,
+  // One character per block. North (−Z) at the top, west (−X, the bay) at the left.
+  //   M marina / embarcadero   L little italy   F financial (Columbia core)
+  //   C civic / core           G gaslamp        E east village   P surface parking
+  districts: [
+    'LLFFCC',
+    'MLFFCC',
+    'MFFFCE',
+    'MFGGCE',
+    'MGGGEE',
+    'MPGGEP',
+  ],
+  // Landmarks claim an inclusive rect of blocks *and* the streets running
+  // through it, so a ballpark isn't bisected by an avenue.
+  landmarks: [
+    { id: 'ballpark', c0: 4, r0: 4, c1: 5, r1: 5 },
+    { id: 'convention', c0: 0, r0: 4, c1: 0, r1: 5 },
+    { id: 'depot', c0: 0, r0: 2, c1: 0, r1: 2 },
+    { id: 'signature', c0: 2, r0: 2, c1: 2, r1: 2 },
+  ],
 };
 
 export const BUILDINGS = {

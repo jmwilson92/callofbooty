@@ -6,6 +6,7 @@ import { Simplex, smoothstep, clamp, lerp } from '../core/Noise.js';
 import {
   buildRoadPolylines, polylinesToSegments, stampParkingLots, defaultParkingLots,
 } from './Roads.js';
+import { downtownPlan } from './DowntownPlan.js';
 
 // San Diego heightfield shaped from satellite_view.png + terrain_map.png.
 // Same array backs render mesh and collision.
@@ -34,6 +35,7 @@ export class Terrain {
       b: { x: s.b.x, y: s.b.z },
       width: s.width,
       blend: s.blend,
+      kind: s.kind, // _applyRoads needs this to tell city streets from freeways
     }));
     this._applyRoads();
     this._reapplyWaterCuts();
@@ -415,8 +417,14 @@ export class Terrain {
     const minH = ROADS.MIN_HEIGHT ?? 2.5;
     const maskOnlyOnPlate = !!opts.maskOnlyOnPlate;
     const plateY = this.downtownPlateY;
+    // Freeways and arterials stop at the edge of the downtown blocks: inside the
+    // district the street grid is the road network. Without this, any corridor
+    // clipping the grid paints asphalt straight through the buildings that now
+    // fill their lots.
+    const cityBounds = downtownPlan().bounds;
 
     for (const seg of this.roads) {
+      const cityStreet = seg.kind === 'street' || seg.kind === 'alley';
       const halfW = (seg.width ?? ROADS.WIDTH) / 2;
       const blend = seg.blend ?? ROADS.BLEND;
       const reach = halfW + blend;
@@ -472,6 +480,9 @@ export class Terrain {
           const cz = lerp(az, bz, t);
           const d = Math.hypot(x - cx, z - cz);
           if (d > reach) continue;
+          if (!cityStreet
+            && x > cityBounds.x0 && x < cityBounds.x1
+            && z > cityBounds.z0 && z < cityBounds.z1) continue;
 
           let roadH = prof[Math.round(t * samples)];
           // Slight crown so pavement reads above soft shoulders

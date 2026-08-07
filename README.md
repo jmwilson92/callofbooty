@@ -65,6 +65,12 @@ Click the page to lock the pointer.
   Airport, MCRD Depot, Downtown (highest loot), Point Loma, Balboa Park,
   San Diego Zoo, Coronado, Radio Tower. Spaced for readability; clearer fog and
   terrain definition. See `docs/04-san-diego-map.md`.
+- **Downtown is a zoned street grid**, not a scatter — 6 × 6 blocks subdivided
+  into parcels built to the lot line, so the streets are canyons (14.6 m facade
+  to facade). Marina, Little Italy, financial core, civic, Gaslamp Quarter,
+  East Village, plus a ballpark, convention centre, rail depot and a crowned
+  signature tower. The whole layout is the `DOWNTOWN_GRID` block in
+  `src/config.js` — including an ASCII map you can edit to rezone it.
 - **Detail structures** — suburban homes, trailers, gas stations, restaurants,
   fast food, auto shops, fire stations, business centers, skyscrapers, boat
   houses, harbors, bridges, billboards, parked vehicles, and abstract zoo
@@ -90,7 +96,8 @@ src/
     Collision.js     spatial hash + capsule/AABB narrowphase
     BoxSink.js       batches boxes into InstancedMesh + collision AABBs
     BuildingKit.js   walls, slabs, stairs, parametric buildings
-    Buildings.js     the seven POI layouts
+    DowntownPlan.js  downtown block/street plan — one source for roads + buildings
+    Buildings.js     the POI layouts
     Props.js         Poisson-disc cover scatter
   player/
     Controller.js    kinematic character controller

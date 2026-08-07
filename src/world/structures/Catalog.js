@@ -1,6 +1,7 @@
 import { BUILDINGS, DOWNTOWN_PLATE } from '../../config.js';
 import { makeBuilding, makeShed, slab } from '../BuildingKit.js';
 import { registerBuilding } from '../BuildingRegistry.js';
+import { downtownPlan } from '../DowntownPlan.js';
 import { Occupancy } from '../Occupancy.js';
 import { worldLadders } from '../Ladders.js';
 import { worldDoors } from '../Doors.js';
@@ -1134,7 +1135,9 @@ export function addBuildingAccess(
  * the neighbor (default random size is only for free-placed fringe towers).
  */
 export function placeSkylineTower(sink, x, z, baseY, rng, floors = null, terrain = null, opts = null) {
-  const fCount = Math.min(24, floors ?? (8 + Math.floor(rng() * 16)));
+  // Cap keeps stray callers from emitting a 60-storey box farm. The downtown
+  // signature tower deliberately runs to the top of this range.
+  const fCount = Math.min(32, floors ?? (8 + Math.floor(rng() * 16)));
   const floorH = 3.5;
   const h = fCount * floorH;
   // CRITICAL: when downtown passes w/d, honor them — random body used to grow past the street
@@ -1348,153 +1351,504 @@ export function placeSkyscraper(sink, terrain, x, z, rng) {
   }
 }
 
+// ===================== DOWNTOWN =====================
+// Modelled on downtown San Diego (docs/downtown-reference.png). The grid, the
+// neighbourhood zoning and the landmark plots all come from DOWNTOWN_GRID via
+// world/DowntownPlan.js — the same plan Roads.js paves — so blocks and streets
+// cannot drift apart.
+//
+// Buildings front the sidewalk instead of sitting in the middle of their block:
+// blocks are subdivided into parcels and each parcel is built to its lot line,
+// which is what turns the streets into canyons you can actually fight in.
+
+/** Buildable rect inside a block once the sidewalk setback is taken off. */
+function blockLot(b, setback) {
+  return {
+    x: b.x + setback,
+    z: b.z + setback,
+    w: b.w - setback * 2,
+    d: b.d - setback * 2,
+  };
+}
+
+/** Split a run into `n` parcels separated by `gap`, skipping any below `min`. */
+function parcels(start, span, n, gap, min = 8) {
+  const count = Math.max(1, n);
+  const each = (span - gap * (count - 1)) / count;
+  if (each < min) {
+    if (count === 1) return [];
+    return parcels(start, span, count - 1, gap, min);
+  }
+  const out = [];
+  for (let i = 0; i < count; i++) out.push({ a: start + i * (each + gap), len: each });
+  return out;
+}
+
 /**
- * Full downtown district from satellite reference: packed towers on a heightfield street grid.
- * Streets are painted in Terrain via buildDowntownGridLines — no box asphalt or yellow paint.
+ * Seat a footprint on the plate and pour its plinth. Returns the seat Y, or null
+ * if the lot is a dip / too uneven to build on.
+ */
+function seatLot(sink, terrain, x, z, w, d, minDry = 2.8, maxDelta = 2.2) {
+  const fh = footprintHeights(terrain, x, z, w, d);
+  if (!Number.isFinite(fh.max) || fh.max < minDry) return null;
+  if (fh.delta > maxDelta) return null;
+  const seatY = fh.max;
+  sink.addSpan(
+    x - 0.15, Math.min(fh.min, seatY) - 0.4, z - 0.15,
+    x + w + 0.15, seatY + 0.06, z + d + 0.15,
+    C.concrete
+  );
+  return seatY;
+}
+
+/** Office fit-out on the walkable floors of a mid-rise. */
+function furnishMidRise(sink, x, z, w, d, seat, floors, rng) {
+  const fh = BUILDINGS.FLOOR_HEIGHT;
+  const gh = BUILDINGS.GROUND_FLOOR_HEIGHT;
+  for (let f = 0; f < floors; f++) {
+    if (f > 0 && f % 2 === 0) continue;
+    const fy = f === 0
+      ? seat + (BUILDINGS.GROUND_SLAB_LIFT || 0.08) + 0.02
+      : seat + gh + (f - 1) * fh + 0.02;
+    placeOfficeFloorFurniture(sink, x, z, w, d, fy, rng);
+  }
+}
+
+/**
+ * Storefront dressing for the low-rise districts: awning over the pavement and a
+ * lit blade sign. `facing` is the street side of the parcel ('n' or 's').
+ */
+function addStorefront(sink, x, z, w, d, seat, rng, facing) {
+  const neon = pick(rng, [C.neonPink, C.neonCyan, C.neonLime, C.redHot, C.yellowHot, C.teal]);
+  const awn = pick(rng, [C.brick, C.green, C.blue, C.red, C.orange, C.woodDark]);
+  const zEdge = facing === 'n' ? z : z + d;
+  const dir = facing === 'n' ? -1 : 1;
+  const y = seat + 3.0;
+  // Awning cantilevered over the sidewalk
+  sink.addSpan(
+    x + w * 0.15, y, Math.min(zEdge, zEdge + dir * 1.6),
+    x + w * 0.85, y + 0.22, Math.max(zEdge, zEdge + dir * 1.6),
+    awn, 'thin'
+  );
+  // Blade sign hanging off the corner
+  const sx = x + w * (rng() > 0.5 ? 0.12 : 0.78);
+  neonStrip(
+    sink,
+    sx, y + 0.5, Math.min(zEdge, zEdge + dir * 0.9),
+    sx + 0.55, y + 2.9, Math.max(zEdge, zEdge + dir * 0.9),
+    neon
+  );
+  // Ground-floor sign band across the facade
+  neonStrip(
+    sink,
+    x + w * 0.12, y - 0.45, Math.min(zEdge, zEdge + dir * 0.35),
+    x + w * 0.88, y - 0.05, Math.max(zEdge, zEdge + dir * 0.35),
+    neon
+  );
+}
+
+/** Rooftop water tank / stair bulkhead — reads as an old low-rise from below. */
+function addRoofClutter(sink, x, z, w, d, roofY, rng) {
+  if (rng() > 0.55) {
+    const tw = 1.8 + rng() * 0.8;
+    const bx = x + w * 0.2;
+    const bz = z + d * 0.25;
+    for (const [ox, oz] of [[0, 0], [tw - 0.3, 0], [0, tw - 0.3], [tw - 0.3, tw - 0.3]]) {
+      post(sink, bx + ox, roofY, bz + oz, 1.1, 0.22, C.woodDark);
+    }
+    sink.addSpan(bx - 0.2, roofY + 1.1, bz - 0.2, bx + tw + 0.1, roofY + 3.4, bz + tw + 0.1, C.wood);
+  }
+  if (rng() > 0.5) {
+    sink.addSpan(
+      x + w * 0.6, roofY, z + d * 0.55,
+      x + w * 0.6 + 2.2, roofY + 1.3, z + d * 0.55 + 1.8,
+      C.metal
+    );
+  }
+}
+
+// --- District generators -----------------------------------------------------
+// Each fills one block's lot and reports how many buildings it seated.
+
+/** Columbia / financial core: one or two full-lot towers, the tallest downtown. */
+function genFinancial(sink, terrain, lot, rng, stats) {
+  const two = lot.w > 30 && rng() > 0.4;
+  const runs = two ? parcels(lot.x, lot.w, 2, 1.4, 13) : [{ a: lot.x, len: lot.w }];
+  for (const p of runs) {
+    const seat = seatLot(sink, terrain, p.a, lot.z, p.len, lot.d);
+    if (seat == null) continue;
+    const floors = two ? 13 + Math.floor(rng() * 10) : 17 + Math.floor(rng() * 8);
+    placeSkylineTower(sink, p.a, lot.z, seat, rng, floors, terrain, { w: p.len, d: lot.d });
+    stats.towers++;
+  }
+}
+
+/** Core / civic: mid-rise offices, two or three to a block. */
+function genCivic(sink, terrain, lot, rng, stats) {
+  const runs = parcels(lot.x, lot.w, rng() > 0.45 ? 3 : 2, 1.2, 10);
+  for (const p of runs) {
+    const seat = seatLot(sink, terrain, p.a, lot.z, p.len, lot.d);
+    if (seat == null) continue;
+    if (rng() > 0.55) {
+      const floors = 8 + Math.floor(rng() * 5);
+      placeSkylineTower(sink, p.a, lot.z, seat, rng, floors, terrain, { w: p.len, d: lot.d });
+      stats.towers++;
+    } else {
+      const floors = 4 + Math.floor(rng() * 4);
+      const seatB = seat - 0.05;
+      makeBuilding(sink, {
+        x: p.a, z: lot.z, w: p.len, d: lot.d, floors,
+        baseY: seatB, color: pick(rng, [C.glass, C.white, C.cream, C.gray, C.brick]), rng,
+      });
+      addBuildingAccess(
+        sink, p.a, lot.z, p.len, lot.d, seatB, floors,
+        BUILDINGS.FLOOR_HEIGHT, rng, 3, false, terrain, false
+      );
+      furnishMidRise(sink, p.a, lot.z, p.len, lot.d, seatB, floors, rng);
+      stats.midrise++;
+    }
+  }
+}
+
+/**
+ * Gaslamp Quarter / Little Italy: a continuous two- to four-storey street wall,
+ * split front and back by the mid-block alley. Party walls are 1 m apart, so the
+ * roofs read as one terrace and you can hop the whole block up top.
+ */
+function genLowRise(sink, terrain, block, lot, rng, stats, opts) {
+  const alleyHalf = opts.alleyW / 2 + 0.4;
+  const midZ = block.z + block.d / 2;
+  const rows = [
+    { z: lot.z, d: midZ - alleyHalf - lot.z, facing: 'n' },
+    { z: midZ + alleyHalf, d: lot.z + lot.d - (midZ + alleyHalf), facing: 's' },
+  ];
+  for (const row of rows) {
+    if (row.d < 7) continue;
+    const runs = parcels(lot.x, lot.w, opts.perRow, 1.0, opts.minW);
+    for (const p of runs) {
+      const seat = seatLot(sink, terrain, p.a, row.z, p.len, row.d);
+      if (seat == null) continue;
+      const floors = opts.floorMin + Math.floor(rng() * opts.floorSpan);
+      const seatB = seat - 0.05;
+      makeBuilding(sink, {
+        x: p.a, z: row.z, w: p.len, d: row.d, floors,
+        baseY: seatB, color: pick(rng, opts.palette), rng,
+      });
+      addBuildingAccess(
+        sink, p.a, row.z, p.len, row.d, seatB, floors,
+        BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain, true
+      );
+      addStorefront(sink, p.a, row.z, p.len, row.d, seatB, rng, row.facing);
+      const roofY = seatB + BUILDINGS.GROUND_FLOOR_HEIGHT + (floors - 1) * BUILDINGS.FLOOR_HEIGHT;
+      addRoofClutter(sink, p.a, row.z, p.len, row.d, roofY + 0.2, rng);
+      stats.lowrise++;
+    }
+  }
+}
+
+/** East Village: brick warehouses and loft conversions, loose and low. */
+function genEastVillage(sink, terrain, lot, rng, stats) {
+  const runs = parcels(lot.x, lot.w, 2, 2.5, 12);
+  for (const p of runs) {
+    const seat = seatLot(sink, terrain, p.a, lot.z, p.len, lot.d);
+    if (seat == null) continue;
+    if (rng() > 0.5) {
+      const shed = makeShed(sink, {
+        x: p.a, z: lot.z, w: p.len, d: lot.d, h: 7 + rng() * 3,
+        baseY: seat, color: pick(rng, [C.brick, C.brickDark, C.metal, C.gray]),
+        doorW: 5,
+      });
+      // makeShed doesn't self-register; without this the warehouses would be the
+      // only downtown interiors with no loot, bots or map footprint.
+      registerBuilding({
+        x: p.a, z: lot.z, w: p.len, d: lot.d, floors: 1, baseY: seat,
+        floorYs: [seat + 0.2], roofY: shed.roofY,
+      });
+      stats.lowrise++;
+    } else {
+      const floors = 3 + Math.floor(rng() * 4);
+      const seatB = seat - 0.05;
+      makeBuilding(sink, {
+        x: p.a, z: lot.z, w: p.len, d: lot.d, floors,
+        baseY: seatB, color: pick(rng, [C.brick, C.brickDark, C.cream, C.gray]), rng,
+      });
+      addBuildingAccess(
+        sink, p.a, lot.z, p.len, lot.d, seatB, floors,
+        BUILDINGS.FLOOR_HEIGHT, rng, -1, false, terrain, true
+      );
+      furnishMidRise(sink, p.a, lot.z, p.len, lot.d, seatB, floors, rng);
+      stats.midrise++;
+    }
+  }
+}
+
+/** Marina / Embarcadero: bayfront hotel slabs, long side to the water. */
+function genMarina(sink, terrain, lot, rng, stats) {
+  const seat = seatLot(sink, terrain, lot.x, lot.z, lot.w, lot.d);
+  if (seat == null) return;
+  const floors = 10 + Math.floor(rng() * 8);
+  placeSkylineTower(sink, lot.x, lot.z, seat, rng, floors, terrain, { w: lot.w, d: lot.d });
+  stats.towers++;
+}
+
+// --- Landmarks ---------------------------------------------------------------
+// Downtown reads from a distance because of a handful of specific silhouettes.
+// These exist so players can call a drop ("the ballpark", "the sails") instead of
+// naming a grid square.
+
+/** Open-bowl ballpark: field, tiered stands on three sides, light towers. */
+function placeBallpark(sink, terrain, lm, rng, stats) {
+  const seat = seatLot(sink, terrain, lm.x, lm.z, lm.w, lm.d, 2.8, 3.0);
+  if (seat == null) return;
+  const x0 = lm.x;
+  const z0 = lm.z;
+  const w = lm.w;
+  const d = lm.d;
+
+  // Playing surface, sunk slightly so the stands look down into it
+  const fieldY = seat + 0.1;
+  sink.addSpan(x0 + 8, seat - 0.4, z0 + 8, x0 + w - 8, fieldY, z0 + d - 8, 0x3f7a34);
+  // Infield dirt arc, blocked out
+  sink.addSpan(x0 + w * 0.52, fieldY, z0 + d * 0.34, x0 + w * 0.86, fieldY + 0.06, z0 + d * 0.66, 0x9a6a42, 'thin');
+
+  // Tiered stands, open on the west (bay) side so the field is visible from Harbor Dr
+  const tiers = 4;
+  for (let t = 0; t < tiers; t++) {
+    const inset = 8 - t * 2;
+    const y = seat + t * 1.5;
+    const h = 1.5;
+    const tx0 = x0 + inset;
+    const tz0 = z0 + inset;
+    const tx1 = x0 + w - inset;
+    const tz1 = z0 + d - inset;
+    // North, south, east decks
+    sink.addSpan(tx0, y, tz0, tx1, y + h, tz0 + 2.0, C.concrete);
+    sink.addSpan(tx0, y, tz1 - 2.0, tx1, y + h, tz1, C.concrete);
+    sink.addSpan(tx1 - 2.0, y, tz0, tx1, y + h, tz1, C.concrete);
+  }
+
+  // Concourse wall with entry gaps on each face
+  const wallY = seat + tiers * 1.5;
+  const gap = 7;
+  sink.addSpan(x0, seat, z0, x0 + w * 0.5 - gap, wallY, z0 + 1.2, C.concrete);
+  sink.addSpan(x0 + w * 0.5 + gap, seat, z0, x0 + w, wallY, z0 + 1.2, C.concrete);
+  sink.addSpan(x0, seat, z0 + d - 1.2, x0 + w * 0.5 - gap, wallY, z0 + d, C.concrete);
+  sink.addSpan(x0 + w * 0.5 + gap, seat, z0 + d - 1.2, x0 + w, wallY, z0 + d, C.concrete);
+  sink.addSpan(x0 + w - 1.2, seat, z0, x0 + w, wallY, z0 + d * 0.5 - gap, C.concrete);
+  sink.addSpan(x0 + w - 1.2, seat, z0 + d * 0.5 + gap, x0 + w, wallY, z0 + d, C.concrete);
+
+  // Light towers on the four corners — the actual long-range silhouette
+  for (const [cx, cz] of [[x0 + 6, z0 + 6], [x0 + w - 6, z0 + 6], [x0 + 6, z0 + d - 6], [x0 + w - 6, z0 + d - 6]]) {
+    post(sink, cx, seat, cz, 26, 0.7, C.metal);
+    sink.addSpan(cx - 2.2, seat + 26, cz - 0.5, cx + 2.6, seat + 28.4, cz + 1.0, C.metalLite);
+    neonStrip(sink, cx - 2.0, seat + 26.4, cz - 0.35, cx + 2.4, seat + 28.0, cz + 0.2, 0xfff4d0);
+  }
+  stats.landmarks++;
+}
+
+/** Bayfront convention hall with a run of sail-like roof fins. Roof is walkable. */
+function placeConventionCenter(sink, terrain, lm, rng, stats) {
+  const seat = seatLot(sink, terrain, lm.x, lm.z, lm.w, lm.d, 2.8, 3.0);
+  if (seat == null) return;
+  const x0 = lm.x + 1;
+  const z0 = lm.z + 1;
+  const w = lm.w - 2;
+  const d = lm.d - 2;
+  const hallH = 11;
+
+  makeShed(sink, {
+    x: x0, z: z0, w, d, h: hallH,
+    baseY: seat, color: C.white, doorW: 7,
+  });
+  // Glazed bay frontage on the west face
+  for (let i = 0; i < Math.floor(d / 5); i++) {
+    const gz = z0 + 2 + i * 5;
+    sink.addSpan(x0 - 0.3, seat + 1.0, gz, x0 + 0.25, seat + hallH - 1.5, gz + 3.6, C.glass, 'glass');
+  }
+  // Sail fins along the ridge — the shape people actually recognise
+  const roofY = seat + hallH;
+  const fins = Math.max(3, Math.floor(d / 12));
+  for (let i = 0; i < fins; i++) {
+    const fz = z0 + d * ((i + 0.5) / fins) - 3;
+    for (let s = 0; s < 4; s++) {
+      const t = s / 3;
+      const fw = w * (0.5 - t * 0.32);
+      const fx = x0 + w * 0.5 - fw / 2;
+      sink.addSpan(fx, roofY + s * 1.7, fz, fx + fw, roofY + (s + 1) * 1.7, fz + 6, C.white);
+    }
+  }
+  // Parapet so the roof is a usable perch rather than a slide
+  sink.addSpan(x0, roofY, z0, x0 + w, roofY + 0.9, z0 + 0.3, C.concrete, 'thin');
+  sink.addSpan(x0, roofY, z0 + d - 0.3, x0 + w, roofY + 0.9, z0 + d, C.concrete, 'thin');
+  registerBuilding({
+    x: x0, z: z0, w, d, floors: 1, baseY: seat,
+    floorYs: [seat + 0.2], roofY,
+  });
+  stats.landmarks++;
+}
+
+/** Mission-revival rail depot: tiled body, twin domes, platform canopies. */
+function placeRailDepot(sink, terrain, lm, rng, stats) {
+  const seat = seatLot(sink, terrain, lm.x, lm.z, lm.w, lm.d, 2.8, 3.0);
+  if (seat == null) return;
+  const w = lm.w - 4;
+  const d = lm.d * 0.5;
+  const x0 = lm.x + 2;
+  const z0 = lm.z + 2;
+
+  makeBuilding(sink, {
+    x: x0, z: z0, w, d, floors: 2,
+    baseY: seat - 0.05, color: C.cream, rng,
+  });
+  addBuildingAccess(sink, x0, z0, w, d, seat - 0.05, 2, BUILDINGS.FLOOR_HEIGHT, rng, 3, false, terrain, false);
+  const roofY = seat + BUILDINGS.GROUND_FLOOR_HEIGHT + BUILDINGS.FLOOR_HEIGHT;
+
+  // Twin domes over the head house
+  for (const dx of [w * 0.22, w * 0.78]) {
+    const bx = x0 + dx - 2.6;
+    const bz = z0 + d * 0.5 - 2.6;
+    sink.addSpan(bx, roofY, bz, bx + 5.2, roofY + 3.2, bz + 5.2, 0xb5643c);
+    sink.addSpan(bx + 1.0, roofY + 3.2, bz + 1.0, bx + 4.2, roofY + 5.0, bz + 4.2, 0xb5643c);
+    post(sink, bx + 2.4, roofY + 5.0, bz + 2.4, 2.2, 0.4, C.metalLite);
+  }
+  // Platform canopies on the track side
+  const py = seat;
+  const pz = z0 + d + 3;
+  for (let i = 0; i < 2; i++) {
+    const cz = pz + i * 9;
+    sink.addSpan(x0, py, cz, x0 + w, py + 0.15, cz + 5.5, C.concrete, 'thin');
+    for (let j = 0; j < 5; j++) {
+      post(sink, x0 + 2 + j * (w - 4) / 4, py, cz + 2.6, 4.2, 0.28, C.metal);
+    }
+    sink.addSpan(x0 - 0.5, py + 4.2, cz - 0.5, x0 + w + 0.5, py + 4.6, cz + 6.0, C.metalLite, 'thin');
+  }
+  stats.landmarks++;
+}
+
+/** The tallest tower on the skyline, with a stepped crown you can see map-wide. */
+function placeSignatureTower(sink, terrain, lm, rng, stats) {
+  const inset = 3.5;
+  const x0 = lm.x + inset;
+  const z0 = lm.z + inset;
+  const w = lm.w - inset * 2;
+  const d = lm.d - inset * 2;
+  const seat = seatLot(sink, terrain, x0, z0, w, d, 2.8, 3.0);
+  if (seat == null) return;
+  const floors = 30;
+  const res = placeSkylineTower(sink, x0, z0, seat, rng, floors, terrain, { w, d });
+  stats.towers++;
+
+  // Stepped crown + mast above the roof slab
+  const roofY = seat - 0.06 + res.h;
+  for (let s = 0; s < 4; s++) {
+    const t = (s + 1) / 5;
+    const cw = w * (1 - t * 0.55);
+    const cd = d * (1 - t * 0.55);
+    sink.addSpan(
+      x0 + (w - cw) / 2, roofY + 1.6 + s * 2.6, z0 + (d - cd) / 2,
+      x0 + (w + cw) / 2, roofY + 1.6 + (s + 1) * 2.6, z0 + (d + cd) / 2,
+      s % 2 === 0 ? C.glassDark : C.metalLite
+    );
+  }
+  const mastY = roofY + 1.6 + 4 * 2.6;
+  post(sink, x0 + w / 2 - 0.3, mastY, z0 + d / 2 - 0.3, 16, 0.6, C.metalLite);
+  neonStrip(
+    sink,
+    x0 + w / 2 - 0.5, mastY + 16, z0 + d / 2 - 0.5,
+    x0 + w / 2 + 0.5, mastY + 18, z0 + d / 2 + 0.5,
+    C.redHot
+  );
+  stats.landmarks++;
+}
+
+/**
+ * Build the whole downtown district from the shared plan.
+ * Streets are painted into the heightfield by Terrain via buildDowntownGridLines —
+ * nothing here emits asphalt.
  */
 export function placeDowntownDistrict(sink, terrain, cx, cz, _unusedBaseY, rng, occ = null) {
   const grid = occ || new Occupancy(12);
-  // Keep in sync with Roads.downtownGridParams
-  const cols = 6;
-  const rows = 5;
-  const streetW = 12;
-  const blockW = 32;
-  const blockD = 30;
-  const stepX = blockW + streetW;
-  const stepZ = blockD + streetW;
-  const originX = cx - (cols * stepX - streetW) / 2;
-  const originZ = cz - (rows * stepZ - streetW) / 2;
-  const gy = (x, z, w = 0, d = 0) => footprintOk(terrain, x, z, w, d);
+  const plan = downtownPlan(cx, cz);
+  const stats = { towers: 0, midrise: 0, lowrise: 0, landmarks: 0 };
   const MIN_DRY = 2.8;
 
-  // A couple of mid-grid surface lots (open asphalt + cars from parking props)
-  const parkingBlocks = new Set(['0,0', '5,4']);
+  // Landmarks first: they hold the biggest plots and must win any contest.
+  for (const lm of plan.landmarks) {
+    if (!grid.tryClaim(lm.x - 1, lm.z - 1, lm.w + 2, lm.d + 2, 1)) continue;
+    if (lm.id === 'ballpark') placeBallpark(sink, terrain, lm, rng, stats);
+    else if (lm.id === 'convention') placeConventionCenter(sink, terrain, lm, rng, stats);
+    else if (lm.id === 'depot') placeRailDepot(sink, terrain, lm, rng, stats);
+    else if (lm.id === 'signature') placeSignatureTower(sink, terrain, lm, rng, stats);
+  }
 
-  let towers = 0;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const bx = originX + c * stepX;
-      const bz = originZ + r * stepZ;
-      const blockSeat = gy(bx + 2, bz + 2, blockW - 4, blockD - 4);
-      if (blockSeat == null || blockSeat < MIN_DRY) continue;
-      const blockBase = blockSeat;
+  for (const b of plan.blocks) {
+    if (b.landmark) continue;
 
-      // Streetlight seated on actual terrain at pole base (not block max height)
-      const lpx = bx - 1.2;
-      const lpz = bz - 1.2;
-      const lightY = terrain.heightAt(lpx, lpz);
-      if (lightY >= MIN_DRY) {
-        // Sink slightly so the base never floats on slopes
-        const ly = lightY - 0.08;
-        post(sink, lpx, ly, lpz, 5.5, 0.16, C.metal);
-        sink.addSpan(lpx - 0.25, ly + 5.25, lpz - 0.25, lpx + 0.35, ly + 5.55, lpz + 0.35, 0xf0f4f8);
-        // Small base plate
-        sink.addSpan(lpx - 0.2, ly, lpz - 0.2, lpx + 0.3, ly + 0.12, lpz + 0.3, C.concrete);
-      }
+    // Streetlight on the block's north-west corner, seated on real ground so the
+    // base never floats where the plate still has a little relief.
+    const lpx = b.x - 1.2;
+    const lpz = b.z - 1.2;
+    const lightY = terrain.heightAt(lpx, lpz);
+    if (lightY >= MIN_DRY) {
+      const ly = lightY - 0.08;
+      post(sink, lpx, ly, lpz, 5.5, 0.16, C.metal);
+      sink.addSpan(lpx - 0.25, ly + 5.25, lpz - 0.25, lpx + 0.35, ly + 5.55, lpz + 0.35, 0xf0f4f8);
+      sink.addSpan(lpx - 0.2, ly, lpz - 0.2, lpx + 0.3, ly + 0.12, lpz + 0.3, C.concrete);
+    }
 
-      if (parkingBlocks.has(`${c},${r}`)) {
-        // Open surface lot inside the block — claim whole block so scatter can't stack
-        const lotX = bx + 3;
-        const lotZ = bz + 3;
-        const lotW = blockW - 6;
-        const lotD = blockD - 6;
-        grid.tryClaim(bx + 1, bz + 1, blockW - 2, blockD - 2, 1.5);
-        // Stall-aligned cars (length along Z, matching painted stalls elsewhere)
-        for (let i = 0; i < 6; i++) {
-          const vx = lotX + 1.5 + (i % 3) * 7.5;
-          const vz = lotZ + 2 + Math.floor(i / 3) * 11;
-          if (vx + 2.2 > lotX + lotW || vz + 5.2 > lotZ + lotD) continue;
-          if (rng() > 0.35) placeVehicle(sink, vx, vz, blockBase, rng, null, true);
-        }
-        continue;
-      }
+    // Claim the block plus half the street so scatter can't nest between towers.
+    if (!grid.tryClaim(b.x - 2, b.z - 2, b.w + 4, b.d + 4, 1)) continue;
 
-      const distCore = Math.hypot(c - cols * 0.45, r - rows * 0.4);
-      const waterfront = r >= rows - 2;
-      const financial = distCore < 2.0;
+    // Surface lots are stamped and dressed by the parking-lot pass in Roads.js.
+    if (b.code === 'P') continue;
 
-      // ONE tower per block, CENTERED, hard setback so street gap is always clear.
-      // (Previously random offset + placeSkylineTower ignoring size → neighbors clipped.)
-      const setback = 8.5; // m from block edge → ~12m street + 17m total gap between facades
-      const maxW = blockW - setback * 2; // 15
-      const maxD = blockD - setback * 2; // 13
-      const tw = Math.min(maxW, 12 + rng() * 3); // 12–15
-      const td = Math.min(maxD, 11 + rng() * 2); // 11–13
-      const ox = (blockW - tw) * 0.5;
-      const oz = (blockD - td) * 0.5;
-      const tx = bx + ox;
-      const tz = bz + oz;
-      // Claim full block + half-street so scatter / landmarks cannot nest in
-      if (!grid.tryClaim(bx - 2, bz - 2, blockW + 4, blockD + 4, 1)) continue;
-      // Seat on densest max under footprint — never lift above ground (no hover gap)
-      const fh = footprintHeights(terrain, tx, tz, tw, td);
-      if (!Number.isFinite(fh.max) || fh.max < MIN_DRY) continue;
-      if (fh.delta > 2.2) continue; // too uneven
-      const seatY = fh.max; // sit on high point; foundation fills dips
-
-      let floors;
-      if (financial && rng() > 0.2) floors = 16 + Math.floor(rng() * 10);
-      else if (waterfront && rng() > 0.3) floors = 12 + Math.floor(rng() * 8);
-      else if (rng() > 0.45) floors = 9 + Math.floor(rng() * 8);
-      else floors = 5 + Math.floor(rng() * 5);
-
-      // Always pour a concrete plinth under the footprint (kills float gaps)
-      const plinthBot = Math.min(fh.min, seatY) - 0.2;
-      sink.addSpan(
-        tx - 0.15, plinthBot, tz - 0.15,
-        tx + tw + 0.15, seatY + 0.06, tz + td + 0.15,
-        C.concrete
-      );
-
-      if (floors <= 7) {
-        const seat = seatY - 0.05; // embed into plinth / grade
-        makeBuilding(sink, {
-          x: tx, z: tz, w: tw, d: td, floors,
-          baseY: seat,
-          color: pick(rng, [C.glass, C.white, C.cream, C.brick, C.gray]),
-          rng,
+    const lot = blockLot(b, plan.setback);
+    switch (b.code) {
+      case 'F':
+        genFinancial(sink, terrain, lot, rng, stats);
+        break;
+      case 'M':
+        genMarina(sink, terrain, lot, rng, stats);
+        break;
+      case 'E':
+        genEastVillage(sink, terrain, lot, rng, stats);
+        break;
+      case 'G':
+        genLowRise(sink, terrain, b, lot, rng, stats, {
+          alleyW: plan.alleyW,
+          perRow: 3,
+          minW: 9,
+          floorMin: 2,
+          floorSpan: 3,
+          palette: [C.brick, C.brickDark, C.cream, C.white, C.gray, C.wood],
         });
-        // Downtown mid-rises: entrance only, no exterior fire escapes
-        addBuildingAccess(sink, tx, tz, tw, td, seat, floors, BUILDINGS.FLOOR_HEIGHT, rng, 3, false, terrain, false);
-        // Desks / chairs / plants on walkable floors
-        const fhKit = BUILDINGS.FLOOR_HEIGHT;
-        const gh = BUILDINGS.GROUND_FLOOR_HEIGHT;
-        for (let f = 0; f < floors; f++) {
-          if (f > 0 && f % 2 === 0) continue;
-          const fy = f === 0
-            ? seat + (BUILDINGS.GROUND_SLAB_LIFT || 0.08) + 0.02
-            : seat + gh + (f - 1) * fhKit + 0.02;
-          placeOfficeFloorFurniture(sink, tx, tz, tw, td, fy, rng);
-        }
-      } else {
-        // Pass locked w/d so tower cannot grow past the block setback
-        placeSkylineTower(sink, tx, tz, seatY, rng, floors, terrain, { w: tw, d: td });
-      }
-      towers++;
+        break;
+      case 'L':
+        genLowRise(sink, terrain, b, lot, rng, stats, {
+          alleyW: plan.alleyW,
+          perRow: 2,
+          minW: 11,
+          floorMin: 2,
+          floorSpan: 2,
+          palette: [C.cream, C.white, C.brick, C.sand],
+        });
+        break;
+      default:
+        genCivic(sink, terrain, lot, rng, stats);
+        break;
     }
   }
 
-  // Waterfront hotels (south of grid) — spaced further, locked size, hard ground seat
-  for (let i = 0; i < 3; i++) {
-    const tw = 14;
-    const td = 12;
-    const hx = originX + 24 + i * 52;
-    const hz = originZ + rows * stepZ + 22; // further south so not jammed on last row
-    if (!grid.tryClaim(hx - 4, hz - 4, tw + 8, td + 8, 3)) continue;
-    const fh = footprintHeights(terrain, hx, hz, tw, td);
-    if (!Number.isFinite(fh.max) || fh.max < MIN_DRY) continue;
-    if (fh.delta > 1.6) continue;
-    const seatY = fh.max;
-    sink.addSpan(
-      hx - 0.25, Math.min(fh.min, seatY) - 0.5, hz - 0.25,
-      hx + tw + 0.25, seatY + 0.08, hz + td + 0.25,
-      C.concrete
-    );
-    placeSkylineTower(sink, hx, hz, seatY, rng, 12 + Math.floor(rng() * 6), terrain, { w: tw, d: td });
-    towers++;
-  }
-
-  return { towers, cols, rows, occ: grid };
+  return {
+    towers: stats.towers,
+    midrise: stats.midrise,
+    lowrise: stats.lowrise,
+    landmarks: stats.landmarks,
+    buildings: stats.towers + stats.midrise + stats.lowrise,
+    cols: plan.cols,
+    rows: plan.rows,
+    occ: grid,
+  };
 }
 
 // ===================== BOAT / HARBOR =====================
