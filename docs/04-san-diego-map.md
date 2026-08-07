@@ -109,25 +109,47 @@ is a climb. The site here runs from 15 m at the west end to 90 m on the east
 ridge and the layout takes that as given (`src/world/structures/Zoo.js`).
 
 It also pioneered cageless moated enclosures, so a habitat is a public viewing
-wall, a moat gap and an inner retaining wall — not a barred cage. On a slope the
-pad cuts to its high corner and the retaining wall grows downhill to meet grade.
+wall, a moat gap and an inner retaining wall — not a barred cage.
 
-Contains the entry plaza and gate arch, five moated habitats, a walk-through
-mesh aviary down in the canyon, reptile and primate houses, a canyon footbridge,
-and the Skyfari running from the low west terminal up to the east ridge.
+**Every pad goes through `bench()`**, which seats the deck at the footprint's
+average height, clamped to a few metres above the low corner, and fills all the
+way down. A terrace is a cut into a hill, not a plinth on top of one: the first
+version put pads at the footprint's *high* corner with a fill capped at 9 m, and
+on ground that drops 34 m across 40 m of footprint three exhibits ended up
+hanging 7–24 m in the air as big black slabs. Ground too broken to bench is
+refused outright, and the steep sites get `canyonExhibit()` instead — stepped
+rock benches with retaining walls, the way Africa Rocks and Tiger Trail work.
+
+Contains the entry plaza and gate arch, a flamingo lagoon just inside it, four
+moated habitats, two stepped canyon exhibits, a walk-through mesh aviary with a
+waterfall down its back wall, reptile and primate houses, the double-decker bus
+tour loop, a canyon footbridge, and the Skyfari from the low west terminal up to
+the east ridge.
+
+The Skyfari cable is subdivided far finer than its pylons. Every box here is
+axis-aligned, so a cable drawn as one span between two diagonal points is not a
+line — it is that line's bounding box, which across this run meant three
+52 × 38 m slabs hanging over the canyon.
 
 ## Kearny Mesa
 
-A flat-topped mesa split into four quadrants by the I-15 and SR-52 corridors
-that cross at the anchor. Big-box retail and the dealership row sit on the two
-freeway-adjacent quadrants — which is where they really are — and the two quiet
-quadrants hold residential tracts.
+A flat-topped mesa. Big-box retail and the dealership row sit on the two
+freeway-adjacent quadrants — which is where they really are — and **six
+residential tracts** spread over the rest of the mesa top: the two original
+quiet quadrants, three more to the north (one of them filling the bare strip
+between the other two, so the north reads as one continuous suburb), and one on
+the shelf east of x 350. The mesa runs 35–55 m with no freeway on the northern
+ground at all, so the suburb spreads onto it the way Clairemont and Mira Mesa
+really do. Two collectors tie the new blocks back to the original pair.
 
 Streets come from `src/world/KearnyPlan.js` (a collector with cross streets and
 a cul-de-sac per tract, plus one access spine per commercial quadrant);
 `src/world/structures/KearnyMesa.js` fills the lots. Residential lot depth is
 derived from the street spacing so back-to-back houses on adjacent streets
-cannot meet in the middle of the block.
+cannot meet in the middle of the block, and lots per side is derived from the
+tract's width to hold a ~20 m frontage at any tract size — a narrower lot cannot
+hold the house (11–15 m) plus its attached garage (5.2 m), and the centring
+maths starts pushing neighbours through each other.
 
 Every building pours a terrace pad down to its low corner rather than demanding
 already-flat ground, which is what lets a suburb sit on rolling mesa.
