@@ -5,15 +5,22 @@
 //   node tools/export-heightmap.mjs --res 8129         # ~2.2 m/sample
 //   node tools/export-heightmap.mjs --out out/sd.r16
 //
-// Writes 16-bit little-endian raw (.r16), which UE5's Landscape import accepts
-// directly and which needs no PNG encoder. Also writes a .json sidecar with the
-// scale values to type into the import dialog, and a weightmap-style land/water
-// mask so the coastline can drive a material layer or a water body.
+// Writes a 16-bit greyscale PNG, which is the format UE5's Landscape import is
+// built around: it carries its own resolution and bit depth, so there is nothing
+// for the import dialog to guess at.
+//
+// The .r16 goes out alongside it, but as a secondary. Raw has no header, so UE
+// reads its dimensions from a companion .json declaring width/height/bpp — and
+// that file lives at exactly the path this script was already using for its own
+// metadata. UE parsed the metadata as a descriptor, found no `width`, and the
+// import silently fell back to a default 505x505 landscape. The sidecar now
+// declares both, so either file works, but PNG is the one to reach for.
 //
 // Resolution note: Landscape likes (components x quads) + 1 sizes — 1009, 2017,
 // 4033, 8129. Anything else still imports but gets resampled.
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, statSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
 import path from 'node:path';
 import {
   FRAME, ASPECT, landField, reliefAt,
@@ -27,6 +34,72 @@ const flag = (name, fallback) => {
 
 const RES = Number(flag('--res', 4033));
 const OUT = flag('--out', 'out/sandiego.r16');
+
+// --- 16-bit greyscale PNG ------------------------------------------------
+// Hand-rolled rather than pulled in as a dependency: the whole encoder is one
+// IHDR, one deflated IDAT and an IEND, and a build tool that needs npm install
+// to produce the terrain is a build tool that stops working.
+
+const CRC_TABLE = (() => {
+  const t = new Int32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c;
+  }
+  return t;
+})();
+
+function crc32(buf) {
+  let c = -1;
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ -1) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([len, body, crc]);
+}
+
+/** @param {Uint16Array} samples row-major, length w*h */
+function encodePng16(samples, w, h) {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 16;   // bit depth
+  ihdr[9] = 0;    // colour type: greyscale
+  ihdr[10] = 0;   // deflate
+  ihdr[11] = 0;   // adaptive filtering
+  ihdr[12] = 0;   // no interlace
+
+  // Scanlines carry a leading filter byte. Filter 0 (None) throughout: the data
+  // is already smooth, so the filters that help photographs cost time here
+  // without buying much, and deflate still finds the redundancy.
+  const stride = w * 2 + 1;
+  const raw = Buffer.allocUnsafe(stride * h);
+  for (let y = 0; y < h; y++) {
+    const o = y * stride;
+    raw[o] = 0;
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      // PNG is big-endian; the .r16 is little-endian. Same samples, opposite order.
+      const v = samples[row + x];
+      raw[o + 1 + x * 2] = v >>> 8;
+      raw[o + 2 + x * 2] = v & 0xff;
+    }
+  }
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(raw, { level: 6 })),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
 
 // Height range the 16-bit values map onto. Everything the trace produces sits
 // inside this, with headroom either side so nothing clips at the extremes.
@@ -95,13 +168,22 @@ const zScale = ((MAX_H - MIN_H) * 100) / 512;
 const zOffsetUU = (MIN_H + (32768 / 65535) * (MAX_H - MIN_H)) * 100;
 
 const outPath = path.resolve(OUT);
+const pngPath = outPath.replace(/\.r16$/, '.png');
 mkdirSync(path.dirname(outPath), { recursive: true });
 writeFileSync(outPath, Buffer.from(heights.buffer));
 writeFileSync(outPath.replace(/\.r16$/, '-landmask.raw'), Buffer.from(mask.buffer));
+writeFileSync(pngPath, encodePng16(heights, RES, RES));
 
 const meta = {
   source: 'src/world/geo/SanDiegoGeo.js',
   resolution: RES,
+  // Unreal reads a headerless .raw/.r16 through a sidecar declaring these three
+  // fields, and looks for it at exactly this path. Without them the import does
+  // not fail loudly — it reports "(Invalid)" resolution and quietly offers a
+  // default 505x505 landscape instead. The PNG needs none of this.
+  width: RES,
+  height: RES,
+  bpp: 16,
   frameMetres: { width: FRAME.widthM, height: FRAME.heightM },
   heightRangeMetres: { min: MIN_H, max: MAX_H },
   observedMetres: { min: +minSeen.toFixed(1), max: +maxSeen.toFixed(1) },
@@ -117,15 +199,17 @@ const meta = {
   // this and the whole coastline sits underwater.
   unrealLandscapeZOffsetUU: +(zOffsetUU).toFixed(1),
   note:
-    'Import as 16-bit raw. Set the XYZ scale above and lift the actor by '
-    + `unrealLandscapeZOffsetUU. Z scale reproduces the ${MIN_H}..${MAX_H} m `
-    + 'range: one unit of landscape Z scale spans 512 m of the 16-bit range, so '
-    + 'scale = range_m * 100 / 512. Sea level lands at '
-    + `${(((0 - MIN_H) / (MAX_H - MIN_H)) * 65535) | 0} of 65535.`,
+    'Import the .png — it carries its own resolution and bit depth. Set the XYZ '
+    + 'scale above and lift the actor by unrealLandscapeZOffsetUU. Z scale '
+    + `reproduces the ${MIN_H}..${MAX_H} m range: one unit of landscape Z scale `
+    + 'spans 512 m of the 16-bit range, so scale = range_m * 100 / 512. Sea '
+    + `level lands at ${(((0 - MIN_H) / (MAX_H - MIN_H)) * 65535) | 0} of 65535.`,
 };
 writeFileSync(outPath.replace(/\.r16$/, '.json'), JSON.stringify(meta, null, 2));
 
-console.log(`wrote ${outPath}`);
+const kb = (p) => (statSync(p).size / 1048576).toFixed(1);
+console.log(`wrote ${pngPath}  (${kb(pngPath)} MB)  <- import this one`);
+console.log(`      ${outPath}  (${kb(outPath)} MB)`);
 console.log(`  ${RES} x ${RES}, ${metresPerSample.toFixed(2)} m per sample`);
 console.log(`  heights ${minSeen.toFixed(1)}..${maxSeen.toFixed(1)} m`);
 console.log(`  land coverage ${(landCells / (RES * RES) * 100).toFixed(1)}%`);
