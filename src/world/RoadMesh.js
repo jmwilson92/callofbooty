@@ -151,8 +151,12 @@ export function buildRoadMesh(terrain, roadLines) {
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.computeBoundingSphere();
 
-  const mat = new THREE.MeshLambertMaterial({
+  const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
+    // Asphalt: rough, faintly damp-looking, never shiny. Standard rather than
+    // Lambert so it responds to the scene environment like everything else.
+    roughness: 0.86,
+    metalness: 0.0,
     // Roads sit millimetres above the terrain they were graded into; the offset
     // keeps them from fighting it at grazing angles across the whole map.
     polygonOffset: true,

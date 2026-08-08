@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WORLD, PLAYER, SIM, PARACHUTE, DOWNED } from './config.js';
+import { WORLD, PLAYER, SIM, PARACHUTE, DOWNED, RENDER } from './config.js';
 import { EventBus } from './core/EventBus.js';
 import { Clock } from './core/Clock.js';
 import { Input } from './core/Input.js';
@@ -45,6 +45,8 @@ import { ThrowableSystem } from './combat/Throwables.js';
 import { MatchController } from './game/Match.js';
 import { ZoneSystem } from './game/Zone.js';
 import { buildRoadMesh } from './world/RoadMesh.js';
+import { setupSky } from './render/Sky.js';
+import { PostFX } from './render/PostFX.js';
 import { isExplore, MODES, getMode, setMode } from './game/Mode.js';
 import { THROWABLES } from './config.js';
 import { EndScreen } from './ui/EndScreen.js';
@@ -111,11 +113,22 @@ async function start() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // Filmic response instead of a raw linear dump to the screen. Without this the
+  // bright end clips flat and everything reads washed out and plasticky.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = RENDER.EXPOSURE;
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(WORLD.SKY_COLOR);
-  scene.fog = new THREE.Fog(WORLD.SKY_COLOR, WORLD.FOG_NEAR, WORLD.FOG_FAR);
+  // Fog is tinted to the sky's *horizon*, not its zenith. The old flat sky
+  // colour sat well above the horizon band the atmosphere shader produces, so
+  // distant terrain faded to one blue and the sky behind it was another —
+  // reading as a hard line across the view at the fog limit.
+  scene.fog = new THREE.Fog(RENDER.HAZE_COLOR, WORLD.FOG_NEAR, WORLD.FOG_FAR);
+  // Physical sky, and — the part that actually matters — the environment map
+  // generated from it. Every material here is MeshStandardMaterial with a
+  // metalness value, and metalness with nothing to reflect is just darker.
+  setupSky(renderer, scene);
 
   const sun = setupLighting(scene);
 
@@ -154,6 +167,10 @@ async function start() {
   controller.prevPos.copy(controller.pos);
 
   const playerCam = new PlayerCamera(window.innerWidth / window.innerHeight);
+  // Ambient occlusion + tone mapping. The single biggest win available to a
+  // world made of boxes: without contact shading in the corners, a wall meeting
+  // a floor reads as two flat panels floating near each other.
+  const postFx = new PostFX(renderer, scene, playerCam.camera);
   const input = new Input(renderer.domElement, bus);
   const hud = createHud();
   hud.setModePicker?.(getMode(), (m) => setMode(m), {
@@ -554,6 +571,7 @@ async function start() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     playerCam.setAspect(window.innerWidth / window.innerHeight);
     weaponOverlay.setAspect(window.innerWidth / window.innerHeight);
+    postFx.setSize(window.innerWidth, window.innerHeight);
   });
 
   const sunOffset = sun.position.clone();
@@ -591,7 +609,7 @@ async function start() {
       clock.advance(() => {});
       endScreen.update(clock.frameDelta || 1 / 60);
       // Keep rendering the frozen world under the overlay for atmosphere
-      renderer.render(scene, playerCam.camera);
+      postFx.render();
       return;
     }
 
@@ -1251,7 +1269,7 @@ async function start() {
       playerCam.camera.rotation.set(freeCam.pitch, freeCam.yaw, 0, 'YXZ');
       playerCam.camera.updateMatrixWorld(true);
     }
-    renderer.render(scene, playerCam.camera);
+    postFx.render();
     // Gun overlay only in first-person on foot — and never over a detached cam,
     // where the arms would hang in mid-air at the debug viewpoint.
     if (input.locked && !vehicles.riding && !controller.parachute && !freeCam) {

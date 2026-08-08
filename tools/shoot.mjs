@@ -17,7 +17,11 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 
-const URL = process.env.GAME_URL || 'http://localhost:5173/';
+// Ambient occlusion runs far too slowly under the software rasteriser to
+// capture with, so post-processing is off unless explicitly asked for (--fx).
+const WANT_FX = process.argv.includes('--fx');
+const BASE_URL = process.env.GAME_URL || 'http://localhost:5173/';
+const URL = WANT_FX ? BASE_URL : BASE_URL + (BASE_URL.includes('?') ? '&' : '?') + 'fx=0';
 const args = process.argv.slice(2);
 
 function flag(name, fallback = null) {

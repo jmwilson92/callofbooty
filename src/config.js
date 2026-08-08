@@ -236,11 +236,17 @@ export const WORLD = {
   // Brighter, cleaner late-afternoon light
   SUN_ELEVATION_DEG: 42,
   SUN_AZIMUTH_DEG: 245,
-  SUN_INTENSITY: 2.85,
+  // Sun stays the key light. Ambient is now mostly the sky environment map
+  // (see RENDER.ENV_INTENSITY) rather than the hemisphere light — the two are
+  // the same job, and running both at their old strengths blew the whole scene
+  // out to near-white.
+  SUN_INTENSITY: 2.4,
   SUN_COLOR: 0xffebd0,
   AMBIENT_SKY: 0xb0cce0,
   AMBIENT_GROUND: 0x7a6a50,
-  AMBIENT_INTENSITY: 0.92,
+  // Kept low and warm: the PMREM environment only sees sky, so this is here for
+  // the bounce off the ground that the sky map cannot provide.
+  AMBIENT_INTENSITY: 0.30,
 
   SHADOW_MAP_SIZE: 2048,
   SHADOW_BOX: 160,
@@ -1283,4 +1289,35 @@ export const MAP = {
   PLAYER_RING: 'rgba(127, 212, 255, 0.35)',
   BORDER: 'rgba(255, 255, 255, 0.18)',
   BG: 'rgba(8, 12, 16, 0.82)',
+};
+
+// Rendering. Kept together because these values only make sense against each
+// other: the sky environment map, the hemisphere light and the sun all light
+// the same scene, so raising one means lowering another.
+export const RENDER = {
+  // Sky environment map strength. This is the scene's ambient light.
+  //
+  // Both of these are far lower than they look like they should be. The three.js
+  // Sky shader is genuinely high dynamic range — it is built to be tone mapped
+  // from a bright linear signal — so an exposure near 1.0 clips the whole scene
+  // to near-white, and an environment intensity above ~0.35 washes every surface
+  // toward sky blue. Raise either and check a street-level shot, not just an
+  // aerial: canyons between towers are where it blows out first.
+  ENV_INTENSITY: 0.30,
+  // Filmic tone mapping exposure.
+  EXPOSURE: 0.50,
+  // Distance haze. Matched to the atmosphere shader's horizon band rather than
+  // the zenith, or the fog limit draws a hard line across the horizon.
+  HAZE_COLOR: 0xdae6ee,
+  // Atmosphere. Coastal southern California: clean air, hazy horizon.
+  SKY_TURBIDITY: 3.2,
+  SKY_RAYLEIGH: 1.4,
+  SKY_MIE: 0.006,
+  SKY_MIE_G: 0.75,
+  // Ambient occlusion. Radius is in metres — ~1 m catches wall/floor junctions,
+  // kerbs and window reveals without smearing shade across a whole street.
+  AO_ENABLED: true,
+  AO_RADIUS: 1.1,
+  AO_INTENSITY: 0.8,
+  AO_SAMPLES: 16,
 };
