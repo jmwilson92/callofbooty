@@ -3,3 +3,10 @@ dist/
 tools/screenshot*.png
 .DS_Store
 *.log
+
+# Generated map data. Both exporters write here by default —
+# tools/export-heightmap.mjs and tools/export-city.mjs — and everything in it
+# is rebuilt from the traced geography in src/world/geo. The copies that are
+# actually consumed live in the callofbootyunreal repo under Tools/Heightmaps,
+# committed there because the Unreal editor cannot run node to make its own.
+out/
