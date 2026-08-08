@@ -429,7 +429,7 @@ export const DISTRICTS = [
     // metal shops on the same block, which is exactly how it reads.
     poly: [[0.664, 0.554], [0.726, 0.578], [0.752, 0.618], [0.728, 0.646],
       [0.678, 0.616], [0.656, 0.582]],
-    grid: { kind: 'grid', rotDeg: 22, blockW: 88, blockH: 60, streetW: 11, aveW: 15, curveAmp: 0 },
+    grid: { kind: 'grid', rotDeg: 14, blockW: 88, blockH: 60, streetW: 11, aveW: 15, curveAmp: 0 },
     build: { kind: 'industrial', cover: 0.50, minH: 5, maxH: 16, lotW: 20, lotD: 26 },
   },
   {
@@ -437,7 +437,8 @@ export const DISTRICTS = [
     name: 'Logan Heights & Southcrest',
     poly: [[0.726, 0.520], [0.822, 0.546], [0.868, 0.598], [0.848, 0.652],
       [0.774, 0.640], [0.720, 0.586]],
-    grid: { kind: 'grid', rotDeg: 20, blockW: 88, blockH: 60, streetW: 11, aveW: 15, curveAmp: 0 },
+    // Logan Heights is a continuation of downtown's plat, not a separate one.
+    grid: { kind: 'grid', rotDeg: 12, blockW: 88, blockH: 60, streetW: 11, aveW: 15, curveAmp: 0 },
     build: { kind: 'house', cover: 0.44, minH: 4, maxH: 12, lotW: 14, lotD: 24 },
   },
   {
@@ -518,8 +519,8 @@ export const DISTRICTS = [
     name: 'Coronado',
     // A resort plat: wide streets, deep lots, and the Hotel del at the bottom
     // of Orange Avenue. Square to itself, not to the mainland.
-    poly: [[0.476, 0.672], [0.522, 0.694], [0.546, 0.740], [0.552, 0.792],
-      [0.522, 0.812], [0.490, 0.774], [0.470, 0.718]],
+    poly: [[0.500, 0.690], [0.522, 0.700], [0.556, 0.744], [0.574, 0.790],
+      [0.548, 0.846], [0.530, 0.786], [0.516, 0.740]],
     grid: { kind: 'grid', rotDeg: 32, blockW: 96, blockH: 68, streetW: 12, aveW: 18, curveAmp: 0 },
     build: { kind: 'house', cover: 0.38, minH: 5, maxH: 14, lotW: 18, lotD: 30 },
   },
@@ -546,7 +547,7 @@ export const DISTRICTS = [
 export const ARTERIALS = [
   // — along the coast and through the beaches —
   { id: 'mission_blvd', name: 'Mission Blvd', w: 16, pts: [
-    [0.040, 0.000], [0.052, 0.038], [0.062, 0.082], [0.070, 0.126], [0.074, 0.150]] },
+    [0.058, 0.004], [0.063, 0.040], [0.068, 0.082], [0.072, 0.126], [0.076, 0.150]] },
   { id: 'ingraham', name: 'Ingraham St', w: 18, pts: [
     [0.096, 0.000], [0.100, 0.036], [0.108, 0.076], [0.120, 0.114], [0.134, 0.146]] },
   { id: 'garnet', name: 'Garnet Ave', w: 20, pts: [
@@ -569,8 +570,9 @@ export const ARTERIALS = [
     [0.104, 0.302]] },
 
   // — Midway, the harbour and Pacific Highway —
+  // Stops short of the depot rather than driving through the parade deck.
   { id: 'midway_dr', name: 'Midway Dr & Sports Arena Blvd', w: 24, pts: [
-    [0.232, 0.298], [0.276, 0.306], [0.320, 0.312], [0.362, 0.312], [0.402, 0.302]] },
+    [0.232, 0.298], [0.268, 0.293], [0.304, 0.287], [0.340, 0.282]] },
   { id: 'pacific_hwy', name: 'Pacific Highway', w: 26, pts: [
     [0.436, 0.194], [0.446, 0.246], [0.446, 0.300], [0.462, 0.348], [0.492, 0.390],
     [0.526, 0.424], [0.556, 0.452]] },
@@ -590,9 +592,11 @@ export const ARTERIALS = [
   { id: 'clairemont_mesa', name: 'Clairemont Mesa Blvd', w: 26, pts: [
     [0.226, 0.062], [0.302, 0.054], [0.382, 0.048], [0.462, 0.042], [0.546, 0.036],
     [0.630, 0.030]] },
+  // Starts east of Mission Bay. The old west end ran across open water: the
+  // real Balboa Avenue passes a kilometre north of the bay's shore, which on
+  // this frame is off the top edge.
   { id: 'balboa_ave', name: 'Balboa Ave', w: 26, pts: [
-    [0.076, 0.014], [0.152, 0.020], [0.230, 0.024], [0.310, 0.022], [0.392, 0.018],
-    [0.470, 0.014]] },
+    [0.215, 0.024], [0.289, 0.019], [0.363, 0.014], [0.436, 0.010], [0.510, 0.005]] },
   { id: 'genesee', name: 'Genesee Ave', w: 22, pts: [
     [0.284, 0.000], [0.290, 0.036], [0.298, 0.074], [0.310, 0.110], [0.326, 0.140]] },
   { id: 'convoy', name: 'Convoy St', w: 20, pts: [
@@ -616,8 +620,8 @@ export const ARTERIALS = [
   { id: 'adams', name: 'Adams Ave', w: 18, pts: [
     [0.664, 0.176], [0.740, 0.178], [0.816, 0.182], [0.890, 0.186], [0.958, 0.190]] },
   { id: 'fifth_ave', name: '5th & 6th Avenue', w: 20, pts: [
-    [0.588, 0.196], [0.592, 0.256], [0.594, 0.318], [0.596, 0.380], [0.596, 0.440],
-    [0.594, 0.492]] },
+    [0.589, 0.196], [0.584, 0.246], [0.580, 0.297], [0.576, 0.347], [0.571, 0.398],
+    [0.567, 0.448]] },
   { id: 'park_blvd', name: 'Park Blvd', w: 22, pts: [
     [0.664, 0.174], [0.664, 0.238], [0.662, 0.302], [0.658, 0.366], [0.652, 0.430],
     [0.648, 0.488], [0.646, 0.520]] },
@@ -637,22 +641,30 @@ export const ARTERIALS = [
     [0.664, 0.348], [0.694, 0.342], [0.724, 0.336], [0.750, 0.332]] },
 
   // — Downtown —
+  // Broadway and Market are downtown streets, not diagonals laid over
+  // downtown, so they run at the plat's own 9 degrees to the tenth of a degree.
+  // At 20 degrees, which is where they were, every block they touched came out
+  // as a pair of triangles — the loudest artefact a generated grid produces.
   { id: 'broadway', name: 'Broadway', w: 24, pts: [
-    [0.532, 0.436], [0.566, 0.452], [0.600, 0.468], [0.634, 0.484], [0.668, 0.500],
-    [0.700, 0.514]] },
+    [0.555, 0.453], [0.600, 0.462], [0.645, 0.471], [0.690, 0.479], [0.735, 0.488]] },
+  // Only 250 m south of Broadway rather than the real 500: the traced bay
+  // shore sits a little north of where it should downtown, and there is not
+  // 500 m of dry land between Broadway and the water at the west end.
   { id: 'market', name: 'Market St', w: 22, pts: [
-    [0.548, 0.474], [0.582, 0.490], [0.616, 0.506], [0.650, 0.522], [0.684, 0.538]] },
+    [0.576, 0.474], [0.612, 0.481], [0.649, 0.488], [0.685, 0.495], [0.722, 0.503]] },
   { id: 'india_kettner', name: 'India & Kettner', w: 18, pts: [
     [0.528, 0.398], [0.548, 0.432], [0.568, 0.466], [0.586, 0.498]] },
+  // The cross family of the same grid, at 99 degrees. Short, because downtown
+  // runs from the mesa to the water in about a kilometre.
   { id: 'first_ave', name: '1st Avenue', w: 18, pts: [
-    [0.552, 0.418], [0.572, 0.452], [0.592, 0.486], [0.610, 0.518]] },
+    [0.570, 0.403], [0.567, 0.426], [0.564, 0.449], [0.561, 0.473]] },
   { id: 'tenth_ave', name: '10th & 11th Avenue', w: 18, pts: [
-    [0.616, 0.454], [0.636, 0.488], [0.654, 0.520], [0.670, 0.548]] },
+    [0.623, 0.439], [0.619, 0.467], [0.616, 0.495], [0.612, 0.522]] },
 
   // — south-east —
   { id: 'imperial', name: 'Imperial Ave', w: 22, pts: [
-    [0.656, 0.540], [0.726, 0.548], [0.798, 0.556], [0.870, 0.564], [0.942, 0.572],
-    [1.000, 0.578]] },
+    [0.656, 0.540], [0.719, 0.552], [0.782, 0.565], [0.845, 0.577], [0.907, 0.589],
+    [0.970, 0.602]] },
   { id: 'national_ave', name: 'National Ave & Main St', w: 22, pts: [
     [0.668, 0.570], [0.724, 0.604], [0.780, 0.640], [0.836, 0.678], [0.888, 0.716],
     [0.930, 0.748]] },
@@ -663,13 +675,16 @@ export const ARTERIALS = [
   { id: 'division', name: 'Division St', w: 18, pts: [
     [0.782, 0.590], [0.846, 0.606], [0.908, 0.622], [0.968, 0.638]] },
   { id: 'market_creek', name: 'Market St east', w: 20, pts: [
-    [0.700, 0.516], [0.774, 0.502], [0.848, 0.490], [0.922, 0.480], [0.992, 0.472]] },
+    [0.700, 0.516], [0.770, 0.530], [0.840, 0.544], [0.910, 0.557], [0.981, 0.571]] },
 
   // — Coronado —
+  // Down the middle of the island. Coronado's town is traced as a strip about
+  // 300 m across — narrower than the real thing — so there is no room either
+  // side of the centreline, and the old route spent half its length in the bay.
   { id: 'orange_ave', name: 'Orange Ave', w: 22, pts: [
-    [0.462, 0.646], [0.486, 0.688], [0.508, 0.730], [0.528, 0.772], [0.542, 0.806]] },
+    [0.508, 0.694], [0.518, 0.708], [0.532, 0.742], [0.552, 0.788], [0.566, 0.826]] },
   { id: 'fourth_st_cor', name: '3rd & 4th St', w: 20, pts: [
-    [0.478, 0.690], [0.510, 0.712], [0.540, 0.732], [0.560, 0.746]] },
+    [0.506, 0.694], [0.520, 0.714], [0.538, 0.752], [0.556, 0.788]] },
   { id: 'alameda', name: 'Alameda Blvd', w: 16, pts: [
-    [0.492, 0.678], [0.516, 0.716], [0.536, 0.756], [0.550, 0.790]] },
+    [0.502, 0.690], [0.518, 0.718], [0.534, 0.752], [0.548, 0.786]] },
 ];

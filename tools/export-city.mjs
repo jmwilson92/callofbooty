@@ -7,9 +7,15 @@
 //   city.json          metadata, district records, arterials and every street
 //                      centreline. Text, because it is small enough and being
 //                      able to read it is worth more than the bytes.
-//   city-buildings.bin  packed little-endian float32, seven per building:
+//   city-buildings.bin  packed little-endian float32, nine per building:
 //                      u, v, rotation degrees, width m, depth m, height m,
-//                      kind index into `kinds` in city.json.
+//                      kind index into `kinds` in city.json, a flags word, and
+//                      the metres its underside sits above local ground.
+//                      Flags are bit 0 "named landmark" and bit 1 "sits on the
+//                      water" — the second matters because the Midway and the
+//                      carrier piers are moored, and a consumer that rejects
+//                      anything standing where the heightmap says sea would
+//                      otherwise throw them away.
 //
 // The buildings are binary because there are of the order of 150,000 of them.
 // As JSON that is 12 MB of text to parse on every page load and every time the
@@ -49,9 +55,10 @@ console.log('  %d streets, %d buildings in %ss',
 const kinds = [...new Set(city.buildings.map((b) => b.kind))].sort();
 const kindIndex = new Map(kinds.map((k, i) => [k, i]));
 
-const buf = Buffer.alloc(city.buildings.length * 7 * 4);
+const STRIDE = 9;
+const buf = Buffer.alloc(city.buildings.length * STRIDE * 4);
 city.buildings.forEach((b, i) => {
-  const o = i * 28;
+  const o = i * STRIDE * 4;
   buf.writeFloatLE(b.u, o);
   buf.writeFloatLE(b.v, o + 4);
   buf.writeFloatLE(b.rot, o + 8);
@@ -59,6 +66,8 @@ city.buildings.forEach((b, i) => {
   buf.writeFloatLE(b.d, o + 16);
   buf.writeFloatLE(b.h, o + 20);
   buf.writeFloatLE(kindIndex.get(b.kind), o + 24);
+  buf.writeFloatLE((b.landmark ? 1 : 0) | (b.water ? 2 : 0), o + 28);
+  buf.writeFloatLE(b.base ?? 0, o + 32);
 });
 
 // Round the street coordinates on the way out. Six decimal places of a
@@ -73,9 +82,13 @@ const meta = {
   fieldResolution: FIELD_RES,
   kinds,
   buildingCount: city.buildings.length,
-  buildingStride: 7,
+  buildingStride: STRIDE,
   buildingFile: 'city-buildings.bin',
-  buildingFields: ['u', 'v', 'rotDeg', 'widthM', 'depthM', 'heightM', 'kind'],
+  buildingFields: ['u', 'v', 'rotDeg', 'widthM', 'depthM', 'heightM', 'kind', 'flags', 'baseM'],
+  buildingFlags: { landmark: 1, water: 2 },
+  landmarks: city.landmarks.map((lm) => ({
+    id: lm.id, name: lm.name, u: r6(lm.u), v: r6(lm.v), rot: lm.rot ?? 0,
+  })),
   districts: DISTRICTS.map((d) => ({
     id: d.id,
     name: d.name,

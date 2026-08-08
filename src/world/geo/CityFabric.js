@@ -14,6 +14,7 @@
 
 import { FRAME, landField, reliefAt, inPoly, distToPoly, distToLine, FREEWAYS } from './SanDiegoGeo.js';
 import { DISTRICTS, ARTERIALS } from './SanDiegoDistricts.js';
+import { LANDMARKS, landmarkBoxes, landmarkClearance } from './SanDiegoLandmarks.js';
 
 const DEG = Math.PI / 180;
 
@@ -648,5 +649,60 @@ export function generateCity(opts = {}) {
     });
   }
 
-  return { field, streets, buildings, arterials: ARTERIALS, stats };
+  // ── Landmarks ────────────────────────────────────────────────────────────
+  //
+  // Last, and destructively: a landmark clears the procedural fabric around it
+  // before it lands. Without that the convention centre shares its footprint
+  // with eleven warehouses and Petco Park has a bungalow at second base. The
+  // clearance is per landmark because the right radius is not a property of the
+  // building — the stadium needs its car park cleared, the museums on Balboa
+  // Park's lawn need nothing cleared, and Fort Rosecrans is 400 m of cleared
+  // ground with almost nothing on it, which is the point of it.
+  if (opts.landmarks !== false && !only) {
+    const marks = LANDMARKS.map((lm) => ({
+      lm,
+      x: lm.u * FRAME.widthM,
+      y: lm.v * FRAME.heightM,
+      r: landmarkClearance(lm),
+    })).filter((m) => m.r > 0);
+
+    let cleared = 0;
+    const kept = [];
+    for (const b of buildings) {
+      const bx = b.u * FRAME.widthM;
+      const by = b.v * FRAME.heightM;
+      let hit = false;
+      for (const m of marks) {
+        const dx = bx - m.x;
+        const dy = by - m.y;
+        if (dx * dx + dy * dy < m.r * m.r) {
+          hit = true;
+          break;
+        }
+      }
+      if (hit) cleared++;
+      else kept.push(b);
+    }
+    // Rewritten in place rather than spread back in: `push(...kept)` passes a
+    // hundred thousand arguments and overflows the stack.
+    buildings.length = 0;
+    for (const b of kept) buildings.push(b);
+
+    let placed = 0;
+    for (const lm of LANDMARKS) {
+      for (const box of landmarkBoxes(lm, FRAME.widthM, FRAME.heightM)) {
+        buildings.push(box);
+        placed++;
+      }
+    }
+    stats.push({
+      id: '(landmarks)',
+      name: 'named buildings',
+      streets: 0,
+      buildings: placed,
+      clearedForThem: cleared,
+    });
+  }
+
+  return { field, streets, buildings, arterials: ARTERIALS, landmarks: LANDMARKS, stats };
 }

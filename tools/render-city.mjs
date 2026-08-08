@@ -23,8 +23,15 @@ const arg = (name, dflt) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : dflt;
 };
 
+// --zoom u0,v0,u1,v1 renders a window of the frame instead of the whole thing.
+// Downtown is 2 km across on a 17.6 km map: at full extent it is 200 pixels,
+// and no amount of squinting will tell you whether the convention centre
+// landed on the water.
+const ZOOM = arg('zoom', null);
+const [U0, V0, U1, V1] = ZOOM ? ZOOM.split(',').map(Number) : [0, 0, 1, 1];
+
 const W = parseInt(arg('res', '2200'), 10);
-const H = Math.round(W * (FRAME.heightM / FRAME.widthM));
+const H = Math.round((W * ((V1 - V0) * FRAME.heightM)) / ((U1 - U0) * FRAME.widthM));
 const OUT = arg('out', 'city-preview.png');
 const ONLY = arg('only', null);
 
@@ -83,8 +90,8 @@ const put = (x, y, r, g, b) => {
   px[i + 2] = b;
 };
 
-const toX = (u) => u * (W - 1);
-const toY = (v) => v * (H - 1);
+const toX = (u) => ((u - U0) / (U1 - U0)) * (W - 1);
+const toY = (v) => ((v - V0) / (V1 - V0)) * (H - 1);
 
 /** Thick line in pixel space, drawn as a swept disc. Slow but obvious. */
 function line(u0, v0, u1, v1, widthM, r, g, b) {
@@ -92,7 +99,7 @@ function line(u0, v0, u1, v1, widthM, r, g, b) {
   const y0 = toY(v0);
   const x1 = toX(u1);
   const y1 = toY(v1);
-  const rad = Math.max(0.6, (widthM / FRAME.widthM) * W * 0.5);
+  const rad = Math.max(0.6, (widthM / ((U1 - U0) * FRAME.widthM)) * W * 0.5);
   const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
   const ri = Math.ceil(rad);
   for (let s = 0; s <= steps; s++) {
@@ -117,16 +124,16 @@ function rect(u, v, wM, dM, rotDeg, r, g, b) {
   const hd = dM / 2;
   const cx = u * FRAME.widthM;
   const cy = v * FRAME.heightM;
-  const sx = W / FRAME.widthM;
-  const sy = H / FRAME.heightM;
+  const sx = W / ((U1 - U0) * FRAME.widthM);
+  const sy = H / ((V1 - V0) * FRAME.heightM);
   const na = Math.max(1, Math.ceil(wM * sx));
   const nb = Math.max(1, Math.ceil(dM * sy));
   for (let i = 0; i <= na; i++) {
     const a = -hw + (wM * i) / na;
     for (let j = 0; j <= nb; j++) {
       const bb = -hd + (dM * j) / nb;
-      const x = (cx + ex[0] * a + ey[0] * bb) * sx;
-      const y = (cy + ex[1] * a + ey[1] * bb) * sy;
+      const x = (cx + ex[0] * a + ey[0] * bb - U0 * FRAME.widthM) * sx;
+      const y = (cy + ex[1] * a + ey[1] * bb - V0 * FRAME.heightM) * sy;
       put(Math.round(x), Math.round(y), r, g, b);
     }
   }
@@ -137,9 +144,9 @@ console.log('rasterising the buildability field...');
 const field = buildField(1400);
 
 for (let y = 0; y < H; y++) {
-  const v = y / (H - 1);
+  const v = V0 + (y / (H - 1)) * (V1 - V0);
   for (let x = 0; x < W; x++) {
-    const u = x / (W - 1);
+    const u = U0 + (x / (W - 1)) * (U1 - U0);
     const l = landAt(field, u, v);
     if (l <= 0) {
       put(x, y, 26, 44, 68);
@@ -177,6 +184,10 @@ for (const a of city.arterials) {
 }
 for (const b of city.buildings) {
   const t = Math.min(1, b.h / 90);
+  if (b.landmark) {
+    rect(b.u, b.v, b.w, b.d, b.rot, 236, Math.round(150 + t * 60), 70);
+    continue;
+  }
   const g = Math.round(120 + t * 130);
   rect(b.u, b.v, b.w, b.d, b.rot, Math.round(112 + t * 138), g, Math.round(104 + t * 140));
 }
