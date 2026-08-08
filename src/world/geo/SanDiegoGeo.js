@@ -79,20 +79,34 @@ export const POINT_LOMA = [
  * than an inlet.
  */
 export const CORONADO = [
-  // North Island: a broad lobe about 3 x 2 km, not the ribbon this used to be.
-  // It is the widest land on the bay's west side and the reason the channel
-  // reads as a channel.
+  // One island, walked clockwise. North Island is the broad lobe at the top,
+  // Coronado town the wider blob south-east of it, and the Silver Strand the
+  // ribbon running off the bottom of the frame. They are one landmass and the
+  // outline treats them as one — the previous version pinched the join to a
+  // 170 m neck, which is not a thing that exists here.
+  //
+  // The town was a 300 m ribbon and is now about 1.4 km across, which is what
+  // it really is. That matters more than it sounds: at 300 m there was no room
+  // for Orange Avenue and the streets either side of it, so half of Coronado's
+  // street grid was being generated into the bay and clipped away, and the
+  // Hotel del had nowhere to stand but the surf.
+
+  // North Island, north shore facing the channel to Point Loma
   [0.302, 0.548], [0.348, 0.530], [0.400, 0.532], [0.446, 0.552],
-  [0.470, 0.586], [0.482, 0.626], [0.488, 0.664],
-  // Coronado town, on the island's south-east shoulder
-  [0.504, 0.700], [0.520, 0.742], [0.534, 0.788],
-  // The Silver Strand, running south off the bottom of the frame
-  [0.548, 0.850], [0.560, 0.920], [0.572, 1.000],
-  [0.612, 1.000], [0.600, 0.918], [0.588, 0.848], [0.574, 0.786],
-  [0.558, 0.742], [0.532, 0.706], [0.500, 0.688],
+  // North-east corner, facing downtown across the bay
+  [0.478, 0.584], [0.502, 0.622], [0.526, 0.660],
+  // The bay shore of the town, running south past Glorietta
+  [0.560, 0.694], [0.588, 0.730], [0.602, 0.770], [0.600, 0.812],
+  // Silver Strand, bay side, off the bottom of the frame
+  [0.582, 0.846], [0.574, 0.890], [0.578, 0.944], [0.584, 1.000],
+  [0.560, 1.000],
+  // Silver Strand, ocean side, back north
+  [0.554, 0.944], [0.548, 0.890], [0.540, 0.846],
+  // The ocean shore of the town
+  [0.528, 0.804], [0.516, 0.762], [0.504, 0.720], [0.492, 0.680],
   // South shore of North Island, back west to the start
-  [0.454, 0.686], [0.408, 0.680], [0.364, 0.664], [0.330, 0.634],
-  [0.310, 0.592],
+  [0.454, 0.664], [0.408, 0.656], [0.364, 0.640], [0.330, 0.612],
+  [0.310, 0.576],
 ];
 
 export const LAND = [MAINLAND, POINT_LOMA, CORONADO];
@@ -247,10 +261,15 @@ export const FREEWAYS = [
   // The Coronado bridge holds its deck; the Strand does not.
   { id: 'sr75_bridge', width: 16, bridge: true, deckM: 62, pts: [
     [0.678, 0.597], [0.650, 0.618], [0.616, 0.641], [0.582, 0.664],
-    [0.547, 0.682], [0.519, 0.696] ] },
-  { id: 'sr75_strand', width: 16, pts: [
-    [0.519, 0.696], [0.536, 0.783], [0.570, 0.864], [0.593, 0.945],
-    [0.616, 1.000] ] },
+    [0.580, 0.674], [0.556, 0.690] ] },
+  // At grade through Coronado and down the Strand: Third and Fourth Street are
+  // an ordinary one-way couplet with houses either side, not a freeway. Flagged
+  // so the city fabric gives it a kerb's worth of clearance rather than a
+  // motorway embankment's — at the full width it cut a bare 70 m scar straight
+  // down the middle of the island.
+  { id: 'sr75_strand', width: 16, surface: true, pts: [
+    [0.556, 0.690], [0.560, 0.744], [0.564, 0.800], [0.560, 0.856],
+    [0.564, 0.918], [0.568, 1.000] ] },
   // I-15 is deliberately absent: it runs east of this frame's edge, and a stub
   // drawn along the boundary would be a line rather than a freeway.
 ];
@@ -271,7 +290,7 @@ export const PLACES = [
   { id: 'downtown', u: 0.611, v: 0.500 },
   { id: 'littleitaly', u: 0.569, v: 0.436 },
   { id: 'northisland', u: 0.349, v: 0.644 },
-  { id: 'coronado', u: 0.497, v: 0.772 },
+  { id: 'coronado', u: 0.552, v: 0.762 },
   { id: 'nationalcity', u: 0.972, v: 0.820 },
   { id: 'northpark', u: 0.802, v: 0.245 },
   { id: 'cityheights', u: 0.968, v: 0.294 },

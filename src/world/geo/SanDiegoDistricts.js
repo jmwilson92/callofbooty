@@ -509,8 +509,9 @@ export const DISTRICTS = [
     name: 'NAS North Island',
     // Hangars along the flight line, the runway crossing the middle of the
     // lobe, and the carrier piers on the channel side.
-    poly: [[0.322, 0.556], [0.400, 0.542], [0.452, 0.566], [0.472, 0.614],
-      [0.462, 0.660], [0.404, 0.674], [0.348, 0.652], [0.318, 0.606]],
+    poly: [[0.320, 0.560], [0.386, 0.542], [0.446, 0.560], [0.492, 0.596],
+      [0.516, 0.636], [0.492, 0.664], [0.428, 0.660], [0.362, 0.632],
+      [0.322, 0.598]],
     grid: { kind: 'super', rotDeg: 22, blockW: 230, blockH: 150, streetW: 14, aveW: 20, curveAmp: 0 },
     build: { kind: 'military', cover: 0.28, minH: 10, maxH: 24, lotW: 80, lotD: 48 },
   },
@@ -519,17 +520,19 @@ export const DISTRICTS = [
     name: 'Coronado',
     // A resort plat: wide streets, deep lots, and the Hotel del at the bottom
     // of Orange Avenue. Square to itself, not to the mainland.
-    poly: [[0.500, 0.690], [0.522, 0.700], [0.556, 0.744], [0.574, 0.790],
-      [0.548, 0.846], [0.530, 0.786], [0.516, 0.740]],
-    grid: { kind: 'grid', rotDeg: 32, blockW: 96, blockH: 68, streetW: 12, aveW: 18, curveAmp: 0 },
+    poly: [[0.502, 0.690], [0.556, 0.696], [0.596, 0.740], [0.600, 0.796],
+      [0.578, 0.836], [0.540, 0.828], [0.512, 0.766], [0.498, 0.716]],
+    // The plat runs with Orange Avenue, not across it — the avenue is one of
+    // the grid's own families, the way Broadway is downtown's.
+    grid: { kind: 'grid', rotDeg: 70, blockW: 96, blockH: 68, streetW: 12, aveW: 18, curveAmp: 0 },
     build: { kind: 'house', cover: 0.38, minH: 5, maxH: 14, lotW: 18, lotD: 30 },
   },
   {
     id: 'silverstrand',
     name: 'Silver Strand',
     // Barely a district: the highway, a naval reserve and dunes.
-    poly: [[0.540, 0.840], [0.586, 0.856], [0.612, 0.980], [0.578, 0.992],
-      [0.548, 0.884]],
+    poly: [[0.542, 0.852], [0.572, 0.858], [0.580, 0.940], [0.582, 0.998],
+      [0.560, 0.998], [0.552, 0.938]],
     grid: { kind: 'none', rotDeg: 30, blockW: 200, blockH: 120, streetW: 10, aveW: 14, curveAmp: 0 },
     build: { kind: 'park', cover: 0.04, minH: 4, maxH: 9, lotW: 24, lotD: 24 },
   },
@@ -681,10 +684,14 @@ export const ARTERIALS = [
   // Down the middle of the island. Coronado's town is traced as a strip about
   // 300 m across — narrower than the real thing — so there is no room either
   // side of the centreline, and the old route spent half its length in the bay.
+  // Down the spine of the town now that there is a town to run down: from the
+  // ferry landing to the Hotel del, with room for streets either side of it.
   { id: 'orange_ave', name: 'Orange Ave', w: 22, pts: [
-    [0.508, 0.694], [0.518, 0.708], [0.532, 0.742], [0.552, 0.788], [0.566, 0.826]] },
+    [0.520, 0.694], [0.530, 0.728], [0.540, 0.762], [0.550, 0.796],
+    [0.558, 0.826]] },
+  // The one-way couplet carrying the bridge traffic west across the island.
   { id: 'fourth_st_cor', name: '3rd & 4th St', w: 20, pts: [
-    [0.506, 0.694], [0.520, 0.714], [0.538, 0.752], [0.556, 0.788]] },
+    [0.556, 0.694], [0.540, 0.701], [0.524, 0.709], [0.508, 0.716]] },
   { id: 'alameda', name: 'Alameda Blvd', w: 16, pts: [
-    [0.502, 0.690], [0.518, 0.718], [0.534, 0.752], [0.548, 0.786]] },
+    [0.510, 0.712], [0.520, 0.745], [0.530, 0.779], [0.539, 0.810]] },
 ];

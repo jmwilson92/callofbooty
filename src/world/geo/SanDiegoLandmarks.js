@@ -33,6 +33,11 @@
  *
  * A single box needs no parts; give w/d/h on the landmark itself.
  *
+ * `apron` is [w, d] (optionally [w, d, dx, dy]) of parking laid down before the
+ * building. A stadium, a mall or an arena is mostly car park by area, and the
+ * asphalt is the part you see first from the air — Snapdragon's lot is bigger
+ * than the bowl by a factor of four and reads as the landmark from a mile up.
+ *
  * `clearM` is how far around it the procedural fabric is deleted. It defaults
  * to the footprint, but a stadium needs its car park cleared too, and a museum
  * on a park lawn needs nothing cleared at all.
@@ -259,6 +264,7 @@ export const LANDMARKS = [
       [-60, -50, 60, 40, 30],
       [70, 40, 70, 44, 26],
     ],
+    apron: [220, 140],
     clearM: 90,
   },
 
@@ -276,6 +282,7 @@ export const LANDMARKS = [
       [-88, 0, 34, 140, 32],
       [88, 0, 34, 140, 32],
     ],
+    apron: [420, 360],
     clearM: 320,
   },
   {
@@ -288,6 +295,7 @@ export const LANDMARKS = [
       [150, -10, 90, 100, 16],
       [0, 110, 200, 60, 14],        // the parking structure
     ],
+    apron: [330, 230],
     clearM: 200,
   },
   {
@@ -295,6 +303,7 @@ export const LANDMARKS = [
     name: 'Westfield Mission Valley',
     u: 0.5680, v: 0.0860, rot: 352, kind: 'commercial',
     parts: [[0, 0, 230, 110, 16], [0, 90, 180, 50, 13]],
+    apron: [290, 180],
     clearM: 170,
   },
   {
@@ -310,6 +319,7 @@ export const LANDMARKS = [
       [86, 20, 76, 40, 24],
       [10, 80, 100, 44, 20],
     ],
+    apron: [200, 130],
     clearM: 120,
   },
   {
@@ -324,6 +334,7 @@ export const LANDMARKS = [
       [110, 66, 70, 60, 30],
       [0, -80, 130, 44, 18],
     ],
+    apron: [240, 170],
     clearM: 150,
   },
 
@@ -345,6 +356,7 @@ export const LANDMARKS = [
     name: 'Pechanga Arena',
     u: 0.2720, v: 0.3020, rot: 14, kind: 'commercial',
     parts: [[0, 0, 130, 120, 30], [0, 0, 100, 92, 36]],
+    apron: [330, 270],
     clearM: 200,
   },
   {
@@ -359,6 +371,7 @@ export const LANDMARKS = [
       [20, -34, 18, 18, 60],        // the tower
       [-40, 54, 240, 60, 16],       // the parking structures
     ],
+    apron: [340, 130, -20, 60],
     clearM: 160,
   },
   {
@@ -387,6 +400,7 @@ export const LANDMARKS = [
       [140, 10, 60, 50, 58],
       [0, 90, 200, 60, 18],
     ],
+    apron: [250, 140],
     clearM: 120,
   },
   {
@@ -401,6 +415,7 @@ export const LANDMARKS = [
       [90, -90, 40, 190, 6],
       [0, 90, 260, 60, 20],
     ],
+    apron: [300, 90, 0, 100],
     clearM: 100,
   },
   {
@@ -417,7 +432,7 @@ export const LANDMARKS = [
     name: 'Hotel del Coronado',
     // At the ocean end of Orange Avenue: a sprawling red-roofed timber pile
     // with a conical turret, and nothing else near it above three storeys.
-    u: 0.5450, v: 0.7950, rot: 32, kind: 'commercial',
+    u: 0.5420, v: 0.8180, rot: 62, kind: 'commercial',
     parts: [
       [0, 0, 130, 90, 24],
       [-64, -40, 26, 26, 38],       // the turret
@@ -429,7 +444,7 @@ export const LANDMARKS = [
   {
     id: 'coronado_ferry',
     name: 'Coronado Ferry Landing',
-    u: 0.5250, v: 0.7060, rot: 32, kind: 'commercial',
+    u: 0.5520, v: 0.7020, rot: 62, kind: 'commercial',
     parts: [[0, 0, 70, 30, 10], [40, 20, 40, 22, 8]],
     clearM: 50,
   },
@@ -439,7 +454,7 @@ export const LANDMARKS = [
     // The hangar row along the runway's north side, and the carrier piers on
     // the channel. A supercarrier alongside is 330 m long and is, from the
     // air, the single most identifiable object on this map.
-    u: 0.3980, v: 0.6060, rot: 22, kind: 'military',
+    u: 0.4100, v: 0.6060, rot: 22, kind: 'military',
     parts: [
       [-150, 0, 120, 70, 26],
       [0, 0, 120, 70, 26],
@@ -451,7 +466,7 @@ export const LANDMARKS = [
   {
     id: 'carrier_pier',
     name: 'North Island carrier piers',
-    u: 0.4520, v: 0.6320, rot: 40, kind: 'military', water: true,
+    u: 0.5320, v: 0.6420, rot: 40, kind: 'military', water: true,
     parts: [
       [0, 0, 400, 40, 6],               // the pier
       [0, -60, 330, 40, 20],            // a carrier alongside: hull
@@ -504,6 +519,7 @@ export const LANDMARKS = [
       [0, 0, 340, 60, 18],
       [0, 110, 300, 50, 16],
     ],
+    apron: [430, 280],
     clearM: 260,
   },
   {
@@ -511,6 +527,7 @@ export const LANDMARKS = [
     name: 'Westfield Plaza Bonita',
     u: 0.9260, v: 0.8760, rot: 4, kind: 'commercial',
     parts: [[0, 0, 210, 110, 16], [0, 90, 170, 50, 13]],
+    apron: [280, 170],
     clearM: 170,
   },
 ];
@@ -526,8 +543,13 @@ export function landmarkBoxes(lm, frameW, frameH) {
   const sin = Math.sin(t);
   const cx = lm.u * frameW;
   const cy = lm.v * frameH;
-  const parts = lm.parts ?? [[0, 0, lm.w ?? 20, lm.d ?? 20, lm.h ?? 10]];
-  return parts.map(([dx, dy, w, d, h, base]) => {
+  const parts = [...(lm.parts ?? [[0, 0, lm.w ?? 20, lm.d ?? 20, lm.h ?? 10]])];
+  if (lm.apron) {
+    const [aw, ad, adx = 0, ady = 0] = lm.apron;
+    // First in the list so it goes down before what stands on it.
+    parts.unshift([adx, ady, aw, ad, 0.12, 0, 'parking']);
+  }
+  return parts.map(([dx, dy, w, d, h, base, kindOverride]) => {
     const x = cx + dx * cos - dy * sin;
     const y = cy + dx * sin + dy * cos;
     return {
@@ -538,7 +560,7 @@ export function landmarkBoxes(lm, frameW, frameH) {
       d: d,
       h,
       base: base ?? 0,
-      kind: lm.kind ?? 'commercial',
+      kind: kindOverride ?? lm.kind ?? 'commercial',
       district: lm.id,
       landmark: true,
       water: !!lm.water,

@@ -148,11 +148,30 @@ function corridorDist(pts, u, v) {
   return distToLine(pts, u, v) * FRAME.widthM;
 }
 
-/** Metres to the nearest freeway carriageway edge; negative means on it. */
+/**
+ * Metres to the nearest freeway carriageway edge; negative means on it.
+ *
+ * Routes flagged `surface` are freeway numbers on ordinary streets — SR-75
+ * through Coronado is Third and Fourth Street, a one-way couplet with houses
+ * either side. They are reported as far away so the caller's freeway padding
+ * does not apply; the arterial clearance still keeps buildings off the tarmac.
+ */
 export function freewayClearance(u, v) {
   let best = Infinity;
   for (const f of FREEWAYS) {
     if (f.bridge) continue;              // a bridge has city underneath it
+    if (f.surface) continue;             // a street, whatever the shield says
+    const d = corridorDist(f.pts, u, v) - f.width / 2;
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/** Surface-running freeway routes, kept clear like a wide arterial. */
+export function surfaceRouteClearance(u, v) {
+  let best = Infinity;
+  for (const f of FREEWAYS) {
+    if (!f.surface) continue;
     const d = corridorDist(f.pts, u, v) - f.width / 2;
     if (d < best) best = d;
   }
@@ -332,6 +351,7 @@ function makeTest(field, opts) {
     if (slopeAt(field, u, v) > maxSlope) return false;
     if (freewayClearance(u, v) < freewayPad) return false;
     if (needArterial && arterialClearance(u, v) < needArterial) return false;
+    if (needArterial && surfaceRouteClearance(u, v) < needArterial) return false;
     return true;
   };
 }
@@ -339,6 +359,13 @@ function makeTest(field, opts) {
 // ── Streets ─────────────────────────────────────────────────────────────────
 
 const SAMPLE_M = 18;     // how finely a candidate street line is walked
+
+// One line in every this-many becomes a collector: the street with the bus, the
+// shops on the corner and twice the width. Six is about right for a streetcar
+// plat of 60-90 m blocks — roughly every half kilometre, which is what walking
+// distance to a bus stop actually was when these were laid out.
+const COLLECTOR_EVERY = 6;
+const COLLECTOR_SCALE = 1.7;
 
 /**
  * Walk one line of a district's grid and return the runs of it that are
@@ -528,6 +555,20 @@ function massIndustrial(w, d, h, r) {
   return parts;
 }
 
+/**
+ * Parking. Not a building — a flat pad a hand's width above the ground.
+ *
+ * It is worth its own kind because from the air it is the loudest single
+ * signature this city has. Southern California built its commercial strip
+ * around the car, and the aprons around a strip mall, the lots ringing the
+ * stadium and the acres of asphalt at Kearny Mesa's tilt-ups are collectively a
+ * bigger share of the ground than the buildings on it. Leave them out and every
+ * commercial block reads as a shed sitting on a lawn.
+ */
+function massParking(w, d) {
+  return [[0, 0, w, d, 0.12]];
+}
+
 /** Everything else keeps its single box. */
 function massDefault(w, d, h) {
   return [[0, 0, w, d, h]];
@@ -541,6 +582,7 @@ function massing(kind, w, d, h, r) {
     case 'tower': return massTower(w, d, h, r);
     case 'commercial': return massCommercial(w, d, h, r);
     case 'industrial': return massIndustrial(w, d, h, r);
+    case 'parking': return massParking(w, d);
     default: return massDefault(w, d, h);
   }
 }
@@ -557,11 +599,22 @@ function emit(fr, d, out, ca, cb, w, dpt, h, kind, r, simple = false) {
   const sin = Math.sin(t);
   const parts = simple ? massDefault(w, dpt, h) : massing(kind, w, dpt, h, r);
   for (const [dx, dy, pw, pd, ph, base] of parts) {
-    if (pw <= 0.5 || pd <= 0.5 || ph <= 0.2) continue;
+    // Drops degenerate parts. The height floor has to stay below a parking
+    // pad's 12 cm — at 0.2 m it silently swallowed every acre of asphalt on
+    // the map and the only surviving car parks were the twelve hand-placed
+    // landmark aprons.
+    if (pw <= 0.5 || pd <= 0.5 || ph <= 0.05) continue;
     const [u, v] = toUv(fr, ca + dx * cos - dy * sin, cb + dx * sin + dy * cos);
     out.push({ u, v, rot, w: pw, d: pd, h: ph, base: base ?? 0, kind, district: d.id });
   }
 }
+
+/**
+ * The kinds whose blocks are surfaced. Housing is not one of them — a
+ * residential block is gardens and driveways, and paving it turns North Park
+ * into a retail park.
+ */
+const PAVED_KINDS = new Set(['commercial', 'industrial', 'military', 'campus']);
 
 /** Fill one block with parcels and put a building on each. */
 function fillBlock(fr, d, block, ok, r, out) {
@@ -595,6 +648,19 @@ function fillBlock(fr, d, block, ok, r, out) {
     if (!ok(u, v, 3)) return;
     emit(fr, d, out, ca, cb, w, dpt, pickHeight('tower', b.minH, b.maxH, r), b.kind, r);
     return;
+  }
+
+  // Everything that is not housing gets its block surfaced before anything is
+  // built on it. The pad goes down first so the buildings land on top of it.
+  // Not every block: a base has grass, a runway and a golf course as well as
+  // hardstanding, and paving all of it turns North Island into one black slab.
+  if (PAVED_KINDS.has(b.kind) && r() < (b.kind === 'military' ? 0.55 : 0.9)) {
+    const pa = (a0 + a1) / 2;
+    const pb = (b0 + b1) / 2;
+    const [pu, pv] = toUv(fr, pa, pb);
+    if (ok(pu, pv, 2)) {
+      emit(fr, d, out, pa, pb, bw * 0.94, bh * 0.94, 0.12, 'parking', r);
+    }
   }
 
   const nx = Math.max(1, Math.round(bw / b.lotW));
@@ -687,6 +753,16 @@ export function generateCity(opts = {}) {
       const stepB = g.blockH + g.aveW;
       const amp = g.curveAmp || 0;
 
+      // Street hierarchy. Every line was the same width, which is why a grid
+      // reads as graph paper rather than as a neighbourhood: real plats put a
+      // collector every four to eight blocks — the one with the bus route, the
+      // shops on the corner and twice the tarmac — and the rest are residential
+      // streets you could park across. One line in COLLECTOR_EVERY gets the
+      // wider section, and the block spacing is untouched, so the fabric does
+      // not move; only the road does.
+      const collector = (n) => (((n % COLLECTOR_EVERY) + COLLECTOR_EVERY)
+        % COLLECTOR_EVERY === 0);
+
       // Cross-street family: lines running along e1, stacked along e2.
       const jMin = Math.floor(fr.b0 / stepB) - 1;
       const jMax = Math.ceil(fr.b1 / stepB) + 1;
@@ -695,11 +771,12 @@ export function generateCity(opts = {}) {
         const salt = (hashStr(d.id) + j * 7919) & 0xffff;
         const off = amp ? (s) => (noise1(s / 420, salt) - 0.5) * 2 * amp : null;
         const runs = traceLine(fr, okHere, 1, cross, off, fr.a0 - stepA, fr.a1 + stepA, 44);
+        const wide = collector(j);
         for (const run of runs) {
           streets.push({
             district: d.id,
-            w: g.streetW,
-            kind: 'street',
+            w: wide ? g.streetW * COLLECTOR_SCALE : g.streetW,
+            kind: wide ? 'collector' : 'street',
             pts: amp ? run : simplifyStraight(run),
           });
           nStreet++;
@@ -714,11 +791,12 @@ export function generateCity(opts = {}) {
         const salt = (hashStr(d.id) + i * 104729) & 0xffff;
         const off = amp ? (s) => (noise1(s / 480, salt) - 0.5) * 2 * amp : null;
         const runs = traceLine(fr, okHere, 2, cross, off, fr.b0 - stepB, fr.b1 + stepB, 44);
+        const wide = collector(i);
         for (const run of runs) {
           streets.push({
             district: d.id,
-            w: g.aveW,
-            kind: 'avenue',
+            w: wide ? g.aveW * COLLECTOR_SCALE : g.aveW,
+            kind: wide ? 'collector' : 'avenue',
             pts: amp ? run : simplifyStraight(run),
           });
           nStreet++;
