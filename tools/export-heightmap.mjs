@@ -81,11 +81,18 @@ for (let r = 0; r < RES; r++) {
   }
 }
 
-// Landscape scale. Z is the awkward one: Unreal maps the full 16-bit range onto
-// 512 units at Z scale 100, so the scale that reproduces our metre range is
-// (range in cm) / 512.
+// Landscape scale. Z is the awkward one: one unit of Unreal's landscape Z scale
+// spans 512 m of the 16-bit height range, so the scale that reproduces our
+// metre range is (range in metres * 100) / 512.
+//
+// Note the encoded range is not centred on zero, and landscape-local Z=0 is the
+// 16-bit midpoint — so the imported actor also needs lifting to put the
+// waterline at world Z=0. See zOffsetUU below.
 const metresPerSample = FRAME.widthM / (RES - 1);
 const zScale = ((MAX_H - MIN_H) * 100) / 512;
+// Elevation that lands on the 16-bit midpoint, in centimetres — the lift the
+// Landscape actor needs so that 0 m of real elevation is world Z=0.
+const zOffsetUU = (MIN_H + (32768 / 65535) * (MAX_H - MIN_H)) * 100;
 
 const outPath = path.resolve(OUT);
 mkdirSync(path.dirname(outPath), { recursive: true });
@@ -105,10 +112,15 @@ const meta = {
     y: +(metresPerSample * 100).toFixed(3),
     z: +zScale.toFixed(3),
   },
+  // Actor Z location that puts sea level on world Z=0. Landscape-local Z=0 is
+  // the 16-bit midpoint, which here is well above the waterline; import without
+  // this and the whole coastline sits underwater.
+  unrealLandscapeZOffsetUU: +(zOffsetUU).toFixed(1),
   note:
-    'Import as 16-bit raw. Set the XYZ scale above. Z scale reproduces the '
-    + `${MIN_H}..${MAX_H} m range: Unreal maps full 16-bit onto 512 uu at Z=100, `
-    + 'so scale = range_cm / 512. Sea level lands at '
+    'Import as 16-bit raw. Set the XYZ scale above and lift the actor by '
+    + `unrealLandscapeZOffsetUU. Z scale reproduces the ${MIN_H}..${MAX_H} m `
+    + 'range: one unit of landscape Z scale spans 512 m of the 16-bit range, so '
+    + 'scale = range_m * 100 / 512. Sea level lands at '
     + `${(((0 - MIN_H) / (MAX_H - MIN_H)) * 65535) | 0} of 65535.`,
 };
 writeFileSync(outPath.replace(/\.r16$/, '.json'), JSON.stringify(meta, null, 2));
