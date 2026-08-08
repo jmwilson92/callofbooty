@@ -139,7 +139,7 @@ for (let r = 0; r < RES; r++) {
     } else {
       const land = landField(u, v);
       if (land > 0) {
-        h = reliefAt(u, v);
+        h = reliefAt(u, v, land);
         // Feather the last few metres to the shoreline so the coast is a beach
         // rather than a wall standing out of the water.
         const shore = Math.min(1, land / 0.004);
