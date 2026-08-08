@@ -420,6 +420,149 @@ function pickHeight(kind, minH, maxH, r) {
   }
 }
 
+
+// ── Massing ─────────────────────────────────────────────────────────────────
+//
+// A building is not a box. Everything here was a single flat-topped extrusion
+// until now, and at any distance the result reads as hatching rather than as
+// buildings — 113,000 identical rectangles with identical rooflines, which is
+// the tell that gives away a generated city faster than any wrong street.
+//
+// Each kind now gets a small vocabulary of parts. The rules are cheap and
+// specific rather than general, because what makes a bungalow read as a
+// bungalow (a hipped roof and a garage set forward of it) has nothing in
+// common with what makes a downtown block read as downtown (a podium filling
+// the block with a slender shaft standing out of it).
+//
+// Parts are [dx, dy, w, d, h, base] in the parcel's own frame — the same shape
+// the hand-authored landmarks use, so both go down the same path.
+
+/** A house: main mass, a hipped roof cap, and often a garage wing. */
+function massHouse(w, d, h, r) {
+  const parts = [[0, 0, w, d, h]];
+  // The roof. Two thirds of the footprint and a couple of metres tall reads as
+  // a hip from the air and as a pitch from the street, without the cost of
+  // actually modelling one.
+  parts.push([0, 0, w * 0.78, d * 0.78, 1.6 + r() * 1.4, h]);
+  if (r() < 0.55 && w > 9) {
+    // Garage or a side wing, lower than the house and set toward the street.
+    const gw = w * (0.30 + r() * 0.16);
+    const gd = d * (0.34 + r() * 0.14);
+    parts.push([(w - gw) / 2 * (r() < 0.5 ? -1 : 1), -(d - gd) / 2, gw, gd, 2.6 + r() * 0.8]);
+  }
+  return parts;
+}
+
+/** A rowhouse: one mass, sometimes with a taller rear wing off the alley. */
+function massRow(w, d, h, r) {
+  const parts = [[0, 0, w, d, h]];
+  if (r() < 0.4) parts.push([0, d * 0.30, w * 0.7, d * 0.34, h * (0.5 + r() * 0.4), h]);
+  else parts.push([0, 0, w * 0.86, d * 0.86, 0.8 + r() * 0.8, h]);
+  return parts;
+}
+
+/**
+ * A midrise block: a courtyard when the parcel can take one, an L otherwise.
+ *
+ * The courtyard is the signature of this density everywhere it occurs — a ring
+ * of building round a hole, five or six storeys, with the hole full of parking
+ * or a pool. A solid block of the same footprint reads as an office slab.
+ */
+function massMidrise(w, d, h, r) {
+  if (w > 26 && d > 26 && r() < 0.62) {
+    const t = Math.min(w, d) * (0.24 + r() * 0.08);   // wing thickness
+    return [
+      [0, -(d - t) / 2, w, t, h],
+      [0, (d - t) / 2, w, t, h],
+      [-(w - t) / 2, 0, t, d - t * 2, h],
+      [(w - t) / 2, 0, t, d - t * 2, h],
+    ];
+  }
+  const parts = [[0, 0, w, d, h]];
+  if (r() < 0.45) {
+    // A stair or lift core standing above the parapet.
+    parts.push([w * 0.2 * (r() < 0.5 ? -1 : 1), 0, w * 0.26, d * 0.26, 2.4 + r() * 1.6, h]);
+  }
+  return parts;
+}
+
+/**
+ * A tower: podium, shaft, and sometimes a setback crown.
+ *
+ * The podium is most of what makes a downtown street feel enclosed — the tower
+ * itself is set back and you barely see it from the pavement. Building only the
+ * shaft leaves streets that feel like a field with poles in it.
+ */
+function massTower(w, d, h, r) {
+  const podium = Math.min(h * 0.35, 12 + r() * 14);
+  const sw = w * (0.52 + r() * 0.22);
+  const sd = d * (0.52 + r() * 0.22);
+  const parts = [
+    [0, 0, w, d, podium],
+    [(w - sw) * (r() - 0.5) * 0.4, (d - sd) * (r() - 0.5) * 0.4, sw, sd, h - podium, podium],
+  ];
+  if (h > 60 && r() < 0.5) {
+    parts.push([0, 0, sw * 0.66, sd * 0.66, 4 + r() * 10, h]);
+  }
+  return parts;
+}
+
+/** Commercial: a big shed, an entry canopy, and rooftop plant. */
+function massCommercial(w, d, h, r) {
+  const parts = [[0, 0, w, d, h]];
+  if (r() < 0.5) parts.push([0, -(d / 2) - 3, w * 0.4, 6, Math.min(h, 4.5)]);
+  if (r() < 0.6) {
+    parts.push([w * (r() - 0.5) * 0.4, d * (r() - 0.5) * 0.4,
+      w * 0.22, d * 0.22, 1.8 + r() * 2.2, h]);
+  }
+  return parts;
+}
+
+/** Industrial: a long shed with a smaller office block against one end. */
+function massIndustrial(w, d, h, r) {
+  const parts = [[0, 0, w, d, h]];
+  const ow = w * (0.22 + r() * 0.12);
+  const od = d * (0.3 + r() * 0.15);
+  parts.push([(w - ow) / 2 * (r() < 0.5 ? -1 : 1), -(d - od) / 2 - od * 0.4,
+    ow, od, Math.max(4, h * 0.55)]);
+  return parts;
+}
+
+/** Everything else keeps its single box. */
+function massDefault(w, d, h) {
+  return [[0, 0, w, d, h]];
+}
+
+function massing(kind, w, d, h, r) {
+  switch (kind) {
+    case 'house': return massHouse(w, d, h, r);
+    case 'rowhouse': return massRow(w, d, h, r);
+    case 'midrise': return massMidrise(w, d, h, r);
+    case 'tower': return massTower(w, d, h, r);
+    case 'commercial': return massCommercial(w, d, h, r);
+    case 'industrial': return massIndustrial(w, d, h, r);
+    default: return massDefault(w, d, h);
+  }
+}
+
+/**
+ * Push one building's parts into the output, placed at a point in the
+ * district's local frame. `simple` skips the vocabulary and emits one box,
+ * which is what the park pavilions and the scattered military sheds want.
+ */
+function emit(fr, d, out, ca, cb, w, dpt, h, kind, r, simple = false) {
+  const rot = d.grid.rotDeg;
+  const t = rot * DEG;
+  const cos = Math.cos(t);
+  const sin = Math.sin(t);
+  const parts = simple ? massDefault(w, dpt, h) : massing(kind, w, dpt, h, r);
+  for (const [dx, dy, pw, pd, ph, base] of parts) {
+    if (pw <= 0.5 || pd <= 0.5 || ph <= 0.2) continue;
+    const [u, v] = toUv(fr, ca + dx * cos - dy * sin, cb + dx * sin + dy * cos);
+    out.push({ u, v, rot, w: pw, d: pd, h: ph, base: base ?? 0, kind, district: d.id });
+  }
+}
+
 /** Fill one block with parcels and put a building on each. */
 function fillBlock(fr, d, block, ok, r, out) {
   const b = d.build;
@@ -437,7 +580,7 @@ function fillBlock(fr, d, block, ok, r, out) {
     const cb = b0 + bh * (0.25 + r() * 0.5);
     const [u, v] = toUv(fr, ca, cb);
     if (!ok(u, v, 4)) return;
-    out.push({ u, v, rot: d.grid.rotDeg, w, d: dpt, h: pickHeight('midrise', b.minH, b.maxH, r), kind: b.kind, district: d.id });
+    emit(fr, d, out, ca, cb, w, dpt, pickHeight('midrise', b.minH, b.maxH, r), b.kind, r, true);
     return;
   }
 
@@ -450,7 +593,7 @@ function fillBlock(fr, d, block, ok, r, out) {
     const cb = (b0 + b1) / 2 + (r() - 0.5) * (bh - dpt) * 0.4;
     const [u, v] = toUv(fr, ca, cb);
     if (!ok(u, v, 3)) return;
-    out.push({ u, v, rot: d.grid.rotDeg, w, d: dpt, h: pickHeight('tower', b.minH, b.maxH, r), kind: b.kind, district: d.id });
+    emit(fr, d, out, ca, cb, w, dpt, pickHeight('tower', b.minH, b.maxH, r), b.kind, r);
     return;
   }
 
@@ -479,16 +622,7 @@ function fillBlock(fr, d, block, ok, r, out) {
       const [u, v] = toUv(fr, ca, cb);
       if (!ok(u, v, 3)) continue;
 
-      out.push({
-        u,
-        v,
-        rot: d.grid.rotDeg,
-        w,
-        d: dpt,
-        h: pickHeight(b.kind, b.minH, b.maxH, r),
-        kind: b.kind,
-        district: d.id,
-      });
+      emit(fr, d, out, ca, cb, w, dpt, pickHeight(b.kind, b.minH, b.maxH, r), b.kind, r);
     }
   }
 }
@@ -635,6 +769,7 @@ export function generateCity(opts = {}) {
           w: d.build.lotW * (0.6 + r() * 0.8),
           d: d.build.lotD * (0.6 + r() * 0.8),
           h: pickHeight(d.build.kind, d.build.minH, d.build.maxH, r),
+          base: 0,
           kind: d.build.kind,
           district: d.id,
         });
