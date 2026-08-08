@@ -217,26 +217,42 @@ export const VALLEYS = [
 // spine of how the map plays, so they follow the actual routes rather than
 // convenient straight lines.
 export const FREEWAYS = [
+  // Re-traced off a Google Maps capture and registered onto this frame with
+  // three landmarks — Cabrillo, downtown and National City. The registration
+  // checks out: National City lands on u 0.972, which is where PLACES
+  // independently puts it.
+  //
+  // The previous trace had I-8 starting too far east, SR-94 running south-east
+  // when it actually climbs north of east toward Lemon Grove, and SR-75 as one
+  // route when it is a bridge over the channel and then an ordinary road down
+  // the Silver Strand.
   { id: 'i5', width: 26, pts: [
-    [0.34, 0.000], [0.36, 0.060], [0.40, 0.140], [0.45, 0.230],
-    [0.505, 0.300], [0.545, 0.360], [0.575, 0.420], [0.605, 0.470],
-    [0.650, 0.530], [0.720, 0.600], [0.790, 0.660], [0.860, 0.720], [0.930, 0.780] ] },
+    [0.445, 0.000], [0.454, 0.082], [0.465, 0.217], [0.485, 0.298],
+    [0.513, 0.365], [0.547, 0.419], [0.582, 0.473], [0.616, 0.514],
+    [0.661, 0.567], [0.713, 0.615], [0.764, 0.655], [0.821, 0.702],
+    [0.878, 0.742], [0.935, 0.783], [0.992, 0.850] ] },
   { id: 'i8', width: 24, pts: [
-    [0.240, 0.140], [0.330, 0.108], [0.450, 0.078], [0.580, 0.056],
-    [0.720, 0.040], [0.860, 0.028], [1.000, 0.020] ] },
-  { id: 'i15', width: 22, pts: [
-    [0.880, 0.000], [0.885, 0.100], [0.890, 0.200], [0.888, 0.300],
-    [0.878, 0.400], [0.860, 0.470], [0.830, 0.530] ] },
+    [0.149, 0.153], [0.206, 0.153], [0.297, 0.136], [0.388, 0.116],
+    [0.490, 0.103], [0.582, 0.089], [0.690, 0.069], [0.809, 0.055],
+    [0.923, 0.042], [1.000, 0.035] ] },
   { id: 'i805', width: 22, pts: [
-    [0.800, 0.000], [0.820, 0.090], [0.845, 0.180], [0.868, 0.270],
-    [0.885, 0.360], [0.900, 0.460], [0.915, 0.560], [0.930, 0.660], [0.945, 0.770] ] },
+    [0.809, 0.000], [0.832, 0.082], [0.855, 0.177], [0.889, 0.285],
+    [0.923, 0.378], [0.958, 0.460], [0.986, 0.541], [1.000, 0.585] ] },
   { id: 'sr163', width: 18, pts: [
-    [0.700, 0.045], [0.680, 0.130], [0.664, 0.215], [0.648, 0.300], [0.628, 0.400] ] },
+    [0.650, 0.095], [0.659, 0.163], [0.665, 0.210], [0.670, 0.284],
+    [0.670, 0.365], [0.661, 0.433], [0.644, 0.487], [0.627, 0.514] ] },
   { id: 'sr94', width: 18, pts: [
-    [0.660, 0.500], [0.730, 0.510], [0.800, 0.525], [0.880, 0.540], [0.960, 0.555] ] },
-  // SR-75: the Coronado bridge, downtown across the bay to the island
-  { id: 'sr75', width: 16, pts: [
-    [0.640, 0.545], [0.600, 0.590], [0.560, 0.640], [0.520, 0.690], [0.492, 0.735] ] },
+    [0.650, 0.554], [0.718, 0.548], [0.809, 0.527], [0.901, 0.507],
+    [0.992, 0.498], [1.000, 0.497] ] },
+  // The Coronado bridge holds its deck; the Strand does not.
+  { id: 'sr75_bridge', width: 16, bridge: true, deckM: 62, pts: [
+    [0.678, 0.597], [0.650, 0.618], [0.616, 0.641], [0.582, 0.664],
+    [0.547, 0.682], [0.519, 0.696] ] },
+  { id: 'sr75_strand', width: 16, pts: [
+    [0.519, 0.696], [0.536, 0.783], [0.570, 0.864], [0.593, 0.945],
+    [0.616, 1.000] ] },
+  // I-15 is deliberately absent: it runs east of this frame's edge, and a stub
+  // drawn along the boundary would be a line rather than a freeway.
 ];
 
 // ── Places ──────────────────────────────────────────────────────────────────
