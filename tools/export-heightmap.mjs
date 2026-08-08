@@ -107,10 +107,16 @@ const MIN_H = -60;   // seabed
 const MAX_H = 180;   // highest mesa, plus headroom
 
 // The frame is wider than it is tall, so a square heightmap has to letterbox or
-// crop. Cropping loses coastline, so it letterboxes: v is sampled over the
-// frame's real aspect and the remainder is left at sea.
-const span = 1 / ASPECT;                 // v extent covered by a square sample
-const vOffset = (1 - span) / 2;
+// crop. Cropping loses coastline, so it letterboxes: the traced frame occupies a
+// band down the middle of the image and the rows either side are open sea.
+//
+// `band` is how much of the image height that band takes up, and `vOffset` is
+// where it starts. Going from an image row to a trace v means subtracting the
+// offset and dividing — the other way round samples v over [vOffset, 1-vOffset]
+// instead, which silently crops the northern and southern tenth of the county
+// and stretches what is left across the full height.
+const band = 1 / ASPECT;                 // image fraction the traced frame fills
+const vOffset = (1 - band) / 2;
 
 const heights = new Uint16Array(RES * RES);
 const mask = new Uint8Array(RES * RES);
@@ -120,8 +126,9 @@ let maxSeen = -Infinity;
 let landCells = 0;
 
 for (let r = 0; r < RES; r++) {
-  // Unreal's landscape Y runs the same way as the trace's v (north at v=0)
-  const v = vOffset + (r / (RES - 1)) * span;
+  // Unreal's landscape Y runs the same way as the trace's v (north at v=0).
+  // Outside 0..1 is the letterbox, and the sea-fill below handles it.
+  const v = (r / (RES - 1) - vOffset) / band;
   for (let c = 0; c < RES; c++) {
     const u = c / (RES - 1);
     const i = r * RES + c;
