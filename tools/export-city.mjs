@@ -25,9 +25,10 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { FRAME } from '../src/world/geo/SanDiegoGeo.js';
+import { FRAME, AIRFIELDS } from '../src/world/geo/SanDiegoGeo.js';
 import { generateCity, buildField } from '../src/world/geo/CityFabric.js';
 import { scatterNature, natureBoxes } from '../src/world/geo/NatureScatter.js';
+import { buildRoadFurniture } from '../src/world/geo/RoadFurniture.js';
 import { DISTRICTS } from '../src/world/geo/SanDiegoDistricts.js';
 import { RIVERS, PONDS, PARKS } from '../src/world/geo/SanDiegoNature.js';
 
@@ -62,6 +63,24 @@ console.log('  %d plants, %d rocks, %d water surfaces -> %d parts in %ss',
   nature.stats.plants, nature.stats.rocks, nature.stats.water, natBoxes.length,
   ((Date.now() - t1) / 1000).toFixed(1));
 for (const b of natBoxes) city.buildings.push(b);
+
+// Kerbs, lights, signs, interchanges, bridges and fences. Fenced ground is the
+// airfields plus everything a district calls military: those are the boundaries
+// you can see from the pavement, and they are most of what tells you that you
+// have walked off the city and onto a base.
+console.log('building the road furniture...');
+const t2 = Date.now();
+const fencePolys = [
+  ...AIRFIELDS.map((a) => a.poly),
+  ...DISTRICTS.filter((d) => d.build.kind === 'military').map((d) => d.poly),
+];
+const furniture = buildRoadFurniture(city, field, { fencePolys });
+console.log('  %d kerbs, %d lights, %d signs, %d interchanges, %d fence bays'
+  + ' -> %d parts in %ss',
+  furniture.stats.kerbs, furniture.stats.lights, furniture.stats.signs,
+  furniture.stats.interchanges, furniture.stats.fence, furniture.stats.total,
+  ((Date.now() - t2) / 1000).toFixed(1));
+for (const b of furniture.boxes) city.buildings.push(b);
 
 // Kinds become small integers in the binary. The order is written into the
 // JSON rather than assumed, so adding a kind later does not silently shift
@@ -113,6 +132,7 @@ const meta = {
     poly: pk.poly.map(([u, v]) => [r6(u), r6(v)]),
   })),
   nature: nature.stats,
+  furniture: furniture.stats,
   landmarks: city.landmarks.map((lm) => ({
     id: lm.id, name: lm.name, u: r6(lm.u), v: r6(lm.v), rot: lm.rot ?? 0,
   })),
