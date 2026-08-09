@@ -182,12 +182,13 @@ for (const a of city.arterials) {
     line(a.pts[i - 1][0], a.pts[i - 1][1], a.pts[i][0], a.pts[i][1], a.w, 128, 122, 112);
   }
 }
-// Parking first, so everything stands on it rather than beside it.
+// Surfaces first, so everything stands on them rather than beside them.
 for (const b of city.buildings) {
   if (b.kind === 'parking') rect(b.u, b.v, b.w, b.d, b.rot, 40, 40, 44);
+  else if (b.kind === 'runway') rect(b.u, b.v, b.w, b.d, b.rot, 176, 176, 172);
 }
 for (const b of city.buildings) {
-  if (b.kind === 'parking') continue;
+  if (b.kind === 'parking' || b.kind === 'runway') continue;
   const t = Math.min(1, b.h / 90);
   if (b.landmark) {
     rect(b.u, b.v, b.w, b.d, b.rot, 236, Math.round(150 + t * 60), 70);

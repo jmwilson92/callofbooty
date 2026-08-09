@@ -111,6 +111,37 @@ export const CORONADO = [
 
 export const LAND = [MAINLAND, POINT_LOMA, CORONADO];
 
+// ── Graded ground ───────────────────────────────────────────────────────────
+//
+// Airfields are cut and filled dead flat before anything else happens to them,
+// and that is a fact about the terrain rather than something you can paint on
+// top of it. Left alone, the coastal ramp puts a 20 m hill in the middle of
+// North Island's runways and a 9 m dip halfway down Lindbergh Field — a
+// runway that rides over a hill is wrong in a way no amount of asphalt fixes.
+//
+// `h` is the graded elevation in metres, `edge` the width of the blend back
+// into the natural ground, in normalised units.
+
+export const AIRFIELDS = [
+  {
+    id: 'lindbergh',
+    // Built on tideland fill between the harbour and the river, so it is low
+    // and level: 5 m, the whole 3 km of it.
+    h: 5.5,
+    edge: 0.009,
+    poly: [[0.284, 0.304], [0.466, 0.354], [0.454, 0.392], [0.272, 0.340]],
+  },
+  {
+    id: 'northisland',
+    // A sand island the Navy levelled. Two runways cross on it and neither
+    // has any business climbing.
+    h: 7.5,
+    edge: 0.010,
+    poly: [[0.330, 0.556], [0.412, 0.548], [0.474, 0.596], [0.470, 0.650],
+      [0.398, 0.664], [0.338, 0.638], [0.320, 0.594]],
+  },
+];
+
 // ── Water carved back out of the land ───────────────────────────────────────
 
 /** Mission Bay — the multi-lobe lagoon behind Mission Beach. */
@@ -435,6 +466,7 @@ function boxes() {
   _boxes = {
     mesas: MESAS.map((m) => ({ m, b: box(m.poly, (m.edge ?? 0.010) + 1e-4) })),
     valleys: VALLEYS.map((val) => ({ val, b: box(val.pts, val.halfW * 2.2 + 1e-4) })),
+    fields: AIRFIELDS.map((af) => ({ af, b: box(af.poly, af.edge + 1e-4) })),
   };
   return _boxes;
 }
@@ -505,5 +537,20 @@ export function reliefAt(u, v, land = null) {
     const floor = Math.max(val.floor, h - val.depth);
     h = h * (1 - cut) + Math.min(h, floor) * cut;
   }
+
+  // Graded ground goes last and wins. An airfield is levelled after the
+  // landform is there, not before, and applying it earlier would let the plain
+  // and the canyons climb back through it.
+  for (const { af, b } of B.fields) {
+    if (!inBox(b, u, v)) continue;
+    const inside = inPoly(af.poly, u, v);
+    const dist = distToPoly(af.poly, u, v);
+    if (!inside && dist >= af.edge) continue;
+    // Full strength inside, easing out across the blend.
+    const t = inside ? 1 : 1 - dist / af.edge;
+    const k = t * t * (3 - 2 * t);
+    h = h * (1 - k) + af.h * k;
+  }
+
   return h;
 }

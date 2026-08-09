@@ -38,6 +38,10 @@
  * asphalt is the part you see first from the air — Snapdragon's lot is bigger
  * than the bowl by a factor of four and reads as the landmark from a mile up.
  *
+ * `clearRect` is [w, d] of fabric cleared in the landmark's own rotated frame,
+ * for the things a radius cannot describe. A runway is 3 km long and 60 m
+ * wide; a circle big enough to clear its ends would erase half a district.
+ *
  * `clearM` is how far around it the procedural fabric is deleted. It defaults
  * to the footprint, but a stadium needs its car park cleared too, and a museum
  * on a park lawn needs nothing cleared at all.
@@ -476,6 +480,61 @@ export const LANDMARKS = [
     clearM: 0,
   },
 
+
+  // ── Airfields ────────────────────────────────────────────────────────────
+  //
+  // The ground under these is graded flat by AIRFIELDS in SanDiegoGeo — a
+  // runway that rides over a hill is wrong in a way no amount of asphalt
+  // fixes, and levelling is a fact about the terrain, not a decal on it.
+  {
+    id: 'san_runway',
+    name: 'Lindbergh Field runway 09/27',
+    // Single runway, 2,865 m, and the busiest single-runway airport in the
+    // country. It is the largest flat object on the map and reads from
+    // anywhere in the frame.
+    u: 0.3760, v: 0.3560, rot: 13, kind: 'runway',
+    parts: [
+      [0, 0, 2880, 61, 0.32],           // the runway
+      [0, -105, 2760, 23, 0.26],        // parallel taxiway, north side
+      [-1360, 0, 90, 150, 0.26],        // west turn pad
+      [1360, 0, 90, 150, 0.26],         // east turn pad
+    ],
+    clearRect: [3300, 560],
+  },
+  {
+    id: 'san_apron',
+    name: 'Lindbergh Field apron',
+    u: 0.3700, v: 0.3380, rot: 13, kind: 'runway',
+    parts: [[0, 0, 1500, 200, 0.24]],
+    clearRect: [1600, 260],
+  },
+  {
+    id: 'ni_runway_1129',
+    name: 'North Island runway 11/29',
+    u: 0.3930, v: 0.6070, rot: 20, kind: 'runway',
+    parts: [
+      [0, 0, 2300, 61, 0.32],
+      [0, 108, 2200, 23, 0.26],
+    ],
+    clearRect: [2500, 400],
+  },
+  {
+    id: 'ni_runway_1836',
+    name: 'North Island runway 18/36',
+    u: 0.3920, v: 0.5990, rot: 108, kind: 'runway',
+    parts: [
+      [0, 0, 1350, 61, 0.32],
+    ],
+    clearRect: [1500, 220],
+  },
+  {
+    id: 'ni_apron',
+    name: 'North Island flight line apron',
+    u: 0.4060, v: 0.5860, rot: 20, kind: 'runway',
+    parts: [[0, 0, 1100, 260, 0.24]],
+    clearRect: [1200, 320],
+  },
+
   // ── Point Loma ───────────────────────────────────────────────────────────
   {
     id: 'cabrillo_monument',
@@ -568,8 +627,19 @@ export function landmarkBoxes(lm, frameW, frameH) {
   });
 }
 
-/** Metres of procedural fabric to clear around a landmark. */
+/**
+ * The clearance around a landmark, as either a radius or a rotated rectangle.
+ * Returns { r } or { rect: [halfW, halfD], rot }.
+ */
 export function landmarkClearance(lm) {
+  if (lm.clearRect) {
+    return { rect: [lm.clearRect[0] / 2, lm.clearRect[1] / 2], rot: lm.rot ?? 0 };
+  }
+  return { r: landmarkRadius(lm) };
+}
+
+/** Metres of procedural fabric to clear around a landmark. */
+function landmarkRadius(lm) {
   if (lm.clearM != null) return lm.clearM;
   const parts = lm.parts ?? [[0, 0, lm.w ?? 20, lm.d ?? 20, lm.h ?? 10]];
   let r = 0;

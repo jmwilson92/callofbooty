@@ -12,7 +12,7 @@
 // consumer — the browser build and the Unreal build have to agree on where the
 // buildings are, and they only do that if neither of them rolls its own dice.
 
-import { FRAME, landField, reliefAt, inPoly, distToPoly, distToLine, FREEWAYS } from './SanDiegoGeo.js';
+import { FRAME, landField, reliefAt, inPoly, distToPoly, distToLine, FREEWAYS, AIRFIELDS } from './SanDiegoGeo.js';
 import { DISTRICTS, ARTERIALS } from './SanDiegoDistricts.js';
 import { LANDMARKS, landmarkBoxes, landmarkClearance } from './SanDiegoLandmarks.js';
 
@@ -340,6 +340,23 @@ function toUv(fr, a, b) {
  * green fingers of untouched canyon between them. Without it the grid runs
  * straight down a 35-degree escarpment and the whole thing looks painted on.
  */
+/**
+ * Is this point on graded airfield ground?
+ *
+ * Nothing procedural is built on an airfield. The terrain under one is levelled
+ * (see AIRFIELDS in SanDiegoGeo) and levelling it is exactly what made it
+ * attractive to the generator: dead flat, no slope, no water — the most
+ * buildable ground on the map, and it promptly covered North Island's runways
+ * in warehouses and car parks. What stands on an airfield is the flight line,
+ * and the flight line is hand-placed as a landmark.
+ */
+export function onAirfield(u, v) {
+  for (const af of AIRFIELDS) {
+    if (inPoly(af.poly, u, v)) return true;
+  }
+  return false;
+}
+
 function makeTest(field, opts) {
   const maxSlope = opts.maxSlope ?? 0.16;      // about 9 degrees
   const minElev = opts.minElev ?? 2.2;
@@ -349,6 +366,7 @@ function makeTest(field, opts) {
     if (landAt(field, u, v) <= 0.0006) return false;
     if (elevAt(field, u, v) < minElev) return false;
     if (slopeAt(field, u, v) > maxSlope) return false;
+    if (onAirfield(u, v)) return false;
     if (freewayClearance(u, v) < freewayPad) return false;
     if (needArterial && arterialClearance(u, v) < needArterial) return false;
     if (needArterial && surfaceRouteClearance(u, v) < needArterial) return false;
@@ -872,12 +890,19 @@ export function generateCity(opts = {}) {
   // Park's lawn need nothing cleared, and Fort Rosecrans is 400 m of cleared
   // ground with almost nothing on it, which is the point of it.
   if (opts.landmarks !== false && !only) {
-    const marks = LANDMARKS.map((lm) => ({
-      lm,
-      x: lm.u * FRAME.widthM,
-      y: lm.v * FRAME.heightM,
-      r: landmarkClearance(lm),
-    })).filter((m) => m.r > 0);
+    const marks = LANDMARKS.map((lm) => {
+      const c = landmarkClearance(lm);
+      const t = (c.rot ?? 0) * DEG;
+      return {
+        lm,
+        x: lm.u * FRAME.widthM,
+        y: lm.v * FRAME.heightM,
+        r: c.r ?? 0,
+        rect: c.rect ?? null,
+        cos: Math.cos(t),
+        sin: Math.sin(t),
+      };
+    }).filter((m) => m.r > 0 || m.rect);
 
     let cleared = 0;
     const kept = [];
@@ -888,6 +913,17 @@ export function generateCity(opts = {}) {
       for (const m of marks) {
         const dx = bx - m.x;
         const dy = by - m.y;
+        if (m.rect) {
+          // Into the landmark's own frame, then a box test. A runway is 3 km
+          // by 60 m; a circle big enough to clear its ends erases a district.
+          const a = dx * m.cos + dy * m.sin;
+          const c2 = -dx * m.sin + dy * m.cos;
+          if (Math.abs(a) < m.rect[0] && Math.abs(c2) < m.rect[1]) {
+            hit = true;
+            break;
+          }
+          continue;
+        }
         if (dx * dx + dy * dy < m.r * m.r) {
           hit = true;
           break;
