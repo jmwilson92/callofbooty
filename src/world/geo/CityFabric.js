@@ -610,12 +610,14 @@ function massing(kind, w, d, h, r) {
  * district's local frame. `simple` skips the vocabulary and emits one box,
  * which is what the park pavilions and the scattered military sheds want.
  */
-function emit(fr, d, out, ca, cb, w, dpt, h, kind, r, simple = false) {
+function emit(fr, d, out, ca, cb, w, dpt, h, kind, r, simple = false, use = null) {
   const rot = d.grid.rotDeg;
   const t = rot * DEG;
   const cos = Math.cos(t);
   const sin = Math.sin(t);
-  const parts = simple ? massDefault(w, dpt, h) : massing(kind, w, dpt, h, r);
+  const parts = use
+    ? massUse(use, w, dpt, r)
+    : (simple ? massDefault(w, dpt, h) : massing(kind, w, dpt, h, r));
   for (const [dx, dy, pw, pd, ph, base] of parts) {
     // Drops degenerate parts. The height floor has to stay below a parking
     // pad's 12 cm — at 0.2 m it silently swallowed every acre of asphalt on
@@ -623,7 +625,162 @@ function emit(fr, d, out, ca, cb, w, dpt, h, kind, r, simple = false) {
     // landmark aprons.
     if (pw <= 0.5 || pd <= 0.5 || ph <= 0.05) continue;
     const [u, v] = toUv(fr, ca + dx * cos - dy * sin, cb + dx * sin + dy * cos);
-    out.push({ u, v, rot, w: pw, d: pd, h: ph, base: base ?? 0, kind, district: d.id });
+    out.push({
+      u, v, rot, w: pw, d: pd, h: ph, base: base ?? 0,
+      kind: use ?? kind, district: d.id,
+    });
+  }
+}
+
+
+// ── What the commercial buildings actually are ──────────────────────────────
+//
+// A commercial block was one anonymous grey shed per parcel. Real commercial
+// strip is a specific and very legible set of things, and they differ from
+// each other in footprint and height far more than in colour: a filling
+// station is a kiosk under a 25 m canopy on a corner, a supermarket is an
+// 80 m box behind an acre of parking, a motel is two storeys wrapped round its
+// own car park, a multiplex is a windowless slab, and a business park is four
+// identical four-storey blocks facing a shared lot.
+//
+// Which one lands where is decided by position, not by dice alone. Corner
+// parcels get the uses that want two frontages — filling stations, fast food,
+// pharmacies. The biggest parcels get the ones that need the floor area.
+// Anything on a downtown block is an office, because a supermarket downtown
+// with its own car park is not a thing that happens.
+
+const USE_SPECS = {
+  // A pad is bigger than the building on it: a fast-food unit is 30 m of
+  // building on a 50 m lot, and capping restaurants at 40 m of frontage meant
+  // none were ever eligible for the 42-55 m lots this city actually has.
+  gas: { minW: 24, maxW: 60, h: [5, 6], corner: 3.0, weight: 5 },
+  restaurant: { minW: 14, maxW: 54, h: [5, 8], corner: 2.2, weight: 12 },
+  grocery: { minW: 46, maxW: 200, h: [8, 12], corner: 0.4, weight: 7 },
+  pharmacy: { minW: 28, maxW: 70, h: [6, 8], corner: 2.0, weight: 5 },
+  strip: { minW: 30, maxW: 160, h: [5, 9], corner: 0.8, weight: 14 },
+  theatre: { minW: 55, maxW: 200, h: [12, 18], corner: 0.3, weight: 2 },
+  motel: { minW: 40, maxW: 130, h: [6, 9], corner: 0.9, weight: 5 },
+  hotel: { minW: 34, maxW: 120, h: [18, 52], corner: 0.7, weight: 4 },
+  office: { minW: 26, maxW: 140, h: [12, 40], corner: 0.9, weight: 9 },
+  bank: { minW: 18, maxW: 52, h: [6, 10], corner: 1.8, weight: 4 },
+};
+
+/**
+ * Pick a use for a commercial parcel.
+ * `corner` is true when the parcel has two street frontages, `span` the larger
+ * of its two dimensions in metres.
+ */
+function pickUse(span, corner, downtown, r) {
+  if (downtown) return r() < 0.22 ? 'hotel' : 'office';
+  let total = 0;
+  const eligible = [];
+  for (const [id, spec] of Object.entries(USE_SPECS)) {
+    if (span < spec.minW || span > spec.maxW) continue;
+    const w = spec.weight * (corner ? spec.corner : 1);
+    if (w <= 0) continue;
+    eligible.push([id, w]);
+    total += w;
+  }
+  if (!eligible.length) return 'strip';
+  let n = r() * total;
+  for (const [id, w] of eligible) {
+    n -= w;
+    if (n <= 0) return id;
+  }
+  return eligible[eligible.length - 1][0];
+}
+
+/**
+ * Massing for a named commercial use. Returns parts in the parcel's frame.
+ * `w` and `d` are the buildable footprint the caller worked out; a use is free
+ * to occupy less of it, and most of them do — the rest is where the cars go.
+ */
+function massUse(use, w, d, r) {
+  switch (use) {
+    case 'gas': {
+      // Kiosk in a corner, canopy over the pumps, and nothing else on the lot.
+      const kw = Math.min(14, w * 0.34);
+      const kd = Math.min(11, d * 0.34);
+      return [
+        [-(w - kw) / 2, -(d - kd) / 2, kw, kd, 4.6],
+        [w * 0.10, d * 0.12, Math.min(26, w * 0.62), Math.min(13, d * 0.42), 0.5, 5.4],
+        [w * 0.10 - 9, d * 0.12, 0.8, 0.8, 5.4],
+        [w * 0.10 + 9, d * 0.12, 0.8, 0.8, 5.4],
+      ];
+    }
+    case 'restaurant': {
+      const bw = w * (0.44 + r() * 0.18);
+      const bd = d * (0.44 + r() * 0.18);
+      return [
+        [0, -(d - bd) / 2 * 0.5, bw, bd, 5 + r() * 2],
+        [0, -(d - bd) / 2 * 0.5, bw * 0.5, bd * 0.5, 1.4, 5 + r() * 2],
+      ];
+    }
+    case 'grocery': {
+      // The box is pushed to the back of the lot and the front is all asphalt.
+      const bw = w * (0.72 + r() * 0.16);
+      const bd = d * (0.44 + r() * 0.14);
+      return [
+        [0, (d - bd) / 2 * 0.7, bw, bd, 9 + r() * 3],
+        [0, (d - bd) / 2 * 0.7 - bd / 2 - 2, bw * 0.5, 4, 5.4],   // entry canopy
+        [bw * 0.3, (d - bd) / 2 * 0.7, bw * 0.2, bd * 0.3, 2.2, 9 + r() * 3],
+      ];
+    }
+    case 'pharmacy':
+    case 'bank': {
+      const bw = w * (0.5 + r() * 0.16);
+      const bd = d * (0.5 + r() * 0.16);
+      return [[0, 0, bw, bd, use === 'bank' ? 6 + r() * 4 : 6 + r() * 2]];
+    }
+    case 'strip': {
+      // An L of small units round the corner of the lot, parking in front.
+      const armW = w * (0.78 + r() * 0.16);
+      const armD = d * (0.3 + r() * 0.1);
+      const parts = [[0, (d - armD) / 2 * 0.8, armW, armD, 5.4 + r() * 2]];
+      if (r() < 0.55) {
+        const sideW = w * (0.24 + r() * 0.08);
+        parts.push([(w - sideW) / 2 * 0.8, 0, sideW, d * 0.5, 5.4 + r() * 2]);
+      }
+      return parts;
+    }
+    case 'theatre': {
+      // Windowless: one big slab with the lobby stuck on the front.
+      const bw = w * (0.6 + r() * 0.16);
+      const bd = d * (0.52 + r() * 0.14);
+      return [
+        [0, 0, bw, bd, 13 + r() * 5],
+        [0, -bd / 2 - 5, bw * 0.6, 10, 7],
+      ];
+    }
+    case 'motel': {
+      // Two storeys in an L or a U wrapped round its own car park.
+      const t = Math.min(11, Math.min(w, d) * 0.24);
+      const parts = [
+        [0, -(d - t) / 2, w * 0.9, t, 6.4],
+        [-(w - t) / 2, 0, t, d * 0.8, 6.4],
+      ];
+      if (r() < 0.5) parts.push([(w - t) / 2, 0, t, d * 0.8, 6.4]);
+      return parts;
+    }
+    case 'hotel': {
+      const bw = w * (0.4 + r() * 0.18);
+      const bd = d * (0.4 + r() * 0.18);
+      const podium = 6 + r() * 5;
+      const tall = 18 + r() * 34;
+      return [
+        [0, 0, w * 0.7, d * 0.5, podium],
+        [0, 0, bw, bd, tall - podium, podium],
+      ];
+    }
+    case 'office':
+    default: {
+      const bw = w * (0.6 + r() * 0.2);
+      const bd = d * (0.6 + r() * 0.2);
+      const hh = 12 + r() * 28;
+      const parts = [[0, 0, bw, bd, hh]];
+      if (r() < 0.5) parts.push([0, 0, bw * 0.3, bd * 0.3, 2.6, hh]);
+      return parts;
+    }
   }
 }
 
@@ -633,6 +790,12 @@ function emit(fr, d, out, ca, cb, w, dpt, h, kind, r, simple = false) {
  * into a retail park.
  */
 const PAVED_KINDS = new Set(['commercial', 'industrial', 'military', 'campus']);
+
+/**
+ * Districts where a commercial parcel is an office or a hotel and nothing
+ * else. A supermarket with its own car park does not happen downtown.
+ */
+const DOWNTOWN_BLOCKS = new Set(['downtown', 'eastvillage', 'littleitaly', 'bankershill']);
 
 /** Fill one block with parcels and put a building on each. */
 function fillBlock(fr, d, block, ok, r, out) {
@@ -706,7 +869,46 @@ function fillBlock(fr, d, block, ok, r, out) {
       const [u, v] = toUv(fr, ca, cb);
       if (!ok(u, v, 3)) continue;
 
-      emit(fr, d, out, ca, cb, w, dpt, pickHeight(b.kind, b.minH, b.maxH, r), b.kind, r);
+      // Commercial parcels become a named use. A parcel touching the block's
+      // corner has two street frontages, which is what a filling station or a
+      // fast-food unit is actually buying when it takes one.
+      if (b.kind === 'commercial') {
+        const corner = (i === 0 || i === nx - 1) && (j === 0 || j === ny - 1);
+        const downtown = DOWNTOWN_BLOCKS.has(d.id);
+
+        // Split the pad. A commercial parcel here is 45 to 70 m, and at that
+        // size the small uses can never be chosen — a filling station tops out
+        // at 60 m of frontage and a restaurant at 40, so the first version of
+        // this produced no petrol stations, no restaurants and no banks
+        // anywhere on the map. Real strip is exactly this: one big lot with
+        // two or three pads on it sharing the parking.
+        // Measured on the PARCEL, not on the footprint the generic path had
+        // already shrunk by the coverage factor. The specs are frontages — a
+        // multiplex needs 55 m of lot, not 55 m of building — and feeding it
+        // the footprint made every lot look 35% smaller than it was, so the
+        // big-format uses were unreachable and there were no cinemas at all.
+        const long = Math.max(pw, pd);
+        // Split fewer than half of them. At 62% the big-format uses went the
+        // other way — a supermarket needs 46 m of frontage and a multiplex 55,
+        // and splitting everything left twenty-one groceries and no cinemas.
+        const splits = (!downtown && long > 50 && r() < 0.42) ? 2 : 1;
+        const alongW = pw >= pd;
+        for (let k = 0; k < splits; k++) {
+          const sw = (alongW ? pw / splits : pw) - 3;
+          const sd = (alongW ? pd : pd / splits) - 3;
+          if (sw < 8 || sd < 8) continue;
+          const off = splits === 1 ? 0 : (k - (splits - 1) / 2);
+          const lotA = a0 + pw * (i + 0.5) + (alongW ? off * (pw / splits) : 0);
+          const lotB = b0 + pd * (j + 0.5) + (alongW ? 0 : off * (pd / splits));
+          const use = pickUse(Math.max(sw, sd), corner && k === 0, downtown, r);
+          emit(fr, d, out, lotA, lotB, sw, sd,
+            pickHeight(b.kind, b.minH, b.maxH, r), b.kind, r, false, use);
+        }
+        continue;
+      }
+
+      emit(fr, d, out, ca, cb, w, dpt,
+        pickHeight(b.kind, b.minH, b.maxH, r), b.kind, r);
     }
   }
 }
