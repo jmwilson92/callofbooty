@@ -27,7 +27,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FRAME } from '../src/world/geo/SanDiegoGeo.js';
 import { generateCity, buildField } from '../src/world/geo/CityFabric.js';
+import { scatterNature, natureBoxes } from '../src/world/geo/NatureScatter.js';
 import { DISTRICTS } from '../src/world/geo/SanDiegoDistricts.js';
+import { RIVERS, PONDS, PARKS } from '../src/world/geo/SanDiegoNature.js';
 
 const args = process.argv.slice(2);
 const arg = (name, dflt) => {
@@ -48,6 +50,18 @@ const t0 = Date.now();
 const city = generateCity({ field });
 console.log('  %d streets, %d buildings in %ss',
   city.streets.length, city.buildings.length, ((Date.now() - t0) / 1000).toFixed(1));
+
+// The natural layer goes into the same array. It is the same kind of record —
+// a box at a place with a size — and giving it a second file format would mean
+// two loaders, two verifications and two ways to be out of step.
+console.log('scattering the natural layer...');
+const t1 = Date.now();
+const nature = scatterNature(city, field);
+const natBoxes = natureBoxes(nature);
+console.log('  %d plants, %d rocks, %d water surfaces -> %d parts in %ss',
+  nature.stats.plants, nature.stats.rocks, nature.stats.water, natBoxes.length,
+  ((Date.now() - t1) / 1000).toFixed(1));
+for (const b of natBoxes) city.buildings.push(b);
 
 // Kinds become small integers in the binary. The order is written into the
 // JSON rather than assumed, so adding a kind later does not silently shift
@@ -86,6 +100,19 @@ const meta = {
   buildingFile: 'city-buildings.bin',
   buildingFields: ['u', 'v', 'rotDeg', 'widthM', 'depthM', 'heightM', 'kind', 'flags', 'baseM'],
   buildingFlags: { landmark: 1, water: 2 },
+  rivers: RIVERS.map((riv) => ({
+    id: riv.id, name: riv.name, w: riv.w,
+    pts: riv.pts.map(([u, v]) => [r6(u), r6(v)]),
+  })),
+  ponds: PONDS.map((pond) => ({
+    id: pond.id, name: pond.name, h: pond.h,
+    poly: pond.poly.map(([u, v]) => [r6(u), r6(v)]),
+  })),
+  parks: PARKS.map((pk) => ({
+    id: pk.id, name: pk.name, kind: pk.kind, cover: pk.cover,
+    poly: pk.poly.map(([u, v]) => [r6(u), r6(v)]),
+  })),
+  nature: nature.stats,
   landmarks: city.landmarks.map((lm) => ({
     id: lm.id, name: lm.name, u: r6(lm.u), v: r6(lm.v), rot: lm.rot ?? 0,
   })),
