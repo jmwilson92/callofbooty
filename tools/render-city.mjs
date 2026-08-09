@@ -15,6 +15,7 @@ import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { FRAME } from '../src/world/geo/SanDiegoGeo.js';
 import { generateCity, buildField, landAt, elevAt, slopeAt } from '../src/world/geo/CityFabric.js';
+import { scatterNature, natureBoxes } from '../src/world/geo/NatureScatter.js';
 import { DISTRICTS } from '../src/world/geo/SanDiegoDistricts.js';
 
 const args = process.argv.slice(2);
@@ -172,6 +173,13 @@ const city = generateCity({ field, only: ONLY ? ONLY.split(',') : null });
 console.log('  %d streets, %d buildings in %ss',
   city.streets.length, city.buildings.length, ((Date.now() - t0) / 1000).toFixed(1));
 
+// The natural layer, so the canyons and the parks are not bare in the preview
+// either. Same call the exporter makes.
+const nature = scatterNature(city, field);
+for (const b of natureBoxes(nature)) city.buildings.push(b);
+console.log('  %d plants, %d rocks, %d water',
+  nature.stats.plants, nature.stats.rocks, nature.stats.water);
+
 for (const s of city.streets) {
   for (let i = 1; i < s.pts.length; i++) {
     line(s.pts[i - 1][0], s.pts[i - 1][1], s.pts[i][0], s.pts[i][1], s.w, 86, 86, 90);
@@ -186,9 +194,15 @@ for (const a of city.arterials) {
 for (const b of city.buildings) {
   if (b.kind === 'parking') rect(b.u, b.v, b.w, b.d, b.rot, 40, 40, 44);
   else if (b.kind === 'runway') rect(b.u, b.v, b.w, b.d, b.rot, 176, 176, 172);
+  else if (b.kind === 'water') rect(b.u, b.v, b.w, b.d, b.rot, 38, 92, 118);
 }
+const GREEN = { tree: [46, 92, 40], palm: [62, 108, 46], shrub: [64, 88, 48] };
 for (const b of city.buildings) {
-  if (b.kind === 'parking' || b.kind === 'runway') continue;
+  const leaf = GREEN[b.kind];
+  if (leaf) { rect(b.u, b.v, b.w, b.d, b.rot, leaf[0], leaf[1], leaf[2]); continue; }
+  if (b.kind === 'rock') { rect(b.u, b.v, b.w, b.d, b.rot, 128, 118, 102); continue; }
+  if (b.kind === 'parking' || b.kind === 'runway' || b.kind === 'water'
+      || b.kind === 'tree_trunk') continue;
   const t = Math.min(1, b.h / 90);
   if (b.landmark) {
     rect(b.u, b.v, b.w, b.d, b.rot, 236, Math.round(150 + t * 60), 70);
