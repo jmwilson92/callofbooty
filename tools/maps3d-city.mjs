@@ -239,6 +239,8 @@ console.log('extracting %d buildings...', kids.length);
 const out = [];
 let skipped = 0;
 let split = 0;
+let flatParts = 0;
+const PAD_H = 0.15;
 let hullPts = 0;
 const t0 = Date.now();
 
@@ -251,7 +253,19 @@ for (let n = 0; n < kids.length; n++) {
 
   const roofY = (node.translation ?? [0, 0, 0])[1];
   const heightM = -acc.min[1];                 // extruded down to the terrain
-  if (!(heightM > 0.4)) { skipped++; continue; }
+  // Height zero is not a reason to drop a building, it is a fact about it.
+  //
+  // 299 parts across 134 structures come through with no extrusion at all —
+  // exactly 0 m, names ending _part_N and _footprint_base — and covering
+  // 0.53 km2, the largest of them 243 x 257 m. They are not podiums of
+  // buildings placed elsewhere: not one of those 134 ids has a part with any
+  // height. The capture simply has no height for them.
+  //
+  // Dropping them leaves holes in the city. Inventing a height would be
+  // fabrication. So they are laid as pads, which is what the data says they
+  // are, and counted out loud so the gap is visible rather than silent.
+  const flat = !(heightM > 0.4);
+  if (flat) flatParts++;
 
   // Roof vertices only: the walls duplicate the plan at every depth, and the
   // hull only needs the outline once.
@@ -265,7 +279,9 @@ for (let n = 0; n < kids.length; n++) {
   const rect = minAreaRect(convexHull(pts));
   if (!rect || !(rect.w > 0.2) || !(rect.d > 0.2)) { skipped++; continue; }
 
-  for (const piece of decompose(pts, rect)) {
+  const pieces = decompose(pts, rect);
+  split += pieces.length - 1;        // extra parts, not pieces
+  for (const piece of pieces) {
     // Mercator -> ground. Widths scale by K like everything horizontal.
     out.push({
       u: toU(piece.cx),
@@ -275,12 +291,11 @@ for (let n = 0; n < kids.length; n++) {
       rot: piece.rotDeg,
       w: piece.w * K,
       d: piece.d * K,
-      h: heightM,
+      h: flat ? PAD_H : heightM,
       base: 0,
       roofY,
-      kind: 'building',
+      kind: flat ? 'pad' : 'building',
     });
-    if (piece !== rect) split++;
   }
 
   if ((n & 8191) === 0 && n) process.stdout.write(`  ${n}/${kids.length}\r`);
@@ -290,6 +305,10 @@ console.log('extracted %d parts from %d buildings, skipped %d, in %ss',
   out.length, kids.length - skipped, skipped, ((Date.now() - t0) / 1000).toFixed(1));
 console.log('%d extra parts from splitting footprints a single rectangle fitted '
   + 'badly', split);
+if (flatParts) {
+  console.log('%d parts had no height in the capture at all and are laid as '
+    + 'pads rather than dropped', flatParts);
+}
 console.log('mean roof polygon: %s vertices',
   (hullPts / Math.max(1, out.length)).toFixed(1));
 
@@ -315,7 +334,18 @@ console.log('outside the frame: %d      outside the playable rect: %d', offFrame
 
 // ── Write ───────────────────────────────────────────────────────────────────
 
-const kinds = ['building'];
+// Derived from what was actually built, never a literal kept in step by hand.
+// The road pass learned this the expensive way: its hand-kept list left 27,784
+// street lights carrying a kind index past the end of the array, present in the
+// buffer and nameable by nothing. Here it silently dropped every pad.
+const kinds = [];
+for (const b of out) if (!kinds.includes(b.kind)) kinds.push(b.kind);
+const kindIdx = new Map(kinds.map((k, i) => [k, i]));
+const unnamed = out.filter((b) => !kindIdx.has(b.kind)).length;
+if (unnamed) {
+  console.error('%d parts have a kind with no index', unnamed);
+  process.exit(1);
+}
 const STRIDE = 9;
 const bin = Buffer.alloc(out.length * STRIDE * 4);
 out.forEach((b, i) => {
@@ -326,7 +356,9 @@ out.forEach((b, i) => {
   bin.writeFloatLE(b.w, o + 12);
   bin.writeFloatLE(b.d, o + 16);
   bin.writeFloatLE(b.h, o + 20);
-  bin.writeFloatLE(0, o + 24);            // kind index
+  // Was a hardcoded 0. Harmless while 'building' was the only kind, and wrong
+  // the moment a second one appeared: every pad was written as a building.
+  bin.writeFloatLE(kindIdx.get(b.kind), o + 24);
   bin.writeFloatLE(0, o + 28);            // flags
   bin.writeFloatLE(b.base, o + 32);
 });
