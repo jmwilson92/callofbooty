@@ -135,6 +135,20 @@ const KERB_H = 0.15;
 const KERB_W = 0.40;
 const SHOULDER_M = 2.0;       // graded ground either side of the carriageway
 
+// Street lighting. Only on the classes that really carry it: an American
+// residential street is lit from poles on the power line, not from a highway
+// mast, and putting a 9 m column outside every house turns a suburb into a
+// retail park. Alternating sides, which is how these are actually spaced.
+const LAMP = {
+  arterial: { spacing: 32, poleH: 9.0, armM: 1.9 },
+  collector: { spacing: 40, poleH: 7.5, armM: 1.5 },
+};
+const LAMP_POLE_W = 0.22;
+const LAMP_HEAD_L = 1.5;
+const LAMP_HEAD_W = 0.34;
+const LAMP_HEAD_H = 0.22;
+const LAMP_CLEAR_M = 0.6;     // outside the kerb
+
 
 // ── Walk the centrelines in metres ──────────────────────────────────────────
 function walk(pts, stepM) {
@@ -344,7 +358,7 @@ const push = (u, v, rot, w, d, h, base, kind) =>
   parts.push({ u, v, rot, w, d, h, base, kind });
 
 let deckN = 0; let markN = 0; let kerbN = 0; let wetSteps = 0;
-let yielded = 0; let boxed = 0;
+let yielded = 0; let boxed = 0; let lampN = 0;
 let skipped = 0;
 for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
   const road = roadsDoc.roads[roadIndex];
@@ -409,12 +423,33 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
       }
     }
 
+    // Street lights, alternating sides, skipped inside a junction box.
+    const lamp = LAMP[road.cls];
+    if (lamp && paint) {
+      const phase = travelled % (lamp.spacing * 2);
+      const side = phase < lamp.spacing ? -1 : 1;
+      if (phase % lamp.spacing < s.len) {
+        const off = side * (halfW + KERB_W + LAMP_CLEAR_M);
+        const pu = (s.x + s.nrm[0] * off) / FRAME;
+        const pv = (s.y + s.nrm[1] * off) / FRAME;
+        push(pu, pv, s.head, LAMP_POLE_W, LAMP_POLE_W, lamp.poleH, 0, 'lamp_post');
+        // The head reaches back over the carriageway on its arm.
+        const hoff = off - side * lamp.armM;
+        push((s.x + s.nrm[0] * hoff) / FRAME, (s.y + s.nrm[1] * hoff) / FRAME,
+          s.head, LAMP_HEAD_L, LAMP_HEAD_W, LAMP_HEAD_H, lamp.poleH - LAMP_HEAD_H,
+          'lamp');
+        lampN += 2;
+      }
+    }
+
     travelled += s.len;
   }
 }
 console.log('%d deck segments, %d markings, %d kerb pieces', deckN, markN, kerbN);
 console.log('%d steps yielded to a more major road at a crossing, %d left '
   + 'unpainted inside a junction box', yielded, boxed);
+console.log('%d street light parts (%d lights) on arterials and collectors',
+  lampN, lampN / 2);
 console.log('%d bridges and %d steps over water left for '
   + 'tools/maps3d-bridges.mjs, which runs after the water is dug',
   skipped, wetSteps);
@@ -464,7 +499,15 @@ const STRIDE = cityDoc.buildingStride ?? 9;
 const oldBin = readFileSync(join(DIR, 'city-buildings.bin'));
 const oldKinds = cityDoc.kinds ?? ['building'];
 
-const newKinds = ['road_deck', 'line_white', 'line_yellow', 'kerb', 'sign_post', 'sign'];
+// Derived from what was actually built, not a list kept in step by hand. The
+// hand-kept list is how 27,784 street lights came out carrying a kind index
+// past the end of the array: the parts were in the buffer, the count in the log
+// was right, and nothing downstream could name them.
+const newKinds = [];
+const seenKind = new Set();
+for (const p of parts) {
+  if (!seenKind.has(p.kind)) { seenKind.add(p.kind); newKinds.push(p.kind); }
+}
 const kinds = [...oldKinds];
 for (const k of newKinds) if (!kinds.includes(k)) kinds.push(k);
 const kindIdx = new Map(kinds.map((k, i) => [k, i]));
@@ -543,4 +586,10 @@ writeFileSync(join(DIR, 'sandiego.png'), Buffer.concat([
 console.log('\n%d road parts + %d buildings = %d total',
   parts.length, total - parts.length, total);
 console.log('kinds: %s', kinds.join(', '));
+const unnamed = parts.filter((p) => !kindIdx.has(p.kind)).length;
+if (unnamed) {
+  console.error('%d parts have a kind with no index — the buffer is corrupt',
+    unnamed);
+  process.exit(1);
+}
 console.log('rewrote sandiego.png / .r16 with the graded corridors');
