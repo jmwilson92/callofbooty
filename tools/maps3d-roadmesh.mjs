@@ -123,6 +123,8 @@ const SPEC = {
   bridge: { skip: true },
   local: { centre: 'none', laneDashes: false, edge: false, kerb: true },
   service: { centre: 'none', laneDashes: false, edge: false, kerb: false },
+  // A footpath has no paint, no kerb and no lighting of its own.
+  path: { centre: 'none', laneDashes: false, edge: false, kerb: false },
 };
 
 const MARK_W = 0.14;          // painted line width, metres
@@ -190,7 +192,7 @@ function walk(pts, stepM) {
 // Bridges are NOT in this list. Grading ground up to meet a bridge deck is
 // what builds an embankment across the channel it crosses; a bridge stands on
 // piers instead, and the ground under it is left alone.
-const CARVE_ORDER = ['service', 'local', 'collector', 'arterial'];
+const CARVE_ORDER = ['path', 'service', 'local', 'collector', 'arterial'];
 const byClass = {};
 for (const r of roadsDoc.roads) (byClass[r.cls] ??= []).push(r);
 
@@ -214,7 +216,8 @@ for (const cls of CARVE_ORDER) {
       smooth[i] = sum / n;
     }
 
-    const halfCorridor = road.w / 2 + SHOULDER_M;
+    const nominal = cls === 'path' && road.w <= 5.0 ? 2.4 : road.w;
+    const halfCorridor = nominal / 2 + SHOULDER_M;
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i];
       const target = smooth[i];
@@ -234,7 +237,7 @@ for (const cls of CARVE_ORDER) {
           if (perp > halfCorridor) continue;
           // Full grade across the carriageway, easing out over the shoulder so
           // the verge meets the natural ground instead of stepping off it.
-          const t = Math.min(1, Math.max(0, (perp - road.w / 2) / SHOULDER_M));
+          const t = Math.min(1, Math.max(0, (perp - nominal / 2) / SHOULDER_M));
           const blend = 1 - t * t * (3 - 2 * t);
           const i2 = r * RES + c;
           height[i2] = height[i2] * (1 - blend) + target * blend;
@@ -262,7 +265,7 @@ console.log('carved %d heightmap samples (%.2f km2 of graded corridor)',
 // major road keeps its carriageway through the box, the minor one stops at the
 // kerb line, and neither paints through — which is what an at-grade
 // intersection looks like, and is the honest reading of what the data says.
-const RANK = { arterial: 4, collector: 3, bridge: 3, local: 2, service: 1 };
+const RANK = { arterial: 4, collector: 3, bridge: 3, local: 2, service: 1, path: 0 };
 const ZONE_PAD_M = 1.0;
 
 const runLen = roadsDoc.roads.map((r) => {
@@ -372,7 +375,17 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
   if (spec.skip) { skipped++; continue; }
   const steps = walk(road.pts, DECK_M);
   if (!steps.length) continue;
-  const halfW = road.w / 2;
+  // A path's measured width is not a measurement. The skeleton raster is
+  // 2.098 m a pixel, so a one-pixel-wide trail reports a half-width of one
+  // pixel and comes back as 4.2 m — the resolution floor, identical for every
+  // path in the city, and wide enough to drive down. Anything at or under the
+  // floor gets a nominal footpath width instead; anything clearly above it was
+  // genuinely measured and is kept, because that is a boardwalk or a plaza.
+  const PATH_NOMINAL_M = 2.4;
+  const PATH_FLOOR_M = 5.0;
+  const width = road.cls === 'path' && road.w <= PATH_FLOOR_M
+    ? PATH_NOMINAL_M : road.w;
+  const halfW = width / 2;
 
   let travelled = 0;
   let prevZone = 'clear';
@@ -402,7 +415,8 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
     const paint = zone === 'clear';
     // The deck's underside sits at the graded height; `base` is relative to
     // the terrain the consumer samples, which is now the same graded height.
-    push(u, v, s.head, s.len + 0.6, road.w, DECK_THICK, DECK_LIFT, 'road_deck');
+    push(u, v, s.head, s.len + 0.6, width, DECK_THICK, DECK_LIFT,
+      road.cls === 'path' ? 'path' : 'road_deck');
     deckN++;
 
     const markBase = DECK_LIFT + DECK_THICK + MARK_H;
@@ -486,7 +500,7 @@ console.log('%d bridges and %d steps over water left for '
 // list, and any end within a few metres of another road's end is a crossroads.
 const ends = [];
 for (const road of roadsDoc.roads) {
-  const rank = { arterial: 4, collector: 3, bridge: 3, local: 2, service: 1 }[road.cls] ?? 1;
+  const rank = { arterial: 4, collector: 3, bridge: 3, local: 2, service: 1, path: 0 }[road.cls] ?? 1;
   for (const idx of [0, road.pts.length - 1]) {
     ends.push({ x: road.pts[idx][0] * FRAME, y: road.pts[idx][1] * FRAME, rank, cls: road.cls });
   }

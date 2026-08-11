@@ -104,6 +104,11 @@ const CLASSES = [
   { node: 'Roads_Bridge', id: 'bridge', lanes: 2, centre: 'yellow', dashes: false, minLenM: 30, closePx: 8 },
   { node: 'Roads_Local', id: 'local', lanes: 2, centre: 'none', dashes: false, minLenM: 40 },
   { node: 'Roads_Service', id: 'service', lanes: 1, centre: 'none', dashes: false, minLenM: 40 },
+  // Paths carry more triangles than any other class in this capture — 118,494,
+  // against 89,454 for service roads — and were not being traced at all. Park
+  // paths, canyon trails, the beach boardwalk. minW is lower because the 3 m
+  // floor the roads use would turn a footpath into a lane.
+  { node: 'Roads_Paths', id: 'path', lanes: 1, centre: 'none', dashes: false, minLenM: 25, minW: 1.5 },
 ];
 
 // ── Rasterise one class ─────────────────────────────────────────────────────
@@ -693,7 +698,7 @@ for (const cls of CLASSES) {
     // because junction blobs pull a mean up and would make every street report
     // the width of its widest intersection.
     const hw = poly.map((p) => p.halfW).sort((a, b) => a - b);
-    const width = Math.max(3, Math.min(40, 2 * hw[Math.floor(hw.length / 2)]));
+    const width = Math.max(cls.minW ?? 3, Math.min(40, 2 * hw[Math.floor(hw.length / 2)]));
     totalKm += ln.len / 1000;
     out.push({ cls: cls.id, lanes: cls.lanes, centre: cls.centre, dashes: cls.dashes, w: +width.toFixed(2), pts });
   }
