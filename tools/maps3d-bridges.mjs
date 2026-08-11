@@ -114,9 +114,16 @@ function walk(pts, stepM) {
   return out;
 }
 
+// Flag 4 says "this part stands over water on purpose". The spawner drops
+// anything whose ground is below the waterline, which is right for a building
+// the plan put in the sea and catastrophic for a pier: without this, 462 deck
+// segments, 462 centre lines and 170 piers — the whole span of the Coronado
+// bridge over the bay — vanish on import, and the log reports a smaller number
+// without saying anything is wrong.
+const FLAG_STRUCTURE = 4;
 const parts = [];
 const push = (u, v, rot, w, d, h, base, kind) =>
-  parts.push([u, v, rot, w, d, h, kind, 0, base]);
+  parts.push([u, v, rot, w, d, h, kind, FLAG_STRUCTURE, base]);
 
 // What gets built here: every road classed as a bridge, plus any run of any
 // other road that ends up over water once the bay is dug. The second case is
@@ -391,6 +398,7 @@ writeFileSync(binPath, Buffer.concat([bin, add]));
 
 city.kinds = kinds;
 city.buildingCount = baseCount + parts.length;
+city.buildingFlags = { ...(city.buildingFlags ?? {}), structure: FLAG_STRUCTURE };
 city.bridges = {
   producedBy: 'tools/maps3d-bridges.mjs',
   baseCount,
