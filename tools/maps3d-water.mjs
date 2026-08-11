@@ -505,12 +505,80 @@ writeFileSync(join(OUT, 'sandiego.png'), Buffer.concat([
   chunk('IEND', Buffer.alloc(0)),
 ]));
 
+// ── Inland water surfaces ───────────────────────────────────────────────────
+//
+// The ocean actor is one plane at Z=0, so it covers every tidal body and
+// nothing else. That leaves 0.28 km2 of inland water — the San Diego River
+// through Mission Valley, sitting 6 to 11 m up — dug into a channel with no
+// water in it. A dark blue ditch.
+//
+// Each inland body gets its own surface instead, emitted as slabs into the
+// packed buffer at that body's own level. One slab per heightmap sample, which
+// is more parts than a rectangle covering would need but is exactly aligned to
+// the mask and needs no assumption about the shape of a river.
+const cityPath = join(OUT, 'city.json');
+let waterParts = 0;
+try {
+  const city = JSON.parse(readFileSync(cityPath, 'utf8'));
+  const STRIDE = city.buildingStride;
+  const binPath = join(OUT, city.buildingFile);
+
+  const base0 = city.waterSurfaces?.baseCount ?? city.buildingCount;
+  if (base0 !== city.buildingCount) {
+    console.log('truncating %d parts from an earlier water pass',
+      city.buildingCount - base0);
+  }
+  const oldBin = readFileSync(binPath).subarray(0, base0 * STRIDE * 4);
+  const kinds = city.kinds.slice();
+  if (!kinds.includes('water')) kinds.push('water');
+  const K_WATER = kinds.indexOf('water');
+
+  const SLAB_H = 0.12;
+  const rows = [];
+  for (let i = 0; i < wet.length; i++) {
+    if (!wet[i]) continue;
+    const body = byId.get(label[i]);
+    if (!body || body.tidal) continue;          // the ocean plane has those
+    const r = (i / RES) | 0; const c = i - r * RES;
+    // base is relative to the ground under the part, and the slab's top has to
+    // land on the body's own surface.
+    rows.push([c / (RES - 1), r / (RES - 1), 0, M_PER_PX, M_PER_PX, SLAB_H,
+      K_WATER, 0, body.surface - height[i] - SLAB_H]);
+  }
+  const add = Buffer.alloc(rows.length * STRIDE * 4);
+  for (let i = 0; i < rows.length; i++) {
+    for (let k = 0; k < STRIDE; k++) {
+      add.writeFloatLE(rows[i][k], (i * STRIDE + k) * 4);
+    }
+  }
+  writeFileSync(binPath, Buffer.concat([oldBin, add]));
+  city.kinds = kinds;
+  city.buildingCount = base0 + rows.length;
+  city.waterSurfaces = {
+    producedBy: 'tools/maps3d-water.mjs',
+    baseCount: base0,
+    parts: rows.length,
+    note: 'Inland water only. Tidal bodies are covered by the ocean actor at '
+      + 'Z=0; these sit at their own level.',
+  };
+  // Anything appended after this pass has just been truncated away with it.
+  delete city.bridges;
+  delete city.vegetation;
+  writeFileSync(cityPath, JSON.stringify(city));
+  waterParts = rows.length;
+  console.log('%d inland water slabs (%s km2) at their own levels',
+    rows.length, ((rows.length * M_PER_PX * M_PER_PX) / 1e6).toFixed(2));
+} catch (err) {
+  console.log('no city plan to add inland water surfaces to (%s)', err.message);
+}
+
 side.observedMetres = { min: +mn.toFixed(2), max: +mx.toFixed(2) };
 side.water = {
   producedBy: 'tools/maps3d-water.mjs',
   bodies: bodies.length,
   tidalBodies: tidalCount,
   surfaceKm2: +((wetPx * M_PER_PX * M_PER_PX) / 1e6).toFixed(2),
+  inlandSurfaceParts: waterParts,
   seaDepthMetres: SEA_DEPTH,
   inlandDepthMetres: INLAND_DEPTH,
   note: 'The capture has no bathymetry. Water bodies are dug from their own '
