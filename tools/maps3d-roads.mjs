@@ -368,6 +368,18 @@ function trace(skel, dist, minLenM) {
   }
   const used = new Uint8Array(RES * RES);
   const lines = [];
+  // Where the skeleton actually branches. This is the only honest way to tell
+  // an at-grade intersection from a flyover: two roads that cross with a branch
+  // node between them meet, two that cross without one pass. The stitch removes
+  // some of these nodes from the centrelines afterwards, so they are recorded
+  // here, before anything is joined.
+  const junctions = [];
+  for (let r = 1; r < RES - 1; r++) {
+    for (let c = 1; c < RES - 1; c++) {
+      const i = r * RES + c;
+      if (skel[i] && deg[i] >= 3) junctions.push(i);
+    }
+  }
 
   const walkFrom = (start) => {
     let i = start;
@@ -412,6 +424,7 @@ function trace(skel, dist, minLenM) {
   for (let i = 0; i < skel.length; i++) if (skel[i] && !used[i] && deg[i] === 1) emit(walkFrom(i));
   for (let i = 0; i < skel.length; i++) if (skel[i] && !used[i] && deg[i] !== 2) emit(walkFrom(i));
   for (let i = 0; i < skel.length; i++) if (skel[i] && !used[i]) emit(walkFrom(i));
+  lines.junctions = junctions;
   return lines;
 }
 
@@ -625,6 +638,7 @@ function stitch(lines, mPerPx) {
 // ── Run ─────────────────────────────────────────────────────────────────────
 const out = [];
 const report = [];
+const junctionPx = new Set();
 for (const cls of CLASSES) {
   const idx = byName[cls.node];
   if (idx === undefined) { report.push([cls.id, 0, 0, 0]); continue; }
@@ -652,6 +666,7 @@ for (const cls of CLASSES) {
   // fragments a bridge breaks into are individually shorter than the class
   // minimum, so filtering first throws away the pieces the stitch needs.
   const traced = trace(skel, dist, 8);
+  for (const i of traced.junctions ?? []) junctionPx.add(i);
   if (DEBUG.startsWith(cls.id + ':')) {
     const [bu0, bv0, bu1, bv1] = DEBUG.slice(cls.id.length + 1).split(',').map(Number);
     const bc0 = Math.round(bu0 * (RES - 1)); const bc1 = Math.round(bu1 * (RES - 1));
@@ -690,6 +705,20 @@ for (const cls of CLASSES) {
     + `(${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 }
 
+// Cluster the branch nodes onto a 12 m grid. One intersection produces a
+// cluster of them and the consumer only needs to know an intersection is there.
+const jcell = new Map();
+for (const i of junctionPx) {
+  const r = Math.floor(i / RES); const c = i - r * RES;
+  const x = (c / (RES - 1)); const y = (r / (RES - 1));
+  const key = `${Math.round(x * side.frameMetres.width / 12)},`
+    + `${Math.round(y * side.frameMetres.width / 12)}`;
+  if (!jcell.has(key)) jcell.set(key, [+x.toFixed(6), +y.toFixed(6)]);
+}
+const junctions = [...jcell.values()];
+console.log('%d skeleton branch samples -> %d intersections',
+  junctionPx.size, junctions.length);
+
 const totalKm = report.reduce((a, r) => a + (r[3] || 0), 0);
 console.log(`\n${out.length} centrelines, ${totalKm.toFixed(1)} km of road total`);
 const byCls = {};
@@ -712,9 +741,11 @@ writeFileSync(join(OUT, 'roads.json'), JSON.stringify({
   totalKm: +totalKm.toFixed(1),
   count: out.length,
   stitch: { gapMetres: STITCH_GAP_M, angleDegrees: STITCH_ANGLE },
+  junctionCount: junctions.length,
   note: 'pts are normalised (u, v) over the frame. w is the measured '
     + 'carriageway width in metres, from a distance transform, not the class '
     + 'nominal. lanes/centre/dashes drive the lane markings.',
   roads: out,
+  junctions,
 }));
 console.log('\nwrote %s', join(OUT, 'roads.json'));

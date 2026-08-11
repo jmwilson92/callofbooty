@@ -13,7 +13,7 @@ what the one before it wrote.
 | 1 | `maps3d-terrain.mjs` | `sandiego.r16`, `sandiego.png`, `sandiego.json` | Fixes the frame: 17.187 km square, the capture centred, a 2 km out-of-bounds ring around it. Every later step reads the frame out of the sidecar and none of them recompute it. |
 | 2 | `maps3d-city.mjs` | `city.json`, `city-buildings.bin` | 63,686 building footprints, min-area rectangles over the roof outlines. |
 | 3 | `maps3d-surfaces.mjs` | `sandiego-surfaces.png` | One RGB ground map: R road class, G land cover, B water. The landscape material samples it by world position. |
-| 4 | `maps3d-roads.mjs` | `roads.json` | Road centrelines recovered from the road surfaces by thinning: 7,962 runs, 1,067 km, each with a measured width. |
+| 4 | `maps3d-roads.mjs` | `roads.json` | Road centrelines recovered from the road surfaces by thinning: 7,775 runs, 1,832 km, each with a measured width. Three things had to be right before that number stopped being 1,067 km — see the note below. |
 | 5 | `maps3d-roadmesh.mjs` | appends to `city-buildings.bin`, rewrites the heightmap | Grades the corridors flat, then builds carriageway, lane markings, kerbs and signs on top of them. |
 | 6 | `maps3d-water.mjs` | rewrites the heightmap | Digs the water: bathymetry the capture does not have, since its water surfaces come back as ground 3.5 m above datum. **Must run after 5** so the road carve is already in the heightmap it reads. |
 | 7 | `maps3d-bridges.mjs` | appends to `city-buildings.bin` | Builds the bridges: ramped deck, markings, parapets and piers. **Must run after 6** — a part's elevation is relative to the terrain under it, so a bridge built before the dig sinks with the bed it spans. |
@@ -31,6 +31,33 @@ node tools/maps3d-bridges.mjs  --out out
 node tools/maps3d-vegetation.mjs --out out
 node tools/maps3d-preview.mjs  --out out
 ```
+
+## Recovering a centreline from a surface
+
+Three stages sit between a road surface and a centreline — rasterise, thin,
+trace — and each of them can lose the road without any stage reporting a
+problem. All three did, and the symptom was the same every time: a road that
+was plainly in the capture came out of the pipeline as nothing.
+
+- **Rasterising interiors only misses thin geometry.** Some of what the capture
+  calls a road is not a filled ribbon; a bridge deck is two edge strips a few
+  metres apart. At 2 m a pixel those sample to a dotted line. Triangle edges are
+  drawn as lines, so a sliver always comes out connected.
+- **The skeleton of a hollow ribbon is its two edges, not its centre.** Classes
+  can declare a `closePx`, and the mask is closed before the distance transform.
+- **A thinned diagonal is a staircase.** Its ordinary points have three
+  8-neighbours, so counting neighbours and calling three a junction stops the
+  walker every few pixels on any road not aligned to the raster — the fragments
+  then fall under the length floor and are discarded. Junctions are found with
+  the crossing number instead: 0-to-1 transitions once around the ring, which is
+  1 at an endpoint, 2 on a curve and 3 or more at a real branch, whatever the
+  orientation. This one alone was worth 500 km of road.
+
+`--debug <class>:<u0,v0,u1,v1> [--debugScale N]` dumps the raw mask, the closed
+mask and the skeleton for one class over one window as a PNG, with sample counts
+for each. Use it before theorising about a missing road. A clean skeleton with
+no traced runs on it points at the walker; an empty mask points at the
+rasteriser.
 
 ## Two things worth knowing before changing any of it
 

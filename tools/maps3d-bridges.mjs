@@ -8,17 +8,6 @@
 // supposed to cross. Once maps3d-water.mjs dug the bays out to -9 m, those
 // spans were left lying on the seabed.
 //
-// A NOTE ON WHAT IS NOT HERE. The capture's road layer has holes in it over
-// water — the Coronado bridge comes through as a 442 m fragment in the middle
-// of the bay, and the other 3 km of it is simply not in the file. An earlier
-// version of this script extended dangling spans along their own heading until
-// they made landfall and snapped them to the nearest road end. It reconnected
-// 15 ends and reconstructed 9.2 km of bridge, and rendering it showed the
-// extrapolation running off across open water nowhere near the real alignment.
-// Fabricated road in the wrong place is worse than missing road, so that came
-// back out. The fragment is built where the capture puts it, and the gap is
-// reported rather than guessed at.
-//
 // So bridges are built here instead of in maps3d-roadmesh.mjs, and this runs
 // AFTER the water. That ordering is the whole point. A part's elevation in the
 // packed buffer is relative to the terrain under it, so anything built before
@@ -136,11 +125,11 @@ const push = (u, v, rot, w, d, h, base, kind) =>
 // alone they lie on the seabed, which is worse than a bridge lying on the bay.
 // Chain the bridge runs before profiling them.
 //
-// The tracer splits a run wherever the skeleton branches, so the Coronado
-// bridge arrives as a handful of pieces laid end to end. Each piece is a
-// perfectly good centreline, but the deck profile is computed per run — ramp
-// up, level, ramp down — so building them separately gives a roller-coaster
-// with a dip at every seam. Joined first, the whole crossing gets one profile.
+// The tracer splits a run wherever the skeleton genuinely branches, so a long
+// crossing can still arrive as a few pieces laid end to end. Each piece is a
+// good centreline, but the deck profile is computed per run — ramp up, level,
+// ramp down — so building them separately gives a roller-coaster with a dip at
+// every seam. Joined first, the whole crossing gets one profile.
 const CHAIN_GAP_M = 150;
 // Over open water the rule can be much looser. Two bridge ends a few hundred
 // metres apart, both over the bay, pointing at each other, are the same bridge

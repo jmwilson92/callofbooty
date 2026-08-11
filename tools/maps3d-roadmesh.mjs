@@ -227,14 +227,127 @@ for (const cls of CARVE_ORDER) {
 console.log('carved %d heightmap samples (%.2f km2 of graded corridor)',
   carved, (carved * M_PER_SAMPLE * M_PER_SAMPLE) / 1e6);
 
+// ── Junction boxes ──────────────────────────────────────────────────────────
+//
+// Two centrelines that cross need one of them to give way, and until now
+// neither did: both decks were built through the crossing at the same
+// elevation, so the carriageways interpenetrated and the depth buffer picked a
+// winner per pixel. The lane markings were painted straight through as well,
+// which no real intersection has — the paint stops at the box.
+//
+// The capture cannot say which road is on top, because it drapes its roads on
+// the terrain: only 0.76% of road vertices sit more than 4 m above the ground
+// under them, and those are the bridges. In plan view a flyover and a
+// crossroads are the same picture. So nothing here invents a flyover. The more
+// major road keeps its carriageway through the box, the minor one stops at the
+// kerb line, and neither paints through — which is what an at-grade
+// intersection looks like, and is the honest reading of what the data says.
+const RANK = { arterial: 4, collector: 3, bridge: 3, local: 2, service: 1 };
+const ZONE_PAD_M = 1.0;
+
+const runLen = roadsDoc.roads.map((r) => {
+  let L = 0;
+  for (let i = 1; i < r.pts.length; i++) {
+    L += Math.hypot((r.pts[i][0] - r.pts[i - 1][0]) * FRAME,
+      (r.pts[i][1] - r.pts[i - 1][1]) * FRAME);
+  }
+  return L;
+});
+const xsegs = [];
+roadsDoc.roads.forEach((r, ri) => {
+  for (let i = 1; i < r.pts.length; i++) {
+    xsegs.push({
+      ri,
+      ax: r.pts[i - 1][0] * FRAME, ay: r.pts[i - 1][1] * FRAME,
+      bx: r.pts[i][0] * FRAME, by: r.pts[i][1] * FRAME,
+    });
+  }
+});
+const XCELL = 40;
+const key = (x, y) => `${Math.floor(x / XCELL)},${Math.floor(y / XCELL)}`;
+const segGrid = new Map();
+xsegs.forEach((sg, i) => {
+  const x0 = Math.min(sg.ax, sg.bx); const x1 = Math.max(sg.ax, sg.bx);
+  const y0 = Math.min(sg.ay, sg.by); const y1 = Math.max(sg.ay, sg.by);
+  for (let c = Math.floor(x0 / XCELL); c <= Math.floor(x1 / XCELL); c++) {
+    for (let r = Math.floor(y0 / XCELL); r <= Math.floor(y1 / XCELL); r++) {
+      const k = `${c},${r}`;
+      (segGrid.get(k) ?? segGrid.set(k, []).get(k)).push(i);
+    }
+  }
+});
+const zones = [];
+const seenPair = new Set();
+for (const list of segGrid.values()) {
+  for (let a = 0; a < list.length; a++) {
+    for (let b = a + 1; b < list.length; b++) {
+      const p = xsegs[list[a]]; const q = xsegs[list[b]];
+      if (p.ri === q.ri) continue;
+      const pk = list[a] < list[b] ? `${list[a]}_${list[b]}` : `${list[b]}_${list[a]}`;
+      if (seenPair.has(pk)) continue;
+      seenPair.add(pk);
+      const d1x = p.bx - p.ax; const d1y = p.by - p.ay;
+      const d2x = q.bx - q.ax; const d2y = q.by - q.ay;
+      const den = d1x * d2y - d1y * d2x;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = ((q.ax - p.ax) * d2y - (q.ay - p.ay) * d2x) / den;
+      const u = ((q.ax - p.ax) * d1y - (q.ay - p.ay) * d1x) / den;
+      if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+      const A = roadsDoc.roads[p.ri]; const B = roadsDoc.roads[q.ri];
+      const ra = RANK[A.cls] ?? 1; const rb = RANK[B.cls] ?? 1;
+      const aWins = ra !== rb ? ra > rb : runLen[p.ri] >= runLen[q.ri];
+      zones.push({
+        x: p.ax + d1x * t,
+        y: p.ay + d1y * t,
+        winner: aWins ? p.ri : q.ri,
+        loser: aWins ? q.ri : p.ri,
+        rWinner: (aWins ? B.w : A.w) / 2 + ZONE_PAD_M,
+        rLoser: (aWins ? A.w : B.w) / 2 + ZONE_PAD_M,
+      });
+    }
+  }
+}
+const zoneGrid = new Map();
+zones.forEach((z, i) => {
+  const rad = Math.max(z.rWinner, z.rLoser);
+  for (let c = Math.floor((z.x - rad) / XCELL); c <= Math.floor((z.x + rad) / XCELL); c++) {
+    for (let r = Math.floor((z.y - rad) / XCELL); r <= Math.floor((z.y + rad) / XCELL); r++) {
+      const k = `${c},${r}`;
+      (zoneGrid.get(k) ?? zoneGrid.set(k, []).get(k)).push(i);
+    }
+  }
+});
+/** How a step of run `ri` at (x, y) is affected: 'clear', 'box' or 'yield'. */
+function zoneAt(x, y, ri) {
+  const c = Math.floor(x / XCELL); const r = Math.floor(y / XCELL);
+  let state = 'clear';
+  for (let dc = -1; dc <= 1; dc++) {
+    for (let dr = -1; dr <= 1; dr++) {
+      for (const zi of zoneGrid.get(`${c + dc},${r + dr}`) ?? []) {
+        const z = zones[zi];
+        if (z.winner !== ri && z.loser !== ri) continue;
+        const mine = z.winner === ri;
+        const rad = mine ? z.rWinner : z.rLoser;
+        if (Math.hypot(z.x - x, z.y - y) > rad) continue;
+        if (!mine) return 'yield';       // the other road owns this ground
+        state = 'box';                   // mine, but do not paint through it
+      }
+    }
+  }
+  return state;
+}
+console.log('%d centreline crossings -> junction boxes', zones.length);
+
 // ── 2 & 3. Deck, markings, kerbs ────────────────────────────────────────────
 const parts = [];
 const push = (u, v, rot, w, d, h, base, kind) =>
   parts.push({ u, v, rot, w, d, h, base, kind });
 
 let deckN = 0; let markN = 0; let kerbN = 0; let wetSteps = 0;
+let yielded = 0; let boxed = 0;
 let skipped = 0;
-for (const road of roadsDoc.roads) {
+for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
+  const road = roadsDoc.roads[roadIndex];
   const spec = SPEC[road.cls] ?? SPEC.local;
   if (spec.skip) { skipped++; continue; }
   const steps = walk(road.pts, DECK_M);
@@ -246,6 +359,9 @@ for (const road of roadsDoc.roads) {
     const u = s.x / FRAME;
     const v = s.y / FRAME;
     if (wetAt(u, v)) { wetSteps++; travelled += s.len; continue; }
+    const zone = zoneAt(s.x, s.y, roadIndex);
+    if (zone === 'yield') { yielded++; travelled += s.len; continue; }
+    const paint = zone === 'clear';
     // The deck's underside sits at the graded height; `base` is relative to
     // the terrain the consumer samples, which is now the same graded height.
     push(u, v, s.head, s.len + 0.6, road.w, DECK_THICK, DECK_LIFT, 'road_deck');
@@ -259,21 +375,22 @@ for (const road of roadsDoc.roads) {
       markN++;
     };
 
-    if (spec.centre === 'double_yellow') {
+    if (!paint) boxed++;
+    if (paint && spec.centre === 'double_yellow') {
       offsetPart(-0.16, MARK_W, s.len + 0.4, 'line_yellow');
       offsetPart(0.16, MARK_W, s.len + 0.4, 'line_yellow');
-    } else if (spec.centre === 'yellow') {
+    } else if (paint && spec.centre === 'yellow') {
       offsetPart(0, MARK_W, s.len + 0.4, 'line_yellow');
     }
 
-    if (spec.edge) {
+    if (paint && spec.edge) {
       offsetPart(-(halfW - 0.35), MARK_W, s.len + 0.4, 'line_white');
       offsetPart(halfW - 0.35, MARK_W, s.len + 0.4, 'line_white');
     }
 
     // Lane dashes: one stripe per period, not per step, so the dash pattern is
     // a property of the road rather than of the tessellation.
-    if (spec.laneDashes) {
+    if (paint && spec.laneDashes) {
       const phase = travelled % DASH_PERIOD;
       if (phase < s.len) {
         for (const side of [-1, 1]) {
@@ -282,7 +399,7 @@ for (const road of roadsDoc.roads) {
       }
     }
 
-    if (spec.kerb) {
+    if (paint && spec.kerb) {
       for (const side of [-1, 1]) {
         const off = side * (halfW + KERB_W / 2);
         const ou = (s.x + s.nrm[0] * off) / FRAME;
@@ -296,6 +413,8 @@ for (const road of roadsDoc.roads) {
   }
 }
 console.log('%d deck segments, %d markings, %d kerb pieces', deckN, markN, kerbN);
+console.log('%d steps yielded to a more major road at a crossing, %d left '
+  + 'unpainted inside a junction box', yielded, boxed);
 console.log('%d bridges and %d steps over water left for '
   + 'tools/maps3d-bridges.mjs, which runs after the water is dug',
   skipped, wetSteps);
