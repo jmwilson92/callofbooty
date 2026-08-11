@@ -15,8 +15,9 @@ what the one before it wrote.
 | 3 | `maps3d-surfaces.mjs` | `sandiego-surfaces.png` | One RGB ground map: R road class, G land cover, B water. The landscape material samples it by world position. |
 | 4 | `maps3d-roads.mjs` | `roads.json` | Road centrelines recovered from the road surfaces by thinning: 7,962 runs, 1,067 km, each with a measured width. |
 | 5 | `maps3d-roadmesh.mjs` | appends to `city-buildings.bin`, rewrites the heightmap | Grades the corridors flat, then builds carriageway, lane markings, kerbs and signs on top of them. |
-| 6 | `maps3d-water.mjs` | rewrites the heightmap | Digs the water. **Must run after 5**: the road carve grades ground up to meet the deck and does it for bridges too, so run in the other order and the Coronado bridge leaves an embankment across the bay. |
-| 7 | `maps3d-vegetation.mjs` | appends to `city-buildings.bin` | Scatters trees, shrubs and rocks from the land cover, and street trees along the verges. Reads the buffer to find the buildings, so it runs after 2 and 5. |
+| 6 | `maps3d-water.mjs` | rewrites the heightmap | Digs the water: bathymetry the capture does not have, since its water surfaces come back as ground 3.5 m above datum. **Must run after 5** so the road carve is already in the heightmap it reads. |
+| 7 | `maps3d-bridges.mjs` | appends to `city-buildings.bin` | Builds the bridges: ramped deck, markings, parapets and piers. **Must run after 6** — a part's elevation is relative to the terrain under it, so a bridge built before the dig sinks with the bed it spans. |
+| 8 | `maps3d-vegetation.mjs` | appends to `city-buildings.bin` | Scatters trees, shrubs and rocks from the land cover, and street trees along the verges. Reads the buffer to find the buildings, so it runs after 2 and 5. |
 | — | `maps3d-preview.mjs` | `terrain-shaded.png` | Not part of the build. Shades the result the way the Unreal landscape material shades it and draws the packed buffer over the top, so a defect shows up here rather than in the editor. `--span 900 --centre 0.70,0.52 --name closeup` windows in on a few blocks. |
 
 ```sh
@@ -26,6 +27,7 @@ node tools/maps3d-surfaces.mjs capture.glb --sidecar out/sandiego.json --out out
 node tools/maps3d-roads.mjs    capture.glb --sidecar out/sandiego.json --out out
 node tools/maps3d-roadmesh.mjs --out out
 node tools/maps3d-water.mjs    capture.glb --out out
+node tools/maps3d-bridges.mjs  --out out
 node tools/maps3d-vegetation.mjs --out out
 node tools/maps3d-preview.mjs  --out out
 ```

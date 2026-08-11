@@ -26,7 +26,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { deflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 
 const args = process.argv.slice(2);
 const arg = (n, d) => {
@@ -56,6 +56,60 @@ const sampleAt = (u, v) => {
   return height[r * RES + c];
 };
 
+// Where the water is. maps3d-water.mjs has not run yet — it runs after this —
+// so the heightmap still says the bay is dry ground 3.5 m up. The surface map
+// knows better, and steps over water are left for maps3d-bridges.mjs to build
+// on piles once the bay has actually been dug.
+let wetPx = null; let wetW = 0;
+try {
+  const buf = readFileSync(join(DIR, 'sandiego-surfaces.png'));
+  let off = 8; const idat = [];
+  let w = 0; let h = 0;
+  while (off < buf.length) {
+    const len = buf.readUInt32BE(off);
+    const type = buf.toString('ascii', off + 4, off + 8);
+    const data = buf.subarray(off + 8, off + 8 + len);
+    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); }
+    else if (type === 'IDAT') idat.push(data);
+    else if (type === 'IEND') break;
+    off += 12 + len;
+  }
+  const rawPx = inflateSync(Buffer.concat(idat));
+  const stride = w * 3;
+  const px = Buffer.alloc(w * h * 3);
+  for (let y = 0; y < h; y++) {
+    const f = rawPx[y * (stride + 1)];
+    const line = rawPx.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    const out = px.subarray(y * stride, (y + 1) * stride);
+    const up = y ? px.subarray((y - 1) * stride, y * stride) : null;
+    for (let i = 0; i < stride; i++) {
+      const a = i >= 3 ? out[i - 3] : 0;
+      const b = up ? up[i] : 0;
+      const c = up && i >= 3 ? up[i - 3] : 0;
+      let v = line[i];
+      if (f === 1) v += a;
+      else if (f === 2) v += b;
+      else if (f === 3) v += (a + b) >> 1;
+      else if (f === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a); const pb = Math.abs(p - b); const pc = Math.abs(p - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      }
+      out[i] = v & 255;
+    }
+  }
+  wetPx = px; wetW = w;
+} catch (err) {
+  console.log('no surface map (%s) — roads over water cannot be detected',
+    err.message);
+}
+const wetAt = (u, v) => {
+  if (!wetPx) return false;
+  const c = Math.min(wetW - 1, Math.max(0, Math.round(u * (wetW - 1))));
+  const r = Math.min(wetW - 1, Math.max(0, Math.round(v * (wetW - 1))));
+  return wetPx[(r * wetW + c) * 3 + 2] > 0;
+};
+
 // ── What each class carries ─────────────────────────────────────────────────
 //
 // Deliberately not "every road gets everything". American residential streets
@@ -65,7 +119,8 @@ const sampleAt = (u, v) => {
 const SPEC = {
   arterial: { centre: 'double_yellow', laneDashes: true, edge: true, kerb: true },
   collector: { centre: 'yellow', laneDashes: false, edge: true, kerb: true },
-  bridge: { centre: 'yellow', laneDashes: false, edge: true, kerb: false },
+  // Bridges are built by tools/maps3d-bridges.mjs, after the water is dug.
+  bridge: { skip: true },
   local: { centre: 'none', laneDashes: false, edge: false, kerb: true },
   service: { centre: 'none', laneDashes: false, edge: false, kerb: false },
 };
@@ -79,6 +134,7 @@ const DECK_LIFT = 0.05;       // above the graded ground
 const KERB_H = 0.15;
 const KERB_W = 0.40;
 const SHOULDER_M = 2.0;       // graded ground either side of the carriageway
+
 
 // ── Walk the centrelines in metres ──────────────────────────────────────────
 function walk(pts, stepM) {
@@ -111,7 +167,10 @@ function walk(pts, stepM) {
 //
 // Minor classes first so majors win where they overlap: at a junction the
 // arterial's grade is the one that should survive, not the driveway's.
-const CARVE_ORDER = ['service', 'local', 'collector', 'bridge', 'arterial'];
+// Bridges are NOT in this list. Grading ground up to meet a bridge deck is
+// what builds an embankment across the channel it crosses; a bridge stands on
+// piers instead, and the ground under it is left alone.
+const CARVE_ORDER = ['service', 'local', 'collector', 'arterial'];
 const byClass = {};
 for (const r of roadsDoc.roads) (byClass[r.cls] ??= []).push(r);
 
@@ -173,9 +232,11 @@ const parts = [];
 const push = (u, v, rot, w, d, h, base, kind) =>
   parts.push({ u, v, rot, w, d, h, base, kind });
 
-let deckN = 0; let markN = 0; let kerbN = 0;
+let deckN = 0; let markN = 0; let kerbN = 0; let wetSteps = 0;
+let skipped = 0;
 for (const road of roadsDoc.roads) {
   const spec = SPEC[road.cls] ?? SPEC.local;
+  if (spec.skip) { skipped++; continue; }
   const steps = walk(road.pts, DECK_M);
   if (!steps.length) continue;
   const halfW = road.w / 2;
@@ -184,7 +245,7 @@ for (const road of roadsDoc.roads) {
   for (const s of steps) {
     const u = s.x / FRAME;
     const v = s.y / FRAME;
-    const ground = sampleAt(u, v);
+    if (wetAt(u, v)) { wetSteps++; travelled += s.len; continue; }
     // The deck's underside sits at the graded height; `base` is relative to
     // the terrain the consumer samples, which is now the same graded height.
     push(u, v, s.head, s.len + 0.6, road.w, DECK_THICK, DECK_LIFT, 'road_deck');
@@ -235,6 +296,9 @@ for (const road of roadsDoc.roads) {
   }
 }
 console.log('%d deck segments, %d markings, %d kerb pieces', deckN, markN, kerbN);
+console.log('%d bridges and %d steps over water left for '
+  + 'tools/maps3d-bridges.mjs, which runs after the water is dug',
+  skipped, wetSteps);
 
 // ── 4. Signs ────────────────────────────────────────────────────────────────
 //
