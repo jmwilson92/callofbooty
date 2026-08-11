@@ -20,6 +20,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { deflateSync } from 'node:zlib';
 
 const args = process.argv.slice(2);
 const src = args[0];
@@ -274,16 +275,95 @@ function thin(maskIn) {
 }
 
 // ── Trace the skeleton into polylines ───────────────────────────────────────
+/** Crossing number: how many separate arms of skeleton meet at a pixel.
+ *
+ * NOT the neighbour count. A thinned diagonal is a staircase, and a staircase
+ * pixel routinely has three 8-neighbours while being an ordinary point on a
+ * single curve. Counting neighbours and calling three a junction stops the
+ * walker every few pixels on any road that does not run along a raster axis —
+ * which is why San Diego's grid traced beautifully and the one long diagonal in
+ * the city, the Coronado bridge, came through as nothing.
+ *
+ * The number of 0-to-1 transitions going once around the ring is the right
+ * measure: 1 is an endpoint, 2 is a curve, 3 or more is a real branch.
+ */
+const RING = [-RES, -RES + 1, 1, RES + 1, RES, RES - 1, -1, -RES - 1];
+function crossings(skel, i) {
+  let a = 0;
+  for (let k = 0; k < 8; k++) {
+    const cur = skel[i + RING[k]] ? 1 : 0;
+    const nxt = skel[i + RING[(k + 1) % 8]] ? 1 : 0;
+    if (!cur && nxt) a++;
+  }
+  return a;
+}
+
+/** Remove skeleton spurs shorter than `maxSpur` pixels.
+ *
+ * Thinning a ribbon that is more than a couple of pixels wide leaves whiskers
+ * hanging off the centreline — one or two pixels each, from every wobble in the
+ * edge. They are invisible in a picture and fatal to the trace: the walker stops
+ * at any pixel of degree three, so a line with a whisker every few pixels comes
+ * apart into pieces shorter than the floor and every one of them is discarded.
+ * That is how 750 m of the Coronado bridge came through as nothing at all, with
+ * a perfectly good mask and a perfectly good skeleton on either side of it.
+ */
+function prune(skel, maxSpur) {
+  const N8 = [-RES - 1, -RES, -RES + 1, -1, 1, RES - 1, RES, RES + 1];
+  const s = Uint8Array.from(skel);
+  let removed = 0;
+  for (let round = 0; round < 4; round++) {
+    const deg = new Uint8Array(s.length);
+    const ends = [];
+    for (let r = 1; r < RES - 1; r++) {
+      for (let c = 1; c < RES - 1; c++) {
+        const i = r * RES + c;
+        if (!s[i]) continue;
+        const a = crossings(s, i);
+        deg[i] = a;
+        if (a === 1) ends.push(i);
+      }
+    }
+    let any = false;
+    for (const e of ends) {
+      if (!s[e]) continue;
+      const path = [];
+      let i = e; let prev = -1;
+      let hitJunction = false;
+      while (path.length <= maxSpur) {
+        path.push(i);
+        let next = -1;
+        for (const o of N8) {
+          const j = i + o;
+          if (j < 0 || j >= s.length) continue;
+          if (!s[j] || j === prev || path.includes(j)) continue;
+          next = j; break;
+        }
+        if (next < 0) break;
+        if (deg[next] > 2) { hitJunction = true; break; }
+        prev = i; i = next;
+      }
+      // Only a whisker off a junction gets cut. A short free-standing fragment
+      // is left alone — the length filter downstream is the right place for it,
+      // and the stitch may yet make something of it.
+      if (hitJunction && path.length <= maxSpur) {
+        for (const q of path) s[q] = 0;
+        removed += path.length;
+        any = true;
+      }
+    }
+    if (!any) break;
+  }
+  return { skel: s, removed };
+}
+
 function trace(skel, dist, minLenM) {
   const deg = new Uint8Array(RES * RES);
-  const N8 = [-RES - 1, -RES, -RES + 1, -1, 1, RES - 1, RES, RES + 1];
   for (let r = 1; r < RES - 1; r++) {
     for (let c = 1; c < RES - 1; c++) {
       const i = r * RES + c;
       if (!skel[i]) continue;
-      let n = 0;
-      for (const o of N8) if (skel[i + o]) n++;
-      deg[i] = n;
+      deg[i] = crossings(skel, i);
     }
   }
   const used = new Uint8Array(RES * RES);
@@ -356,6 +436,74 @@ function simplify(poly, tolPx) {
     if (worst > tolPx) { keep[wi] = 1; stack.push([a, wi], [wi, b]); }
   }
   return poly.filter((_, i) => keep[i]);
+}
+
+// ── Debug crops ─────────────────────────────────────────────────────────────
+//
+//   --debug bridge:0.712,0.605,0.748,0.646
+//
+// Writes the rasterised mask, the closed mask and the skeleton for one class
+// over one window, as a PNG. Three stages happen between a road surface and a
+// centreline and each can lose the road; looking at all three at once is the
+// difference between fixing it and guessing at it.
+const DEBUG = arg('debug', '');
+const DEBUG_SCALE = parseInt(arg('debugScale', '1'), 10);
+function debugCrop(id, stages, box) {
+  const [u0, v0, u1, v1] = box;
+  const c0 = Math.round(u0 * (RES - 1)); const c1 = Math.round(u1 * (RES - 1));
+  const r0 = Math.round(v0 * (RES - 1)); const r1 = Math.round(v1 * (RES - 1));
+  const W0 = c1 - c0 + 1; const H0 = r1 - r0 + 1;
+  const S = Math.max(1, DEBUG_SCALE);
+  const W = W0 * S; const H = H0 * S;
+  const cols = [[190, 60, 60], [70, 130, 220], [90, 255, 110]];
+  const rows = Buffer.alloc(H * (1 + W * 3));
+  for (let r = 0; r < H; r++) {
+    const o = r * (1 + W * 3);
+    rows[o] = 0;
+    for (let c = 0; c < W; c++) {
+      const i = (r0 + Math.floor(r / S)) * RES + (c0 + Math.floor(c / S));
+      let col = [16, 20, 26];
+      for (let k = 0; k < stages.length; k++) if (stages[k][i]) col = cols[k];
+      const p = o + 1 + c * 3;
+      rows[p] = col[0]; rows[p + 1] = col[1]; rows[p + 2] = col[2];
+    }
+  }
+  const CRCT = (() => {
+    const t = new Int32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c;
+    }
+    return t;
+  })();
+  const crc = (b) => {
+    let c = 0xffffffff;
+    for (let i = 0; i < b.length; i++) c = CRCT[(c ^ b[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (ty, data) => {
+    const l = Buffer.alloc(4); l.writeUInt32BE(data.length, 0);
+    const b = Buffer.concat([Buffer.from(ty, 'ascii'), data]);
+    const cc = Buffer.alloc(4); cc.writeUInt32BE(crc(b), 0);
+    return Buffer.concat([l, b, cc]);
+  };
+  const ih = Buffer.alloc(13);
+  ih.writeUInt32BE(W, 0); ih.writeUInt32BE(H, 4); ih[8] = 8; ih[9] = 2;
+  const dest = join(OUT, `debug-${id}.png`);
+  writeFileSync(dest, Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ih), chunk('IDAT', deflateSync(rows, { level: 6 })),
+    chunk('IEND', Buffer.alloc(0)),
+  ]));
+  const counts = stages.map((st) => {
+    let n = 0;
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) n += st[r * RES + c] ? 1 : 0;
+    return n;
+  });
+  console.log('wrote %s (%d x %d) — red raw mask, blue closed, green skeleton; '
+    + 'samples in window: raw %d, closed %d, skeleton %d',
+    dest, W, H, counts[0], counts[1], counts[2]);
 }
 
 // ── Stitch ──────────────────────────────────────────────────────────────────
@@ -493,11 +641,27 @@ for (const cls of CLASSES) {
   }
   if (!px) { report.push([cls.id, tris, 0, 0]); continue; }
   const dist = distanceTransform(mask);
-  const skel = thin(mask);
+  const thinned = thin(mask);
+  const pruned = prune(thinned, 9);
+  const skel = pruned.skel;
+  if (DEBUG.startsWith(cls.id + ':')) {
+    debugCrop(cls.id, [raster.mask, mask, skel],
+      DEBUG.slice(cls.id.length + 1).split(',').map(Number));
+  }
   // Trace with a low floor and apply the class minimum after stitching. The
   // fragments a bridge breaks into are individually shorter than the class
   // minimum, so filtering first throws away the pieces the stitch needs.
   const traced = trace(skel, dist, 8);
+  if (DEBUG.startsWith(cls.id + ':')) {
+    const [bu0, bv0, bu1, bv1] = DEBUG.slice(cls.id.length + 1).split(',').map(Number);
+    const bc0 = Math.round(bu0 * (RES - 1)); const bc1 = Math.round(bu1 * (RES - 1));
+    const br0 = Math.round(bv0 * (RES - 1)); const br1 = Math.round(bv1 * (RES - 1));
+    const hits = traced.filter((l) => l.poly.some((p) => p.c >= bc0 && p.c <= bc1
+      && p.r >= br0 && p.r <= br1));
+    console.log('  debug: %d of %d traced runs touch the window; lengths %s',
+      hits.length, traced.length,
+      hits.map((l) => Math.round(l.len)).sort((a, b) => b - a).slice(0, 12).join(', ') || 'none');
+  }
   const stitched = stitch(traced, M_PER_PX);
   const joins = stitched.joins;
   const lines = stitched.lines.filter((l) => l.len >= cls.minLenM);
@@ -520,7 +684,8 @@ for (const cls of CLASSES) {
   }
   report.push([cls.id, tris, lines.length, totalKm, ((Date.now() - t0) / 1000).toFixed(1)]);
   console.log(`  ${cls.id}: ${tris} triangles -> ${traced.length} fragments, `
-    + `${joins} stitched, ${dropped} under ${cls.minLenM} m dropped -> `
+    + `${pruned.removed} spur samples pruned, ${joins} stitched, `
+    + `${dropped} under ${cls.minLenM} m dropped -> `
     + `${lines.length} centrelines, ${totalKm.toFixed(1)} km `
     + `(${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 }
