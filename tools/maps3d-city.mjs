@@ -32,8 +32,9 @@ mkdirSync(OUT, { recursive: true });
 const side = JSON.parse(readFileSync(SIDECAR, 'utf8'));
 const FRAME = side.frameMetres.width;          // square, metres
 const K = side.mercatorToGround;               // Mercator unit -> true metre
-console.log('frame %.0f m square, playable %.0f x %.0f m, 1 unit = %.5f m',
-  FRAME, side.playableMetres.width, side.playableMetres.height, K);
+console.log('frame %s m square, playable %s x %s m, 1 unit = %s m',
+  FRAME.toFixed(0), side.playableMetres.width.toFixed(0),
+  side.playableMetres.height.toFixed(0), K.toFixed(5));
 
 // ── glb ─────────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,81 @@ function readAccessor(i) {
     }
   }
   return out;
+}
+
+
+// ── One rectangle is not always enough ──────────────────────────────────────
+//
+// Every building in the capture is a flat-topped extrusion of a polygon: two Y
+// levels, a median of 24 vertices, up to 186. Half of them are near enough
+// rectangular that the minimum-area rectangle over the outline is within 5% of
+// the true footprint, and for those a single box is the right answer.
+//
+// The rest are not. 13.6% of buildings have a bounding rectangle more than 1.3
+// times their real footprint and 3% more than 1.6 — the L-shaped apartment
+// blocks, the T-shaped schools, the malls with a wing. A single box for those
+// fills in the courtyard and squares off the corner, which is the difference
+// between a silhouette you can navigate by and a slab.
+//
+// So a poor fit gets cut in half along its long axis, at whichever of a few
+// candidate positions leaves the least total area, and each half is fitted
+// again. Only if that actually wins by a clear margin — a marginal improvement
+// is not worth doubling the part count.
+const SPLIT_TRIGGER = 1.25;   // bounding rect this many times the footprint
+const SPLIT_GAIN = 0.86;      // the two halves must beat this fraction of one
+const SPLIT_MIN_M = 6;        // do not cut a small building in half
+const SPLIT_DEPTH = 2;
+
+/** Area of a polygon's outline, by the shoelace over its convex hull. */
+function hullArea(hull) {
+  let a = 0;
+  for (let i = 0; i < hull.length; i++) {
+    const p = hull[i]; const q = hull[(i + 1) % hull.length];
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return Math.abs(a) / 2;
+}
+
+function decompose(pts, rect, depth = 0) {
+  const single = [rect];
+  if (depth >= SPLIT_DEPTH) return single;
+  if (Math.min(rect.w, rect.d) < SPLIT_MIN_M) return single;
+
+  // The outline's own area. The hull overstates a concave footprint, which is
+  // exactly the case this is looking for, so it is the right comparison: a
+  // rectangle much larger than the hull means the outline is not a rectangle.
+  const hull = convexHull(pts);
+  const area = hullArea(hull);
+  if (!(area > 1)) return single;
+  if (rect.w * rect.d < area * SPLIT_TRIGGER) return single;
+
+  // Work in the rectangle's own frame and cut across the long axis.
+  const th = (rect.rotDeg * Math.PI) / 180;
+  const ux = Math.cos(th); const uy = Math.sin(th);
+  const along = rect.w >= rect.d;
+  const proj = pts.map((p) => {
+    const dx = p[0] - rect.cx; const dy = p[1] - rect.cy;
+    return along ? dx * ux + dy * uy : -dx * uy + dy * ux;
+  });
+  const span = along ? rect.w : rect.d;
+
+  let best = null;
+  for (let f = 0.3; f <= 0.7001; f += 0.1) {
+    const cut = -span / 2 + span * f;
+    const a = []; const b = [];
+    for (let i = 0; i < pts.length; i++) (proj[i] <= cut ? a : b).push(pts[i]);
+    if (a.length < 3 || b.length < 3) continue;
+    const ra = minAreaRect(convexHull(a));
+    const rb = minAreaRect(convexHull(b));
+    if (!ra || !rb) continue;
+    const total = ra.w * ra.d + rb.w * rb.d;
+    if (!best || total < best.total) best = { total, a, b, ra, rb };
+  }
+  if (!best || best.total > rect.w * rect.d * SPLIT_GAIN) return single;
+  return [
+    ...decompose(best.a, best.ra, depth + 1),
+    ...decompose(best.b, best.rb, depth + 1),
+  ];
 }
 
 const roots = {};
@@ -162,6 +238,7 @@ console.log('extracting %d buildings...', kids.length);
 
 const out = [];
 let skipped = 0;
+let split = 0;
 let hullPts = 0;
 const t0 = Date.now();
 
@@ -188,27 +265,33 @@ for (let n = 0; n < kids.length; n++) {
   const rect = minAreaRect(convexHull(pts));
   if (!rect || !(rect.w > 0.2) || !(rect.d > 0.2)) { skipped++; continue; }
 
-  // Mercator -> ground. Widths scale by K like everything horizontal.
-  out.push({
-    u: toU(rect.cx),
-    v: toV(rect.cy),
-    // glTF +Z is the capture's south, matching this project's +v, so the
-    // bearing carries across unchanged.
-    rot: rect.rotDeg,
-    w: rect.w * K,
-    d: rect.d * K,
-    h: heightM,
-    base: 0,
-    roofY,
-    kind: 'building',
-  });
+  for (const piece of decompose(pts, rect)) {
+    // Mercator -> ground. Widths scale by K like everything horizontal.
+    out.push({
+      u: toU(piece.cx),
+      v: toV(piece.cy),
+      // glTF +Z is the capture's south, matching this project's +v, so the
+      // bearing carries across unchanged.
+      rot: piece.rotDeg,
+      w: piece.w * K,
+      d: piece.d * K,
+      h: heightM,
+      base: 0,
+      roofY,
+      kind: 'building',
+    });
+    if (piece !== rect) split++;
+  }
 
   if ((n & 8191) === 0 && n) process.stdout.write(`  ${n}/${kids.length}\r`);
 }
 
-console.log('extracted %d buildings, skipped %d, in %ss',
-  out.length, skipped, ((Date.now() - t0) / 1000).toFixed(1));
-console.log('mean roof polygon: %.1f vertices', hullPts / Math.max(1, out.length));
+console.log('extracted %d parts from %d buildings, skipped %d, in %ss',
+  out.length, kids.length - skipped, skipped, ((Date.now() - t0) / 1000).toFixed(1));
+console.log('%d extra parts from splitting footprints a single rectangle fitted '
+  + 'badly', split);
+console.log('mean roof polygon: %s vertices',
+  (hullPts / Math.max(1, out.length)).toFixed(1));
 
 // ── Sanity, before anything is written ──────────────────────────────────────
 
@@ -223,9 +306,11 @@ for (const b of out) {
   if (b.u < 0 || b.u > 1 || b.v < 0 || b.v > 1) offFrame++;
   if (Math.abs(b.u - 0.5) > halfPU + 1e-6 || Math.abs(b.v - 0.5) > halfPV + 1e-6) offPlay++;
 }
-console.log('\nheight   p50 %.1f  p90 %.1f  p99 %.1f  max %.1f m',
-  pct(hs, 0.5), pct(hs, 0.9), pct(hs, 0.99), hs[hs.length - 1]);
-console.log('footprint total %.2f km2', areas.reduce((a, b) => a + b, 0) / 1e6);
+console.log('\nheight   p50 %s  p90 %s  p99 %s  max %s m',
+  pct(hs, 0.5).toFixed(1), pct(hs, 0.9).toFixed(1), pct(hs, 0.99).toFixed(1),
+  hs[hs.length - 1].toFixed(1));
+console.log('footprint total %s km2',
+  (areas.reduce((a, b) => a + b, 0) / 1e6).toFixed(2));
 console.log('outside the frame: %d      outside the playable rect: %d', offFrame, offPlay);
 
 // ── Write ───────────────────────────────────────────────────────────────────
@@ -268,6 +353,6 @@ const meta = {
 };
 writeFileSync(join(OUT, 'city.json'), JSON.stringify(meta));
 writeFileSync(join(OUT, 'city-buildings.bin'), bin);
-console.log('\nwrote %s  (%.2f MB, %d buildings)',
-  join(OUT, 'city-buildings.bin'), bin.length / 1048576, out.length);
+console.log('\nwrote %s  (%s MB, %d parts)',
+  join(OUT, 'city-buildings.bin'), (bin.length / 1048576).toFixed(2), out.length);
 console.log('wrote %s', join(OUT, 'city.json'));
