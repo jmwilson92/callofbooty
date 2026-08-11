@@ -59,6 +59,56 @@ for each. Use it before theorising about a missing road. A clean skeleton with
 no traced runs on it points at the walker; an empty mask points at the
 rasteriser.
 
+## What the capture actually contains
+
+Every node has now been enumerated and counted. This is the list, so that nobody
+plans work against something that is not there — and so that nobody goes looking
+twice for something that is.
+
+| Node | Triangles | What it is |
+|------|-----------|------------|
+| `tinMesh` | — | The terrain. Horizontal axes are Web Mercator, vertical is true metres. No bathymetry: water surfaces come back as flat ground 3.5 m above datum. |
+| `Buildings` | 63,985 children | One primitive each, exactly two Y levels — flat-topped extrusions of polygons. No pitched roofs, no multi-level massing. 134 of them have no height at all. |
+| `Roads_Arterial` | 35,603 | |
+| `Roads_Collector` | 56,835 | |
+| `Roads_Local` | 75,253 | |
+| `Roads_Service` | 89,454 | |
+| `Roads_Paths` | 118,494 | The largest road class in the capture, and the last one anybody thought to look for. 442 km. |
+| `Roads_Bridge` | 29,425 | Stored as two thin edge strips, not a filled ribbon. |
+| `Roads_Rail`, `_Ferry`, `_Tunnel`, `_Sidewalk`, `_Crosswalk`, `_Parking` | **0** | Empty. Do not plan work that depends on them. |
+| `LandCover_Grass` | 212,080 | |
+| `LandCover_Wood` | 67,712 | |
+| `LandCover_Urban` | 62,822 | A classification polygon draped on the terrain — 82% of its vertices sit within a metre of the ground, with a symmetric tail either side, which is sampling noise and not structure. There is nothing in it but the colour it already contributes to the surface map. |
+| `LandCover_Sand`, `_Rock`, `_Wetland` | 6,728 / 4,628 / 3,440 | |
+| `LandCover_Farmland`, `_Ice`, `_Other` | **0** | Empty. |
+| `Water` | 11,778 | Surfaces only. Every body is flat; depth is invented by `maps3d-water.mjs`. |
+
+Two things the capture does **not** record, both checked rather than assumed:
+
+- **Grade separation.** Of 316,926 road vertices, 0.76% sit more than 4 m above
+  the ground under them and 0.15% more than 8 m — and those are the bridges. In
+  plan view a flyover and a crossroads are the same picture, so freeway
+  overpasses cannot be recovered or inferred, and are not built.
+- **Building height for 134 structures**, covering 0.53 km2. Those are laid as
+  pads rather than given an invented height.
+
+## A bug family worth knowing about
+
+Six defects in this pipeline have had the same shape: a hand-kept list or a
+literal that stopped matching what is actually built, failing silently while the
+count in the log looked healthy. The tracer's class list omitting `Roads_Paths`
+(442 km). Two `kinds` literals, one in the road pass and one in the city pass.
+A hardcoded `0` written as every part's kind index. A `heightM > 0.4` guard
+dropping 299 footprints. A structure list in the planting pass that did not
+know about `pad`.
+
+So the rule here is: derive the list from what was built, or list the exclusions
+so an unknown case fails safe — and make the script exit non-zero rather than
+carry on. `maps3d-roadmesh.mjs` refuses to run on a road class it has no spec
+for, `maps3d-surfaces.mjs` counts the triangles of any class it has no code for,
+`maps3d-preview.mjs` names kinds it has no colour for, and
+`Tools/build_sandiego.py` warns rather than importing a kind as default grey.
+
 ## Two things worth knowing before changing any of it
 
 **The horizontal axes of the capture are Web Mercator metres, the vertical is
