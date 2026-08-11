@@ -25,8 +25,12 @@ const arg = (n, d) => {
 };
 const OUT = arg('out', 'out');
 const W = parseInt(arg('res', '2048'), 10);
+// A window on the frame, so the same script does the whole map and a street.
+const CENTRE = arg('centre', '0.5,0.5').split(',').map(Number);
+const NAME = arg('name', 'terrain-shaded');
 
 const side = JSON.parse(readFileSync(join(OUT, 'sandiego.json'), 'utf8'));
+const SPAN_M = parseFloat(arg('span', String(side.frameMetres.width)));
 const RES = side.resolution;
 const FRAME = side.frameMetres.width;
 const LO = side.heightRangeMetres.min;
@@ -125,16 +129,20 @@ function heightAt(fc, fr) {
 }
 
 const mPerHeightPx = FRAME / (RES - 1);
+const VSPAN = SPAN_M / FRAME;
+const U0 = CENTRE[0] - VSPAN / 2;
+const V0 = CENTRE[1] - VSPAN / 2;
+const M_PER_OUT_PX = SPAN_M / W;
 const out = Buffer.alloc(W * (1 + W * 3));
 const counts = { cover: 0, pave: 0, water: 0, sea: 0 };
 
 for (let y = 0; y < W; y++) {
   const o = y * (1 + W * 3);
   out[o] = 0;
-  const v = (y + 0.5) / W;
+  const v = V0 + ((y + 0.5) / W) * VSPAN;
   const fr = v * (RES - 1);
   for (let x = 0; x < W; x++) {
-    const u = (x + 0.5) / W;
+    const u = U0 + ((x + 0.5) / W) * VSPAN;
     const fc = u * (RES - 1);
 
     const h = heightAt(fc, fr);
@@ -190,6 +198,83 @@ for (let y = 0; y < W; y++) {
   }
 }
 
+// ── The city on top ─────────────────────────────────────────────────────────
+//
+// Buildings, road kit and planting all live in the same packed buffer. Drawn
+// from directly above as rotated rectangles, in order of how high the top of
+// each part sits, which is close enough to a painter's sort for a plan view.
+const KIND_COLOUR = {
+  building: [0.402, 0.386, 0.358],
+  road_deck: [0.052, 0.051, 0.055],
+  line_white: [0.880, 0.880, 0.860],
+  line_yellow: [0.880, 0.680, 0.130],
+  kerb: [0.560, 0.556, 0.540],
+  sign_post: [0.300, 0.300, 0.305],
+  sign: [0.620, 0.180, 0.140],
+  tree: [0.118, 0.170, 0.086],
+  tree_trunk: [0.128, 0.104, 0.078],
+  palm: [0.150, 0.196, 0.104],
+  shrub: [0.176, 0.190, 0.116],
+  rock: [0.310, 0.288, 0.252],
+};
+let drawn = 0;
+try {
+  const city = JSON.parse(readFileSync(join(OUT, 'city.json'), 'utf8'));
+  const stride = city.buildingStride;
+  const bin = readFileSync(join(OUT, city.buildingFile));
+  const kinds = city.kinds ?? ['building'];
+  const list = [];
+  for (let i = 0; i < city.buildingCount; i++) {
+    const o = i * stride * 4;
+    const u = bin.readFloatLE(o);
+    const v = bin.readFloatLE(o + 4);
+    if (u < U0 || v < V0 || u > U0 + VSPAN || v > V0 + VSPAN) continue;
+    list.push({
+      u,
+      v,
+      rot: (bin.readFloatLE(o + 8) * Math.PI) / 180,
+      w: bin.readFloatLE(o + 12),
+      d: bin.readFloatLE(o + 16),
+      h: bin.readFloatLE(o + 20),
+      kind: kinds[Math.round(bin.readFloatLE(o + 24))] ?? 'building',
+      base: stride > 8 ? bin.readFloatLE(o + 32) : 0,
+    });
+  }
+  list.sort((a, b) => (a.base + a.h) - (b.base + b.h));
+  for (const p of list) {
+    const col = KIND_COLOUR[p.kind] ?? [0.5, 0.45, 0.4];
+    // A tall part catches more light from above than the ground beside it.
+    const lift = 1 + Math.min(0.35, (p.base + p.h) * 0.012);
+    const cx = ((p.u - U0) / VSPAN) * W;
+    const cy = ((p.v - V0) / VSPAN) * W;
+    const hw = p.w / 2 / M_PER_OUT_PX;
+    const hd = p.d / 2 / M_PER_OUT_PX;
+    const ca = Math.cos(p.rot); const sa = Math.sin(p.rot);
+    const reach = Math.ceil(Math.hypot(hw, hd)) + 1;
+    if (reach > W) continue;
+    for (let dy = -reach; dy <= reach; dy++) {
+      const y = Math.round(cy + dy);
+      if (y < 0 || y >= W) continue;
+      for (let dx = -reach; dx <= reach; dx++) {
+        const x = Math.round(cx + dx);
+        if (x < 0 || x >= W) continue;
+        const px = x + 0.5 - cx; const py = y + 0.5 - cy;
+        const lx = px * ca + py * sa;
+        const ly = -px * sa + py * ca;
+        if (Math.abs(lx) > hw || Math.abs(ly) > hd) continue;
+        const o = y * (1 + W * 3) + 1 + x * 3;
+        for (let k = 0; k < 3; k++) {
+          out[o + k] = Math.round(255 * Math.pow(sat(col[k] * lift), 1 / 2.2));
+        }
+      }
+    }
+    drawn++;
+  }
+  console.log('drew %d of %d city parts in the window', drawn, city.buildingCount);
+} catch (err) {
+  console.log('no city plan to draw (%s)', err.message);
+}
+
 const CRC = (() => {
   const t = new Int32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -219,13 +304,13 @@ const png = Buffer.concat([
   chunk('IDAT', deflateSync(out, { level: 6 })),
   chunk('IEND', Buffer.alloc(0)),
 ]);
-const dest = join(OUT, 'terrain-shaded.png');
+const dest = join(OUT, NAME + '.png');
 writeFileSync(dest, png);
 
 const total = W * W;
 const pc = (n) => ((n * 100) / total).toFixed(1);
-console.log('surface map %d x %d, heightmap %d, frame %s km',
-  surf.w, surf.h, RES, (FRAME / 1000).toFixed(2));
+console.log('surface map %d x %d, heightmap %d, window %s m centred on %s, %s',
+  surf.w, surf.h, RES, SPAN_M.toFixed(0), CENTRE[0], CENTRE[1]);
 console.log('of %d shaded pixels: land cover %s%%, paving %s%%, water %s%%, sea %s%%',
   total, pc(counts.cover), pc(counts.pave), pc(counts.water), pc(counts.sea));
 console.log('wrote %s (%s MB)', dest, (png.length / 1048576).toFixed(1));
