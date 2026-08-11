@@ -130,11 +130,13 @@ const lon0 = meta.params.areaSelected.rectCenter[0];
 const K = Math.cos((lat0 * Math.PI) / 180);
 const playW = (mxX - mnX) * K;
 const playH = (mxZ - mnZ) * K;
-console.log('capture true ground  %.0f x %.0f m   (1 unit = %.5f m)', playW, playH, K);
+console.log('capture true ground  %s x %s m   (1 unit = %s m)',
+  playW.toFixed(0), playH.toFixed(0), K.toFixed(5));
 
 // The landscape frame: the capture plus a ring, made square so the heightmap is.
 const frame = Math.max(playW, playH) + RING_M * 2;
-console.log('landscape frame      %.0f x %.0f m  (ring %.0f m each side)', frame, frame, RING_M);
+console.log('landscape frame      %s x %s m  (ring %s m each side)',
+  frame.toFixed(0), frame.toFixed(0), RING_M.toFixed(0));
 
 const mPerSample = frame / (RES - 1);
 const height = new Float32Array(RES * RES).fill(NaN);
@@ -234,6 +236,25 @@ for (let pass = 0; pass < 6; pass++) {
 }
 if (holes) console.log('closed %d pinholes inside the capture', holes);
 
+// Anything still unfilled inside the capture is a real hole, not a pinhole, and
+// the ring fill below will quietly patch it with a border elevation — a plateau
+// or a pit in the middle of the city, indistinguishable in the log from the
+// 83 km2 of ring that fill is actually for. Count them separately.
+let interiorHoles = 0;
+for (let r = capR0; r <= capR1; r++) {
+  for (let c = capC0; c <= capC1; c++) {
+    if (Number.isNaN(height[r * RES + c])) interiorHoles++;
+  }
+}
+if (interiorHoles) {
+  console.warn('%d samples inside the capture are STILL unfilled after six '
+    + 'passes (%s km2). The ring fill will give them a border elevation, which '
+    + 'is wrong for an interior hole.', interiorHoles,
+    ((interiorHoles * mPerSample * mPerSample) / 1e6).toFixed(3));
+} else {
+  console.log('no unfilled samples inside the capture');
+}
+
 /**
  * The capture's border elevation, smoothed along the border.
  *
@@ -318,7 +339,7 @@ for (let r = 0; r < RES; r++) {
 
 let lo = Infinity; let hi = -Infinity;
 for (const v of height) { if (v < lo) lo = v; if (v > hi) hi = v; }
-console.log('elevation %.2f .. %.2f m', lo, hi);
+console.log('elevation %s .. %s m', lo.toFixed(2), hi.toFixed(2));
 
 // ── Encode ──────────────────────────────────────────────────────────────────
 // Round the stored range outward so the numbers in the recipe stay tidy.
@@ -404,12 +425,16 @@ const sidecar = {
 };
 writeFileSync(sidecarJson, JSON.stringify(sidecar, null, 2));
 
-console.log('\nwrote %s  (%.1f MB)', join(OUT, 'sandiego.png'), png.length / 1048576);
-console.log('wrote %s  (%.1f MB)', join(OUT, 'sandiego.r16'), r16.length / 1048576);
+console.log('\nwrote %s  (%s MB)', join(OUT, 'sandiego.png'),
+  (png.length / 1048576).toFixed(1));
+console.log('wrote %s  (%s MB)', join(OUT, 'sandiego.r16'),
+  (r16.length / 1048576).toFixed(1));
 console.log('wrote %s', sidecarJson);
 console.log('\n--- import recipe ---');
 console.log('  resolution     %d x %d', RES, RES);
-console.log('  scale          X %.3f  Y %.3f  Z %.3f', scaleXY, scaleXY, scaleZ);
-console.log('  location       0, 0, %.0f', midMetres * 100);
-console.log('  span           %.2f km square', (frame / 1000));
-console.log('  playable       %.2f x %.2f km, centred', playW / 1000, playH / 1000);
+console.log('  scale          X %s  Y %s  Z %s',
+  scaleXY.toFixed(3), scaleXY.toFixed(3), scaleZ.toFixed(3));
+console.log('  location       0, 0, %s', (midMetres * 100).toFixed(0));
+console.log('  span           %s km square', (frame / 1000).toFixed(2));
+console.log('  playable       %s x %s km, centred',
+  (playW / 1000).toFixed(2), (playH / 1000).toFixed(2));
