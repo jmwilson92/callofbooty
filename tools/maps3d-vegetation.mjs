@@ -147,11 +147,26 @@ const OCC_M = 4;
 const OCC = Math.ceil(FRAME / OCC_M);
 const occupied = new Uint8Array(OCC * OCC);
 const MARGIN_M = 2.5;
-const BUILDING_KINDS = new Set(['building', 'house', 'tower', 'block',
-  'industrial', 'military', 'campus', 'landmark']);
+// Listed by what is NOT a structure, not by what is.
+//
+// This was a hand-kept list of building kind names, and when `pad` was added it
+// was not in it, so 37 plants ended up standing inside slabs. That is the fifth
+// time a literal list in this pipeline has stopped matching what is actually
+// built. Inverting it does not remove the list, but it changes which way a new
+// kind fails: an unknown kind is now treated as something to keep clear of,
+// which costs a few trees, rather than as open ground, which puts a tree
+// through a wall.
+const NOT_A_STRUCTURE = new Set([
+  'road_deck', 'line_white', 'line_yellow', 'kerb', 'path', 'water',
+  'sign', 'sign_post', 'lamp', 'lamp_post',
+  'tree', 'tree_trunk', 'palm', 'shrub', 'rock',
+]);
 const buildingKind = new Set(kinds
-  .map((n, i) => (BUILDING_KINDS.has(n) ? i : -1))
+  .map((n, i) => (NOT_A_STRUCTURE.has(n) ? -1 : i))
   .filter((i) => i >= 0));
+console.log('avoiding %d of %d kinds as structures: %s',
+  buildingKind.size, kinds.length,
+  kinds.filter((n) => !NOT_A_STRUCTURE.has(n)).join(', '));
 let stamped = 0;
 let stampedParts = 0;
 for (let i = 0; i < baseCount; i++) {

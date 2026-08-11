@@ -268,6 +268,22 @@ console.log('carved %d heightmap samples (%.2f km2 of graded corridor)',
 const RANK = { arterial: 4, collector: 3, bridge: 3, local: 2, service: 1, path: 0 };
 const ZONE_PAD_M = 1.0;
 
+// Every class the tracer produced has to be accounted for here. A class that
+// nobody mentions gets no spec, no rank and no carve, and the only sign is a
+// slightly smaller part count — which is how 442 km of footpath stayed missing
+// for a week and how 27,784 street lights ended up unnameable.
+for (const cls of Object.keys(byClass)) {
+  const known = SPEC[cls] && RANK[cls] !== undefined
+    && (CARVE_ORDER.includes(cls) || SPEC[cls].skip);
+  if (!known) {
+    console.error('road class %s (%d runs) is not handled: spec=%s rank=%s '
+      + 'carved=%s', cls, byClass[cls].length, !!SPEC[cls],
+      RANK[cls] !== undefined, CARVE_ORDER.includes(cls));
+    process.exit(1);
+  }
+}
+
+
 const runLen = roadsDoc.roads.map((r) => {
   let L = 0;
   for (let i = 1; i < r.pts.length; i++) {

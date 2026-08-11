@@ -151,7 +151,19 @@ for (const [group, target, table] of [['Roads', R, ROAD_CODE], ['LandCover', G, 
   for (const child of gltf.nodes[idx].children ?? []) {
     const name = gltf.nodes[child].name;
     const code = table[name] ?? 0;
-    if (!code) { report.push([name, 0, 0]); continue; }
+    if (!code) {
+      // A class with geometry and no code is silently thrown away. Count its
+      // triangles before deciding that is fine — Roads_Paths had 118,494 of
+      // them and no entry in the tracer's list for a week.
+      const probe = { tris: 0, px: 0 };
+      stamp(child, new Uint8Array(RES * RES), 1, probe);
+      if (probe.tris) {
+        console.warn('  %s has %d triangles and NO CODE — nothing will be '
+          + 'painted for it', name, probe.tris);
+      }
+      report.push([name, probe.tris, 0]);
+      continue;
+    }
     const counter = { tris: 0, px: 0 };
     stamp(child, target, code, counter);
     report.push([name, counter.tris, counter.px]);

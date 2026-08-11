@@ -246,6 +246,11 @@ try {
       base: stride > 8 ? bin.readFloatLE(o + 32) : 0,
     });
   }
+  const uncoloured = (city.kinds ?? []).filter((k) => !KIND_COLOUR[k]);
+  if (uncoloured.length) {
+    console.log('no colour for %s — drawn in the fallback, so this preview '
+      + 'does not match the editor', uncoloured.join(', '));
+  }
   list.sort((a, b) => (a.base + a.h) - (b.base + b.h));
   for (const p of list) {
     const col = KIND_COLOUR[p.kind] ?? [0.5, 0.45, 0.4];
