@@ -149,6 +149,12 @@ const LAMP_HEAD_W = 0.34;
 const LAMP_HEAD_H = 0.22;
 const LAMP_CLEAR_M = 0.6;     // outside the kerb
 
+// Stop lines. A road that yields at a crossing gets a bar painted across it on
+// each approach, which is the thing that makes a junction read as a junction
+// from the ground rather than as two roads that happen to overlap.
+const STOP_W = 0.45;          // along the road
+const STOP_INSET_M = 0.6;     // back from the box edge
+
 
 // ── Walk the centrelines in metres ──────────────────────────────────────────
 function walk(pts, stepM) {
@@ -358,7 +364,7 @@ const push = (u, v, rot, w, d, h, base, kind) =>
   parts.push({ u, v, rot, w, d, h, base, kind });
 
 let deckN = 0; let markN = 0; let kerbN = 0; let wetSteps = 0;
-let yielded = 0; let boxed = 0; let lampN = 0;
+let yielded = 0; let boxed = 0; let lampN = 0; let stopN = 0;
 let skipped = 0;
 for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
   const road = roadsDoc.roads[roadIndex];
@@ -369,11 +375,29 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
   const halfW = road.w / 2;
 
   let travelled = 0;
+  let prevZone = 'clear';
   for (const s of steps) {
     const u = s.x / FRAME;
     const v = s.y / FRAME;
     if (wetAt(u, v)) { wetSteps++; travelled += s.len; continue; }
     const zone = zoneAt(s.x, s.y, roadIndex);
+    // Entering or leaving a box the other road owns: paint a stop bar across
+    // this carriageway, on the outside of the step so it sits back from the
+    // kerb line rather than under the crossing traffic.
+    if (zone === 'yield' && prevZone !== 'yield' && spec.centre !== 'none') {
+      const back = -(STOP_INSET_M + s.len / 2);
+      push((s.x + s.dir[0] * back) / FRAME, (s.y + s.dir[1] * back) / FRAME,
+        s.head, STOP_W, road.w - 0.5, MARK_H,
+        DECK_LIFT + DECK_THICK + MARK_H, 'line_white');
+      stopN++;
+    } else if (zone !== 'yield' && prevZone === 'yield' && spec.centre !== 'none') {
+      const fwd = STOP_INSET_M + s.len / 2;
+      push((s.x + s.dir[0] * fwd) / FRAME, (s.y + s.dir[1] * fwd) / FRAME,
+        s.head, STOP_W, road.w - 0.5, MARK_H,
+        DECK_LIFT + DECK_THICK + MARK_H, 'line_white');
+      stopN++;
+    }
+    prevZone = zone;
     if (zone === 'yield') { yielded++; travelled += s.len; continue; }
     const paint = zone === 'clear';
     // The deck's underside sits at the graded height; `base` is relative to
@@ -450,6 +474,7 @@ console.log('%d steps yielded to a more major road at a crossing, %d left '
   + 'unpainted inside a junction box', yielded, boxed);
 console.log('%d street light parts (%d lights) on arterials and collectors',
   lampN, lampN / 2);
+console.log('%d stop bars where a road yields at a crossing', stopN);
 console.log('%d bridges and %d steps over water left for '
   + 'tools/maps3d-bridges.mjs, which runs after the water is dug',
   skipped, wetSteps);
@@ -496,7 +521,22 @@ console.log('%d sign assemblies at %d junctions', signN, cells.size);
 // ── Merge with the buildings and write ──────────────────────────────────────
 const cityDoc = JSON.parse(readFileSync(join(DIR, 'city.json'), 'utf8'));
 const STRIDE = cityDoc.buildingStride ?? 9;
-const oldBin = readFileSync(join(DIR, 'city-buildings.bin'));
+
+// Truncate back to what was here before the last road pass, the way the bridge
+// and vegetation steps do. Without this a second run appends a whole second
+// road network on top of the first — 429,082 duplicate parts — and the only
+// symptom is a part count that looks large but not obviously wrong. Everything
+// appended after this pass is invalidated too, so their marks are dropped.
+const roadBase = cityDoc.roadmesh?.baseCount ?? cityDoc.buildingCount;
+if (roadBase !== cityDoc.buildingCount) {
+  console.log('truncating %d parts from an earlier pass',
+    cityDoc.buildingCount - roadBase);
+}
+cityDoc.buildingCount = roadBase;
+delete cityDoc.bridges;
+delete cityDoc.vegetation;
+const oldBin = readFileSync(join(DIR, 'city-buildings.bin'))
+  .subarray(0, roadBase * STRIDE * 4);
 const oldKinds = cityDoc.kinds ?? ['building'];
 
 // Derived from what was actually built, not a list kept in step by hand. The
@@ -529,6 +569,7 @@ parts.forEach((p, i) => {
   bin.writeFloatLE(p.base, o + 32);
 });
 cityDoc.kinds = kinds;
+cityDoc.roadmesh = { baseCount: roadBase };
 cityDoc.buildingCount = total;
 cityDoc.roadStats = { deck: deckN, markings: markN, kerbs: kerbN, signs: signN,
   totalKm: roadsDoc.totalKm, carvedSamples: carved };
