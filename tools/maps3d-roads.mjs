@@ -94,12 +94,34 @@ const toRow = (z) => ((((z - czU) * K) / FRAME) + 0.5) * (RES - 1);
 const CLASSES = [
   { node: 'Roads_Arterial', id: 'arterial', lanes: 4, centre: 'double_yellow', dashes: true, minLenM: 60 },
   { node: 'Roads_Collector', id: 'collector', lanes: 2, centre: 'yellow', dashes: false, minLenM: 50 },
-  { node: 'Roads_Bridge', id: 'bridge', lanes: 2, centre: 'yellow', dashes: false, minLenM: 30 },
+  // closePx: some of what the capture calls a road is a hollow outline rather
+  // than a filled ribbon. The bridge deck is two edge strips a few metres
+  // apart, and the skeleton of a hollow ribbon is its two edges, not its
+  // centre — which is why the Coronado bridge came out as a few hundred
+  // metres of stub. Closing the mask first fills the deck so there is a
+  // centreline to find.
+  { node: 'Roads_Bridge', id: 'bridge', lanes: 2, centre: 'yellow', dashes: false, minLenM: 30, closePx: 8 },
   { node: 'Roads_Local', id: 'local', lanes: 2, centre: 'none', dashes: false, minLenM: 40 },
   { node: 'Roads_Service', id: 'service', lanes: 1, centre: 'none', dashes: false, minLenM: 40 },
 ];
 
 // ── Rasterise one class ─────────────────────────────────────────────────────
+/** Bresenham, clipped to the grid. Used to guarantee thin triangles connect. */
+function line(x0, y0, x1, y1, mask) {
+  let x = Math.round(x0); let y = Math.round(y0);
+  const xe = Math.round(x1); const ye = Math.round(y1);
+  const dx = Math.abs(xe - x); const dy = -Math.abs(ye - y);
+  const sx = x < xe ? 1 : -1; const sy = y < ye ? 1 : -1;
+  let err = dx + dy;
+  for (let guard = 0; guard < 100000; guard++) {
+    if (x >= 0 && y >= 0 && x < RES && y < RES) mask[y * RES + x] = 1;
+    if (x === xe && y === ye) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x += sx; }
+    if (e2 <= dx) { err += dx; y += sy; }
+  }
+}
+
 function rasterise(nodeIdx) {
   const mask = new Uint8Array(RES * RES);
   let tris = 0;
@@ -131,6 +153,19 @@ function rasterise(nodeIdx) {
               mask[r * RES + col] = 1;
             }
           }
+          // And the edges, as lines.
+          //
+          // A sampled interior misses thin geometry. Some of what the capture
+          // calls a road is not a filled ribbon at all — the Coronado bridge is
+          // stored as two edge strips a few metres apart — and at 2 m a pixel
+          // those rasterise to a dotted line. A dotted line thins to a handful
+          // of isolated pixels, traces to nothing, and 3.4 km of bridge
+          // disappears without any stage reporting a problem. Drawing the edges
+          // guarantees a sliver comes out connected, and costs nothing on a
+          // triangle wide enough to have filled properly anyway.
+          line(ax, ay, bx, by, mask);
+          line(bx, by, cx, cy, mask);
+          line(cx, cy, ax, ay, mask);
           tris++;
         }
       }
@@ -177,6 +212,27 @@ function distanceTransform(mask) {
 // which is the property that matters: a skeleton that breaks at junctions
 // gives disconnected road stubs, and a road network you cannot drive along is
 // no better than the painted one.
+/** Morphological closing by `k` pixels, built from two distance transforms.
+ *
+ * Dilating is "within k of the mask" and eroding is "further than k from the
+ * complement", and the chamfer transform answers both in two passes each, which
+ * matters at 8192 squared. */
+function closeMask(mask, k) {
+  const inv = new Uint8Array(mask.length);
+  for (let i = 0; i < mask.length; i++) inv[i] = mask[i] ? 0 : 1;
+  const toMask = distanceTransform(inv);
+  const dilated = new Uint8Array(mask.length);
+  for (let i = 0; i < mask.length; i++) {
+    dilated[i] = mask[i] || toMask[i] <= k ? 1 : 0;
+  }
+  const toEdge = distanceTransform(dilated);
+  const out = new Uint8Array(mask.length);
+  for (let i = 0; i < mask.length; i++) {
+    out[i] = dilated[i] && toEdge[i] > k ? 1 : 0;
+  }
+  return out;
+}
+
 function thin(maskIn) {
   const m = Uint8Array.from(maskIn);
   const idx = (r, c) => r * RES + c;
@@ -302,6 +358,122 @@ function simplify(poly, tolPx) {
   return poly.filter((_, i) => keep[i]);
 }
 
+// ── Stitch ──────────────────────────────────────────────────────────────────
+//
+// The traced skeleton comes out in fragments. The capture's road surfaces are
+// not continuous ribbons — they are laid down span by span, panel by panel —
+// and every seam between two panels that the rasteriser cannot quite close
+// becomes a break in the skeleton and therefore two centrelines instead of one.
+//
+// On ordinary streets that costs nothing much. On the Coronado bridge it cost
+// the bridge: 3.4 km of deck came through as 456 fragments with a median length
+// of 81 m and 886 endpoint pairs within 50 m of each other, and the longest
+// continuous run over water was 442 m. Built from that, the bridge is a stub in
+// the middle of the bay.
+//
+// So fragments are joined back up where the geometry says they were one road:
+// two ends close together, both tangents pointing along the gap, nothing else.
+// The angle test is what keeps it honest — without it this would weld every
+// road that happens to end near another one, and a city is mostly roads ending
+// near other roads.
+const STITCH_GAP_M = 46;
+const STITCH_ANGLE = 34;      // degrees, tangent to tangent and to the gap
+
+function stitch(lines, mPerPx) {
+  const alive = lines.map(() => true);
+  const polys = lines.map((l) => l.poly.slice());
+  const gapPx = STITCH_GAP_M / mPerPx;
+  const cosMax = Math.cos((STITCH_ANGLE * Math.PI) / 180);
+
+  // Tangent at an end, pointing OUT of the run.
+  const tangent = (poly, end) => {
+    const n = poly.length;
+    const k = Math.min(6, n - 1);
+    const a = end ? poly[n - 1 - k] : poly[k];
+    const b = end ? poly[n - 1] : poly[0];
+    const dx = b.c - a.c; const dy = b.r - a.r;
+    const len = Math.hypot(dx, dy) || 1;
+    return [dx / len, dy / len];
+  };
+
+  let joins = 0;
+  let pass = 0;
+  while (pass++ < 12) {
+    // Rebuild the endpoint index each pass: joining changes the ends.
+    const ends = [];
+    for (let i = 0; i < polys.length; i++) {
+      if (!alive[i] || polys[i].length < 2) continue;
+      for (const end of [0, 1]) {
+        const p = end ? polys[i][polys[i].length - 1] : polys[i][0];
+        ends.push({ i, end, c: p.c, r: p.r, t: tangent(polys[i], end) });
+      }
+    }
+    const cell = Math.max(1, Math.ceil(gapPx));
+    const grid = new Map();
+    for (let k = 0; k < ends.length; k++) {
+      const key = `${Math.floor(ends[k].c / cell)},${Math.floor(ends[k].r / cell)}`;
+      (grid.get(key) ?? grid.set(key, []).get(key)).push(k);
+    }
+
+    let madeOne = false;
+    const taken = new Uint8Array(ends.length);
+    for (let a = 0; a < ends.length; a++) {
+      if (taken[a] || !alive[ends[a].i]) continue;
+      const A = ends[a];
+      let best = -1; let bestScore = -1;
+      const gc = Math.floor(A.c / cell); const gr = Math.floor(A.r / cell);
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          for (const b of grid.get(`${gc + dc},${gr + dr}`) ?? []) {
+            if (b === a || taken[b]) continue;
+            const B = ends[b];
+            if (B.i === A.i || !alive[B.i]) continue;
+            const dx = B.c - A.c; const dy = B.r - A.r;
+            const gap = Math.hypot(dx, dy);
+            if (gap > gapPx || gap < 1e-6) continue;
+            const ux = dx / gap; const uy = dy / gap;
+            // A's tangent points out of A, so it should point along the gap;
+            // B's points out of B, so it should point back against it.
+            const ca = A.t[0] * ux + A.t[1] * uy;
+            const cb = -(B.t[0] * ux + B.t[1] * uy);
+            // Outward tangents of two runs that were once one road point in
+            // opposite directions, so this one wants to be near -1.
+            const cc = -(A.t[0] * B.t[0] + A.t[1] * B.t[1]);
+            if (ca < cosMax || cb < cosMax || cc < cosMax) continue;
+            const score = Math.min(ca, cb, cc) - gap / gapPx * 0.15;
+            if (score > bestScore) { bestScore = score; best = b; }
+          }
+        }
+      }
+      if (best < 0) continue;
+      const B = ends[best];
+      // Orient both so A's tail meets B's head, then concatenate.
+      let pa = polys[A.i]; let pb = polys[B.i];
+      if (!A.end) pa = pa.slice().reverse();
+      if (B.end) pb = pb.slice().reverse();
+      polys[A.i] = pa.concat(pb);
+      polys[B.i] = [];
+      alive[B.i] = false;
+      taken[a] = 1; taken[best] = 1;
+      joins++;
+      madeOne = true;
+    }
+    if (!madeOne) break;
+  }
+
+  const out = [];
+  for (let i = 0; i < polys.length; i++) {
+    if (!alive[i] || polys[i].length < 2) continue;
+    let len = 0;
+    for (let k = 1; k < polys[i].length; k++) {
+      len += Math.hypot(polys[i][k].c - polys[i][k - 1].c,
+        polys[i][k].r - polys[i][k - 1].r) * mPerPx;
+    }
+    out.push({ poly: polys[i], len });
+  }
+  return { lines: out, joins };
+}
+
 // ── Run ─────────────────────────────────────────────────────────────────────
 const out = [];
 const report = [];
@@ -309,13 +481,27 @@ for (const cls of CLASSES) {
   const idx = byName[cls.node];
   if (idx === undefined) { report.push([cls.id, 0, 0, 0]); continue; }
   const t0 = Date.now();
-  const { mask, tris } = rasterise(idx);
-  let px = 0;
+  const raster = rasterise(idx);
+  const tris = raster.tris;
+  const mask = cls.closePx ? closeMask(raster.mask, cls.closePx) : raster.mask;
+  let px = 0; let rawPx = 0;
   for (let i = 0; i < mask.length; i++) if (mask[i]) px++;
+  for (let i = 0; i < raster.mask.length; i++) if (raster.mask[i]) rawPx++;
+  if (cls.closePx) {
+    console.log(`  ${cls.id}: closed by ${cls.closePx} px, `
+      + `${rawPx} -> ${px} mask samples`);
+  }
   if (!px) { report.push([cls.id, tris, 0, 0]); continue; }
   const dist = distanceTransform(mask);
   const skel = thin(mask);
-  const lines = trace(skel, dist, cls.minLenM);
+  // Trace with a low floor and apply the class minimum after stitching. The
+  // fragments a bridge breaks into are individually shorter than the class
+  // minimum, so filtering first throws away the pieces the stitch needs.
+  const traced = trace(skel, dist, 8);
+  const stitched = stitch(traced, M_PER_PX);
+  const joins = stitched.joins;
+  const lines = stitched.lines.filter((l) => l.len >= cls.minLenM);
+  const dropped = stitched.lines.length - lines.length;
 
   let totalKm = 0;
   for (const ln of lines) {
@@ -333,8 +519,10 @@ for (const cls of CLASSES) {
     out.push({ cls: cls.id, lanes: cls.lanes, centre: cls.centre, dashes: cls.dashes, w: +width.toFixed(2), pts });
   }
   report.push([cls.id, tris, lines.length, totalKm, ((Date.now() - t0) / 1000).toFixed(1)]);
-  console.log(`  ${cls.id}: ${tris} triangles -> ${lines.length} centrelines, `
-    + `${totalKm.toFixed(1)} km (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  console.log(`  ${cls.id}: ${tris} triangles -> ${traced.length} fragments, `
+    + `${joins} stitched, ${dropped} under ${cls.minLenM} m dropped -> `
+    + `${lines.length} centrelines, ${totalKm.toFixed(1)} km `
+    + `(${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 }
 
 const totalKm = report.reduce((a, r) => a + (r[3] || 0), 0);
@@ -358,6 +546,7 @@ writeFileSync(join(OUT, 'roads.json'), JSON.stringify({
   metresPerPixel: +M_PER_PX.toFixed(3),
   totalKm: +totalKm.toFixed(1),
   count: out.length,
+  stitch: { gapMetres: STITCH_GAP_M, angleDegrees: STITCH_ANGLE },
   note: 'pts are normalised (u, v) over the frame. w is the measured '
     + 'carriageway width in metres, from a distance transform, not the class '
     + 'nominal. lanes/centre/dashes drive the lane markings.',

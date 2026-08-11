@@ -134,8 +134,83 @@ const push = (u, v, rot, w, d, h, base, kind) =>
 // the marinas — 1.5 km of service road and boardwalk on Shelter Island and the
 // Embarcadero that the capture has running straight out over the water. Left
 // alone they lie on the seabed, which is worse than a bridge lying on the bay.
+// Chain the bridge runs before profiling them.
+//
+// The tracer splits a run wherever the skeleton branches, so the Coronado
+// bridge arrives as a handful of pieces laid end to end. Each piece is a
+// perfectly good centreline, but the deck profile is computed per run — ramp
+// up, level, ramp down — so building them separately gives a roller-coaster
+// with a dip at every seam. Joined first, the whole crossing gets one profile.
+const CHAIN_GAP_M = 150;
+// Over open water the rule can be much looser. Two bridge ends a few hundred
+// metres apart, both over the bay, pointing at each other, are the same bridge
+// — there is nothing else out there for them to be. On land the same gap would
+// weld a slip road to whatever happened to end near it.
+const CHAIN_GAP_WET_M = 420;
+const CHAIN_COS = Math.cos((70 * Math.PI) / 180);
+function chainBridges(roads) {
+  const runs = roads.map((r) => ({ ...r, pts: r.pts.slice() }));
+  const heading = (pts, end) => {
+    const n = pts.length;
+    const k = Math.min(4, n - 1);
+    const a = end ? pts[n - 1 - k] : pts[k];
+    const b = end ? pts[n - 1] : pts[0];
+    const dx = (b[0] - a[0]) * FRAME; const dy = (b[1] - a[1]) * FRAME;
+    const len = Math.hypot(dx, dy) || 1;
+    return [dx / len, dy / len];
+  };
+  const alive = runs.map(() => true);
+  let joins = 0;
+  for (let pass = 0; pass < 8; pass++) {
+    let made = false;
+    for (let i = 0; i < runs.length; i++) {
+      if (!alive[i]) continue;
+      for (const endA of [0, 1]) {
+        const A = runs[i];
+        const tipA = endA ? A.pts[A.pts.length - 1] : A.pts[0];
+        const tA = heading(A.pts, endA);
+        let best = null; let bestScore = -1;
+        for (let j = 0; j < runs.length; j++) {
+          if (j === i || !alive[j]) continue;
+          for (const endB of [0, 1]) {
+            const B = runs[j];
+            const tipB = endB ? B.pts[B.pts.length - 1] : B.pts[0];
+            const gap = Math.hypot((tipB[0] - tipA[0]) * FRAME,
+              (tipB[1] - tipA[1]) * FRAME);
+            const overWater = groundAt(tipA[0], tipA[1]) < WET_M
+              && groundAt(tipB[0], tipB[1]) < WET_M;
+            const limit = overWater ? CHAIN_GAP_WET_M : CHAIN_GAP_M;
+            if (gap > limit) continue;
+            const tB = heading(B.pts, endB);
+            const cc = -(tA[0] * tB[0] + tA[1] * tB[1]);
+            if (cc < CHAIN_COS) continue;
+            const score = cc - (gap / limit) * 0.2;
+            if (score > bestScore) { bestScore = score; best = { j, endB }; }
+          }
+        }
+        if (!best) continue;
+        const B = runs[best.j];
+        const pa = endA ? runs[i].pts : runs[i].pts.slice().reverse();
+        const pb = best.endB ? B.pts.slice().reverse() : B.pts;
+        runs[i].pts = pa.concat(pb);
+        runs[i].w = Math.max(runs[i].w, B.w);
+        alive[best.j] = false;
+        joins++;
+        made = true;
+      }
+    }
+    if (!made) break;
+  }
+  const out = runs.filter((_, i) => alive[i]);
+  console.log('chained %d bridge runs into %d by joining %d ends',
+    roads.length, out.length, joins);
+  return out;
+}
+const chained = chainBridges(roadsDoc.roads.filter((r) => r.cls === 'bridge'));
+const allRoads = roadsDoc.roads.filter((r) => r.cls !== 'bridge').concat(chained);
+
 const jobs = [];
-for (const road of roadsDoc.roads) {
+for (const road of allRoads) {
   const steps = walk(road.pts, DECK_M);
   if (steps.length < 2) continue;
   const ground = steps.map((s) => groundAt(s.x / FRAME, s.y / FRAME));
@@ -161,7 +236,7 @@ for (const road of roadsDoc.roads) {
     i = j;
   }
 }
-const bridges = roadsDoc.roads.filter((r) => r.cls === 'bridge');
+const bridges = chained;
 let deckN = 0; let markN = 0; let parapetN = 0; let pierN = 0;
 let overWater = 0; let dryOnly = 0;
 let tallest = 0; let longest = null;
@@ -347,6 +422,13 @@ city.bridges = {
     + 'are built where the capture puts them and gaps are not extrapolated.',
 };
 if (longest) city.bridges.tallest = longest;
+
+// Anything appended after this pass has just been truncated away with the old
+// bridges, so its high-water mark is a lie now. Leaving it in place is what
+// silently ate the bridge on the last run: vegetation read a baseCount from a
+// previous cycle, truncated the buffer back to it, and took the new deck with
+// it. The count was still right in the log, and the bridge was gone.
+delete city.vegetation;
 writeFileSync(cityPath, JSON.stringify(city));
 
 console.log('%d parts appended, %d in the plan', parts.length, city.buildingCount);
