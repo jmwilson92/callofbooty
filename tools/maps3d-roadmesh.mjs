@@ -157,6 +157,16 @@ const LAMP_CLEAR_M = 0.6;     // outside the kerb
 const STOP_W = 0.45;          // along the road
 const STOP_INSET_M = 0.6;     // back from the box edge
 
+// Zebra crossings, on the same transitions the stop bars use. Continental
+// style, which is what is painted in California: bars running along the
+// direction of travel, spanning the carriageway, set between the stop bar and
+// the junction itself. Only where the road being stopped carries a centre line
+// — a crossing painted across a service road is detail nobody asked for.
+const ZEBRA_BAR_L = 2.4;      // along the road
+const ZEBRA_BAR_W = 0.5;      // across it
+const ZEBRA_PITCH = 0.95;
+const ZEBRA_OFFSET_M = 2.2;   // from the transition, toward the junction
+
 
 // ── Walk the centrelines in metres ──────────────────────────────────────────
 function walk(pts, stepM) {
@@ -384,6 +394,7 @@ const push = (u, v, rot, w, d, h, base, kind) =>
 
 let deckN = 0; let markN = 0; let kerbN = 0; let wetSteps = 0;
 let yielded = 0; let boxed = 0; let lampN = 0; let stopN = 0;
+let zebraN = 0; let zebraN2 = 0;
 let skipped = 0;
 for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
   const road = roadsDoc.roads[roadIndex];
@@ -413,18 +424,28 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
     // Entering or leaving a box the other road owns: paint a stop bar across
     // this carriageway, on the outside of the step so it sits back from the
     // kerb line rather than under the crossing traffic.
-    if (zone === 'yield' && prevZone !== 'yield' && spec.centre !== 'none') {
-      const back = -(STOP_INSET_M + s.len / 2);
-      push((s.x + s.dir[0] * back) / FRAME, (s.y + s.dir[1] * back) / FRAME,
+    const entering = zone === 'yield' && prevZone !== 'yield';
+    const leaving = zone !== 'yield' && prevZone === 'yield';
+    if ((entering || leaving) && spec.centre !== 'none') {
+      const sgn = entering ? -1 : 1;
+      const at = sgn * (STOP_INSET_M + s.len / 2);
+      push((s.x + s.dir[0] * at) / FRAME, (s.y + s.dir[1] * at) / FRAME,
         s.head, STOP_W, road.w - 0.5, MARK_H,
         DECK_LIFT + DECK_THICK + MARK_H, 'line_white');
       stopN++;
-    } else if (zone !== 'yield' && prevZone === 'yield' && spec.centre !== 'none') {
-      const fwd = STOP_INSET_M + s.len / 2;
-      push((s.x + s.dir[0] * fwd) / FRAME, (s.y + s.dir[1] * fwd) / FRAME,
-        s.head, STOP_W, road.w - 0.5, MARK_H,
-        DECK_LIFT + DECK_THICK + MARK_H, 'line_white');
-      stopN++;
+
+      // The crossing sits between that bar and the junction.
+      const zc = at + sgn * ZEBRA_OFFSET_M;
+      const zx = s.x + s.dir[0] * zc; const zy = s.y + s.dir[1] * zc;
+      const bars = Math.max(2, Math.floor((width - 1.0) / ZEBRA_PITCH));
+      for (let b = 0; b < bars; b++) {
+        const off = (b - (bars - 1) / 2) * ZEBRA_PITCH;
+        push((zx + s.nrm[0] * off) / FRAME, (zy + s.nrm[1] * off) / FRAME,
+          s.head, ZEBRA_BAR_L, ZEBRA_BAR_W, MARK_H,
+          DECK_LIFT + DECK_THICK + MARK_H, 'line_white');
+        zebraN++;
+      }
+      zebraN2++;
     }
     prevZone = zone;
     if (zone === 'yield') { yielded++; travelled += s.len; continue; }
@@ -504,7 +525,8 @@ console.log('%d steps yielded to a more major road at a crossing, %d left '
   + 'unpainted inside a junction box', yielded, boxed);
 console.log('%d street light parts (%d lights) on arterials and collectors',
   lampN, lampN / 2);
-console.log('%d stop bars where a road yields at a crossing', stopN);
+console.log('%d stop bars where a road yields at a crossing, and %d crossings '
+  + 'of %d bars', stopN, zebraN2, zebraN);
 console.log('%d bridges and %d steps over water left for '
   + 'tools/maps3d-bridges.mjs, which runs after the water is dug',
   skipped, wetSteps);
