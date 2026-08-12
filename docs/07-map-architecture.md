@@ -111,21 +111,58 @@ destroyed. Removing supports propagates: a slab with nothing under it goes, and
 what it carried goes with it. Collapse is a solve over a graph of a few thousand
 nodes, not a rigid-body simulation.
 
-The whole map is **3.33 M structural elements**. At two bits each:
+This is built: `tools/structgraph.mjs` is the reference implementation and
+`tools/maps3d-struct.mjs` runs it over all 63,985 records. **The numbers first
+written here were an estimate and they were wrong — 2.3× low.** The real ones,
+measured:
 
-| | Elements | Damage state |
+| | Elements | Share |
 |---|---|---|
-| Tier A (1,141) | 0.65 M | 19% |
-| Tier B (8,950) | 0.96 M | 29% |
-| Tier C (53,595) | 1.73 M | 52% |
-| **Whole map** | **3.33 M** | **0.8 MB** |
-| Worst single building | 13,052 | 3.3 KB |
+| Tier A | 1.15 M | 15% |
+| Tier B | 1.84 M | 24% |
+| Tier C | 4.71 M | 61% |
+| **Whole map** | **7.69 M** | **1.92 MB of damage state** |
+| Worst single building | 25,311 | 6.2 KB |
 
-Nought point eight megabytes for the destruction state of every building in San
-Diego, and 3.3 KB for the worst tower on the map — and the server never holds
-all of it loaded anyway. **This is the number that makes requirements 1 and 3
-compatible.** A late joiner gets the whole city's damage in one packet. A tower
-falling replicates as a few hundred bytes of state change.
+By element: 3.11 M columns, 1.93 M slabs, 2.65 M wall panels. 9,833 structures
+get a circulation core. The estimate was low because it counted columns per bay
+rather than per grid point and gave each storey one slab instead of one per bay —
+and per-bay slabs are what let a hole be blown in a floor, so the extra cost buys
+the thing the requirement is about.
+
+**1.92 MB for the destruction state of every building in San Diego**, 6.2 KB for
+the worst one, 18 bytes for a two-storey house — and the server never holds the
+whole map loaded anyway. **This is the number that makes requirements 1 and 3
+compatible.** A late joiner gets the whole city's damage in one packet; a tower
+falling replicates as a few hundred bytes of state change. Being 2.3× over the
+estimate changes nothing about that argument, which is why it is worth having
+measured rather than argued.
+
+Cost to build and to solve, in JavaScript, which is a floor not a target:
+**1.0 µs to build a building's graph**, and a collapse solve on the 49-storey
+tower — 6,174 elements — is **166 µs**, a two-storey house 4.2 µs.
+
+The rule behaves. On the tallest building on the map:
+
+| Hit | Brought down with it | Left standing |
+|-----|---------------------|---------------|
+| One ground-floor corner column | 47 | 99.2% |
+| The ground-floor column line down one long side | 235 | 96.0% |
+| Every ground-floor column | 6,035 | 0.8% |
+| Every column on storey 24 of 49 | 3,011 | 49.8% |
+
+A corner takes the column line above it and little else. Cutting a whole side
+drops a strip. Taking the ground floor away brings the entire tower down and
+leaves only the walls that stood on grade. A shell through storey 24 removes
+almost exactly the half above it. None of that was tuned — it falls out of the
+load-path rule.
+
+And an invariant worth having checked rather than reasoned about: because the
+sweep resolves the whole load path in one pass, **applying it can never expose
+anything it did not already account for**. Over 2,055 structures with 5–25% of
+their elements shot out at random, the fixed point was reached in two rounds
+every time. If that ever stops holding, a dependency in the sweep points the
+wrong way and buildings would settle in stages instead of at once.
 
 The visual collapse is a **client-side** event played on the state transition —
 Chaos, animation, particles, whatever looks best, costing the server nothing.
