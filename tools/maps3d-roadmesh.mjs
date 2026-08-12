@@ -33,7 +33,12 @@ const arg = (n, d) => {
   const i = args.indexOf('--' + n);
   return i >= 0 && args[i + 1] ? args[i + 1] : d;
 };
-const DIR = arg('dir', 'out');
+// Every other script in the pipeline takes --out. This one took only --dir, and
+// tools/maps3d.md documented it as --out, so the documented command line quietly
+// read and wrote ./out instead of the directory it was given — building on stale
+// data with a healthy-looking log. Same bug family as the rest: a name that
+// stopped matching what is actually used, failing silently. Both spellings now.
+const DIR = arg('out', arg('dir', 'out'));
 const DECK_M = parseFloat(arg('deck', '14'));
 
 const side = JSON.parse(readFileSync(join(DIR, 'sandiego.json'), 'utf8'));

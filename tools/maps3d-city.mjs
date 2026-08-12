@@ -236,6 +236,65 @@ const buildingsNode = gltf.nodes[roots.Buildings];
 const kids = buildingsNode.children ?? [];
 console.log('extracting %d buildings...', kids.length);
 
+// ── Structures ──────────────────────────────────────────────────────────────
+//
+// The packed buffer is a list of boxes. That is the right shape for placing
+// 745,575 instances and the wrong shape for everything that comes next: a
+// building that can be entered, damaged and streamed has to be addressable as
+// one thing, and after decompose() an L-shaped block is two boxes with nothing
+// tying them together.
+//
+// So alongside the parts, this writes one record per source building — the
+// footprint before it was cut up, the storey count, an archetype, and a seed.
+// The interior generator and the destruction graph both read this and neither
+// reads the parts. Emitting it here is not a convenience: the grouping only
+// exists at this point in the pipeline, and cannot be recovered from the buffer
+// afterwards.
+
+// Floor-to-floor by what the building is. An office is not an apartment is not
+// a shed, and using one number for all three puts eleven storeys in a warehouse.
+const ARCHETYPES = {
+  //                    floor  tier   what it is
+  pad:       { floorM: 0,    tier: 0 },
+  house:     { floorM: 3.0,  tier: 1 },   // under 10 m, under 400 m2
+  lowrise:   { floorM: 3.5,  tier: 1 },   // under 10 m, wider — strip retail
+  midrise:   { floorM: 3.2,  tier: 2 },   // 10-20 m — apartments, small offices
+  warehouse: { floorM: 7.0,  tier: 2 },   // big floorplate, tall clear volume
+  highrise:  { floorM: 3.8,  tier: 3 },   // 20-40 m
+  tower:     { floorM: 3.8,  tier: 3 },   // 40 m and up
+};
+
+function archetypeOf(h, areaM2) {
+  if (!(h > 0.4)) return 'pad';
+  if (h >= 40) return 'tower';
+  if (h >= 20) return 'highrise';
+  if (areaM2 >= 2000) return 'warehouse';   // a 15 m shed is not a midrise
+  if (h >= 10) return 'midrise';
+  return areaM2 < 400 ? 'house' : 'lowrise';
+}
+
+// A house is one or two storeys depending on how tall it actually is, which is
+// the distinction the design asks for and the capture happens to carry: the
+// 5-10 m band is the whole suburb, and 7 m is where a bungalow becomes a
+// two-storey. Rounding rather than flooring is what puts the split there.
+function storeysOf(kind, h) {
+  const f = ARCHETYPES[kind].floorM;
+  if (!f) return 0;
+  return Math.max(1, Math.round(h / f));
+}
+
+// Stable across rebuilds and independent of iteration order, because the server
+// and every client have to generate the same interior from it. Position is the
+// only identity a capture building has, so position is what it hashes.
+function seedOf(u, v) {
+  let x = Math.round(u * 4294967296) ^ (Math.round(v * 4294967296) * 2654435761);
+  x = Math.imul(x ^ (x >>> 16), 2246822507);
+  x = Math.imul(x ^ (x >>> 13), 3266489909);
+  return (x ^ (x >>> 16)) >>> 8;          // 24 bits, exact in a float32
+}
+
+const structures = [];
+
 const out = [];
 let skipped = 0;
 let split = 0;
@@ -281,6 +340,24 @@ for (let n = 0; n < kids.length; n++) {
 
   const pieces = decompose(pts, rect);
   split += pieces.length - 1;        // extra parts, not pieces
+
+  // The record describes the whole building, so it carries the rectangle from
+  // before the cut — the pieces are how it is drawn, not what it is.
+  const su = toU(rect.cx); const sv = toV(rect.cy);
+  const sw = rect.w * K; const sd = rect.d * K;
+  const kind = archetypeOf(flat ? 0 : heightM, sw * sd);
+  structures.push({
+    partIndex: out.length,
+    partCount: pieces.length,
+    u: su, v: sv, rot: rect.rotDeg, w: sw, d: sd,
+    h: flat ? PAD_H : heightM,
+    storeys: storeysOf(kind, heightM),
+    floorM: ARCHETYPES[kind].floorM,
+    kind,
+    tier: ARCHETYPES[kind].tier,
+    seed: seedOf(su, sv),
+  });
+
   for (const piece of pieces) {
     // Mercator -> ground. Widths scale by K like everything horizontal.
     out.push({
@@ -332,6 +409,38 @@ console.log('footprint total %s km2',
   (areas.reduce((a, b) => a + b, 0) / 1e6).toFixed(2));
 console.log('outside the frame: %d      outside the playable rect: %d', offFrame, offPlay);
 
+// ── What the interior pass is being handed ──────────────────────────────────
+
+const TIER_NAME = ['—', 'C', 'B', 'A'];
+const byKind = new Map();
+for (const s of structures) {
+  const g = byKind.get(s.kind) ?? { n: 0, storeys: 0, floor: 0, tier: s.tier };
+  g.n++; g.storeys += s.storeys; g.floor += s.w * s.d * s.storeys;
+  byKind.set(s.kind, g);
+}
+const totalFloor = [...byKind.values()].reduce((a, g) => a + g.floor, 0);
+console.log('\n%d structures behind %d parts', structures.length, out.length);
+console.log('archetype    tier   count   storeys   mean   floor area   share');
+for (const [k, g] of [...byKind].sort((a, b) => b[1].floor - a[1].floor)) {
+  console.log('%s %s %s %s %s %s km2 %s%%',
+    k.padEnd(12), TIER_NAME[g.tier].padEnd(6),
+    String(g.n).padStart(6), String(g.storeys).padStart(9),
+    (g.storeys / g.n).toFixed(1).padStart(6),
+    (g.floor / 1e6).toFixed(2).padStart(9),
+    ((g.floor / totalFloor) * 100).toFixed(1).padStart(6));
+}
+const storeyHist = new Map();
+for (const s of structures) {
+  if (s.tier !== 1) continue;
+  storeyHist.set(s.storeys, (storeyHist.get(s.storeys) ?? 0) + 1);
+}
+console.log('tier C storeys: %s',
+  [...storeyHist].sort((a, b) => a[0] - b[0])
+    .map(([n, c]) => `${n}-storey ${c}`).join(', '));
+console.log('total interior floor %s km2 over %s storeys',
+  (totalFloor / 1e6).toFixed(2),
+  structures.reduce((a, s) => a + s.storeys, 0));
+
 // ── Write ───────────────────────────────────────────────────────────────────
 
 // Derived from what was actually built, never a literal kept in step by hand.
@@ -363,6 +472,31 @@ out.forEach((b, i) => {
   bin.writeFloatLE(b.base, o + 32);
 });
 
+// Same rule as the kinds above: the archetype list is what was built, not a
+// literal kept in step by hand.
+const archetypes = [];
+for (const s of structures) if (!archetypes.includes(s.kind)) archetypes.push(s.kind);
+const archIdx = new Map(archetypes.map((k, i) => [k, i]));
+const S_STRIDE = 14;
+const sbin = Buffer.alloc(structures.length * S_STRIDE * 4);
+structures.forEach((s, i) => {
+  const o = i * S_STRIDE * 4;
+  sbin.writeFloatLE(s.partIndex, o);
+  sbin.writeFloatLE(s.partCount, o + 4);
+  sbin.writeFloatLE(s.u, o + 8);
+  sbin.writeFloatLE(s.v, o + 12);
+  sbin.writeFloatLE(s.rot, o + 16);
+  sbin.writeFloatLE(s.w, o + 20);
+  sbin.writeFloatLE(s.d, o + 24);
+  sbin.writeFloatLE(s.h, o + 28);
+  sbin.writeFloatLE(s.storeys, o + 32);
+  sbin.writeFloatLE(s.floorM, o + 36);
+  sbin.writeFloatLE(archIdx.get(s.kind), o + 40);
+  sbin.writeFloatLE(s.tier, o + 44);
+  sbin.writeFloatLE(s.seed, o + 48);
+  sbin.writeFloatLE(0, o + 52);           // flags, reserved
+});
+
 const meta = {
   generatedFor: 'Call of Booty — San Diego (maps3d capture)',
   source: src,
@@ -376,6 +510,18 @@ const meta = {
   buildingFile: 'city-buildings.bin',
   buildingFields: ['u', 'v', 'rotDeg', 'widthM', 'depthM', 'heightM', 'kind', 'flags', 'baseM'],
   buildingFlags: { landmark: 1, water: 2 },
+  structures: {
+    count: structures.length,
+    stride: S_STRIDE,
+    file: 'city-structures.bin',
+    fields: ['partIndex', 'partCount', 'u', 'v', 'rotDeg', 'widthM', 'depthM',
+      'heightM', 'storeys', 'floorHeightM', 'archetype', 'tier', 'seed', 'flags'],
+    archetypes,
+    tiers: { 0: 'pad', 1: 'C — walkable', 2: 'B — open floorplates', 3: 'A — full fit-out' },
+    note: 'One record per source building, grouping its parts in '
+      + 'city-buildings.bin. The interior generator and the destruction graph '
+      + 'read this; neither reads the parts.',
+  },
   arterials: [],
   streets: [],
   stats: [{
@@ -385,6 +531,9 @@ const meta = {
 };
 writeFileSync(join(OUT, 'city.json'), JSON.stringify(meta));
 writeFileSync(join(OUT, 'city-buildings.bin'), bin);
+writeFileSync(join(OUT, 'city-structures.bin'), sbin);
 console.log('\nwrote %s  (%s MB, %d parts)',
   join(OUT, 'city-buildings.bin'), (bin.length / 1048576).toFixed(2), out.length);
+console.log('wrote %s  (%s MB, %d structures)',
+  join(OUT, 'city-structures.bin'), (sbin.length / 1048576).toFixed(2), structures.length);
 console.log('wrote %s', join(OUT, 'city.json'));
