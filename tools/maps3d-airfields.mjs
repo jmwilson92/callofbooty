@@ -35,50 +35,58 @@ const OUT = arg('out', arg('dir', 'out'));
 //
 // lat/lon of each threshold, the width, and the elevation the strip is graded
 // to. AUTHORED, NOT MEASURED — see the note at the top of the file.
+// A runway is a length and a heading, not two guessed corners.
+//
+// The first version of this table stated both thresholds by hand, and both were
+// wrong in the same way: the headings came out too shallow, so every strip lay
+// several degrees off its real alignment and looked it. A runway designator is
+// its MAGNETIC heading rounded to ten degrees, and San Diego's magnetic
+// declination is about 11 degrees east, so the true heading is the designator
+// plus eleven. That is a published number and a derivation, rather than a guess
+// at where a threshold sits, and it is why the strips are described this way.
+//
+//   09/27 magnetic 089.5  ->  true 100.5
+//   18/36 magnetic 180    ->  true 191
+//   11/29 magnetic 110    ->  true 121
+//
+// Lengths are the published figures. Midpoints are still the soft part and are
+// what wants checking against a chart — but a midpoint that is fifty metres out
+// shifts a runway fifty metres, where a heading that is eight degrees out
+// swings its ends by two hundred.
+const DECLINATION_E = 11;
+
 const AIRFIELDS = [
   {
     name: 'San Diego International (KSAN)',
     runways: [
       {
-        id: '09/27', w: 61,
-        a: { lat: 32.7335, lon: -117.2050 },
-        b: { lat: 32.7325, lon: -117.1745 },
+        id: '09/27', w: 61, lengthM: 2865, magHeading: 89.5,
+        mid: { lat: 32.7325, lon: -117.1897 },
       },
     ],
-    // Taxiway parallel to the runway on the terminal side, and the apron.
-    taxiways: [
-      { w: 23, a: { lat: 32.7322, lon: -117.2040 }, b: { lat: 32.7312, lon: -117.1760 } },
-    ],
-    aprons: [
-      { lat: 32.7305, lon: -117.1930, w: 620, d: 240, rotDeg: 2 },
-    ],
+    // Parallel taxiway on the south side, full length, as on the imagery.
+    // Offset is signed: positive is to the right of the take-off direction.
+    taxiways: [{ w: 23, parallelTo: '09/27', offsetM: 130, lengthM: 2700 }],
+    aprons: [{ lat: 32.7300, lon: -117.1950, w: 620, d: 240, rotDeg: -10 }],
   },
   {
     name: 'NAS North Island (KNZY)',
     runways: [
-      // 8,002 ft = 2,439 m, which is the figure worth trusting here; the
-      // thresholds are the part that wants checking against a real chart.
       {
-        id: '18/36', w: 61, lengthM: 2439,
-        a: { lat: 32.7078, lon: -117.2148 },
-        b: { lat: 32.6908, lon: -117.2148 },
+        id: '18/36', w: 61, lengthM: 2439, magHeading: 180,
+        mid: { lat: 32.6993, lon: -117.2153 },
       },
       {
-        id: '11/29', w: 61,
-        a: { lat: 32.7042, lon: -117.2222 },
-        b: { lat: 32.6968, lon: -117.2028 },
+        // Shifted 430 m east of the first estimate: at the original midpoint
+        // the north-west end of this runway ran 400 m out into the bay, which
+        // the terrain check caught before anything was built.
+        id: '11/29', w: 61, lengthM: 2439, magHeading: 110,
+        mid: { lat: 32.7005, lon: -117.2105 },
       },
     ],
-    taxiways: [
-      { w: 23, a: { lat: 32.7072, lon: -117.2108 }, b: { lat: 32.6914, lon: -117.2108 } },
-    ],
-    // North of runway 11/29 and east of the parallel taxiway. At -117.2105 it
-    // straddled 18/36; at 32.6975 it swallowed the eastern threshold of 11/29.
-    // Both were obvious in a render and invisible in every count, which is why
-    // there is now an assertion below that an apron may not touch a runway.
-    aprons: [
-      { lat: 32.7035, lon: -117.2060, w: 500, d: 250, rotDeg: 0 },
-    ],
+    // The flight line is east of 18/36 on the imagery, so the taxiway is too.
+    taxiways: [{ w: 23, parallelTo: '18/36', offsetM: -180, lengthM: 2200 }],
+    aprons: [{ lat: 32.7000, lon: -117.2090, w: 560, d: 260, rotDeg: -1 }],
   },
 ];
 
@@ -287,30 +295,46 @@ function segGap(a1, b1, w1, a2, b2, w2) {
 const KA = kindOf('apron');
 let runwayM = 0; let taxiM = 0; let apronM2 = 0;
 
-/** Stretch a runway about its midpoint to a published length. */
+/** A runway's two thresholds, from its midpoint, true heading and length. */
 function toLength(r) {
-  if (!r.lengthM) return [r.a, r.b];
-  const mid = { lat: (r.a.lat + r.b.lat) / 2, lon: (r.a.lon + r.b.lon) / 2 };
-  const dLat = (r.b.lat - r.a.lat) * M_LAT;
-  const dLon = (r.b.lon - r.a.lon) * M_LON;
-  const have = Math.hypot(dLat, dLon);
-  if (!have) return [r.a, r.b];
-  const k = r.lengthM / have / 2;
+  const trueHdg = (r.magHeading ?? 0) + DECLINATION_E;
+  const t = (trueHdg * Math.PI) / 180;
+  const half = r.lengthM / 2;
+  const dn = Math.cos(t) * half;
+  const de = Math.sin(t) * half;
   return [
-    { lat: mid.lat - (r.b.lat - r.a.lat) * k, lon: mid.lon - (r.b.lon - r.a.lon) * k },
-    { lat: mid.lat + (r.b.lat - r.a.lat) * k, lon: mid.lon + (r.b.lon - r.a.lon) * k },
+    { lat: r.mid.lat - dn / M_LAT, lon: r.mid.lon - de / M_LON },
+    { lat: r.mid.lat + dn / M_LAT, lon: r.mid.lon + de / M_LON },
+  ];
+}
+
+/** A parallel taxiway, offset perpendicular from the runway it serves. */
+function taxiEnds(t, field) {
+  const r = field.runways.find((x) => x.id === t.parallelTo) ?? field.runways[0];
+  const trueHdg = (r.magHeading ?? 0) + DECLINATION_E;
+  const th = (trueHdg * Math.PI) / 180;
+  const half = (t.lengthM ?? r.lengthM) / 2;
+  // Perpendicular, to the right of the take-off direction.
+  const pn = Math.cos(th + Math.PI / 2) * t.offsetM;
+  const pe = Math.sin(th + Math.PI / 2) * t.offsetM;
+  const cn = r.mid.lat + pn / M_LAT;
+  const ce = r.mid.lon + pe / M_LON;
+  const dn = Math.cos(th) * half;
+  const de = Math.sin(th) * half;
+  return [
+    { lat: cn - dn / M_LAT, lon: ce - de / M_LON },
+    { lat: cn + dn / M_LAT, lon: ce + de / M_LON },
   ];
 }
 
 // Where the aprons actually go.
 //
-// Placing an apron by hand has now been wrong three times: across runway 18/36,
-// then across the threshold of 11/29, then on top of North Island's hangars. It
-// is the one piece of geometry here with nothing to derive it from, and guessing
-// it repeatedly is not a method. So the table gives a hint and this searches
-// outward from it for a position that clears every runway and sits on the
-// fewest buildings, preferring to stay near a taxiway — which is where an apron
-// belongs, since that is how an aircraft gets on and off it.
+// Placing an apron by hand was wrong three times running — across runway 18/36,
+// then across the eastern threshold of 11/29, then on top of North Island's
+// hangars. It is the one piece of geometry here with nothing to derive it from,
+// so the table gives a hint and this searches outward from it for ground that
+// clears every runway, sits on the fewest buildings, is on the taxiway's side
+// of the runway, and is not in the bay.
 const buildingXY = [];
 {
   const bKinds = new Set(['building', 'pad']);
@@ -334,9 +358,10 @@ function apronSegment(ap) {
 
 function placeApron(field, hint) {
   const runways = field.runways.map((r) => [...toLength(r), r.w / 2, r.id]);
-  const taxi = field.taxiways.map((t) => [t.a, t.b, t.w / 2]);
+  const taxi = field.taxiways.map((t) => [...taxiEnds(t, field), t.w / 2]);
   const STEP_M = 40;
   const REACH_M = 900;
+  const TAXI_GAP_M = 25;
   let best = null;
   for (let dy = -REACH_M; dy <= REACH_M; dy += STEP_M) {
     for (let dx = -REACH_M; dx <= REACH_M; dx += STEP_M) {
@@ -348,38 +373,27 @@ function placeApron(field, hint) {
       }
       if (clash) continue;
 
-      // Buildings whose footprint circle reaches inside the apron rectangle.
-      const cx = toU(cand.lon) * FRAME; const cy = toV(cand.lat) * FRAME;
       const th = (cand.rotDeg * Math.PI) / 180;
       const ux = Math.cos(th); const uy = Math.sin(th);
-      let on = 0;
-      for (let i = 0; i < buildingXY.length; i += 3) {
-        const px = buildingXY[i] - cx; const py = buildingXY[i + 1] - cy;
-        const la = Math.abs(px * ux + py * uy); const lb = Math.abs(-px * uy + py * ux);
-        const r = buildingXY[i + 2];
-        if (la <= cand.w / 2 + r && lb <= cand.d / 2 + r) on++;
-      }
-      // An apron you can only reach by crossing a runway is not an apron. The
-      // first search put KSAN's on the north side while its taxiway is south,
-      // 174 m away as the crow flies and across the 09/27 strip in practice.
-      let near = Infinity; let blocked = false;
       const acx = toU(cand.lon) * FRAME; const acy = toV(cand.lat) * FRAME;
+
+      // An apron you can only reach by crossing a runway is not an apron.
+      let near = Infinity; let blocked = false;
       for (const [ta, tb, tw] of taxi) {
         near = Math.min(near, segGap(a, b, cand.d / 2, ta, tb, tw));
-        const t0 = { lat: (ta.lat + tb.lat) / 2, lon: (ta.lon + tb.lon) / 2 };
-        const tx = toU(t0.lon) * FRAME; const ty = toV(t0.lat) * FRAME;
+        const tx = toU((ta.lon + tb.lon) / 2) * FRAME;
+        const ty = toV((ta.lat + tb.lat) / 2) * FRAME;
         for (const [ra, rb] of runways) {
           const rx0 = toU(ra.lon) * FRAME; const ry0 = toV(ra.lat) * FRAME;
           const rx1 = toU(rb.lon) * FRAME; const ry1 = toV(rb.lat) * FRAME;
-          const side = (px, py) => Math.sign((rx1 - rx0) * (py - ry0) - (ry1 - ry0) * (px - rx0));
-          if (side(acx, acy) && side(tx, ty) && side(acx, acy) !== side(tx, ty)) blocked = true;
+          const side2 = (px, py) => Math.sign((rx1 - rx0) * (py - ry0) - (ry1 - ry0) * (px - rx0));
+          if (side2(acx, acy) && side2(tx, ty) && side2(acx, acy) !== side2(tx, ty)) blocked = true;
         }
       }
       if (blocked) continue;
 
-      // And it has to be on land. "Clear of every building" is trivially true
-      // over the bay, and the search duly parked San Diego International's
-      // apron in the water — the one place with no buildings for 600 m.
+      // And it has to be on land: "clear of every building" is trivially true
+      // over the bay, and the search duly parked KSAN's apron in the water.
       let wet = false;
       for (let i = -3; i <= 3 && !wet; i++) {
         for (let j = -3; j <= 3; j++) {
@@ -391,10 +405,14 @@ function placeApron(field, hint) {
         }
       }
       if (wet) continue;
-      // Abut the taxiway, do not swallow it. Scoring the gap as max(0, near)
-      // made overlap free, and the search happily buried 131 m of taxiway under
-      // the apron. Aiming at a small positive gap puts the apron alongside.
-      const TAXI_GAP_M = 25;
+
+      let on = 0;
+      for (let i = 0; i < buildingXY.length; i += 3) {
+        const px = buildingXY[i] - acx; const py = buildingXY[i + 1] - acy;
+        const la = Math.abs(px * ux + py * uy); const lb = Math.abs(-px * uy + py * ux);
+        const r = buildingXY[i + 2];
+        if (la <= cand.w / 2 + r && lb <= cand.d / 2 + r) on++;
+      }
       const score = on * 10000 + Math.abs(near - TAXI_GAP_M);
       if (!best || score < best.score) best = { cand, on, near, score, dx, dy };
     }
@@ -409,12 +427,14 @@ for (const field of AIRFIELDS) {
     const g = gradeStrip(ra, rb, r.w / 2);
     pave(g, r.w / 2, 'runway', { markings: true });
     runwayM += g.lenM;
-    console.log('  runway %s  %s m x %s m, graded %s to %s m (%s%% gradient)',
-      r.id, g.lenM.toFixed(0), r.w, g.ea.toFixed(1), g.eb.toFixed(1),
+    console.log('  runway %s  %s m x %s m, true %s deg, graded %s to %s m (%s%% gradient)',
+      r.id, g.lenM.toFixed(0), r.w, (r.magHeading + DECLINATION_E).toFixed(1),
+      g.ea.toFixed(1), g.eb.toFixed(1),
       ((Math.abs(g.eb - g.ea) / g.lenM) * 100).toFixed(2));
   }
   for (const t of field.taxiways) {
-    const g = gradeStrip(t.a, t.b, t.w / 2);
+    const [ta, tb] = taxiEnds(t, field);
+    const g = gradeStrip(ta, tb, t.w / 2);
     pave(g, t.w / 2, 'taxiway');
     taxiM += g.lenM;
     console.log('  taxiway    %s m x %s m', g.lenM.toFixed(0), t.w);
@@ -460,7 +480,10 @@ for (const field of AIRFIELDS) {
     laid.push([a, b, r.w / 2]); movement.push([a, b, r.w / 2]);
     strips.push([a, b, r.w / 2, `${field.name} ${r.id}`]);
   }
-  for (const t of field.taxiways) { laid.push([t.a, t.b, t.w / 2]); movement.push([t.a, t.b, t.w / 2]); }
+  for (const t of field.taxiways) {
+    const [ta, tb] = taxiEnds(t, field);
+    laid.push([ta, tb, t.w / 2]); movement.push([ta, tb, t.w / 2]);
+  }
   for (const ap of field.placedAprons) {
     const [a, b] = apronSegment(ap);
     laid.push([a, b, ap.d / 2]);
