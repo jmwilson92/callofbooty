@@ -205,6 +205,12 @@ for (let y = 0; y < W; y++) {
 // each part sits, which is close enough to a painter's sort for a plan view.
 const KIND_COLOUR = {
   building: [0.402, 0.386, 0.358],
+  runway: [0.088, 0.086, 0.090],
+  taxiway: [0.105, 0.102, 0.098],
+  apron: [0.140, 0.138, 0.134],
+  runway_centreline: [0.900, 0.900, 0.880],
+  runway_threshold: [0.920, 0.920, 0.900],
+  runway_light: [0.760, 0.700, 0.320],
   road_deck: [0.052, 0.051, 0.055],
   path: [0.512, 0.470, 0.398],
   pad: [0.430, 0.424, 0.412],

@@ -19,6 +19,7 @@ what the one before it wrote.
 | 7 | `maps3d-bridges.mjs` | appends to `city-buildings.bin` | Builds the bridges: ramped deck, markings, parapets and piers. **Must run after 6** — a part's elevation is relative to the terrain under it, so a bridge built before the dig sinks with the bed it spans. |
 | 8 | `maps3d-vegetation.mjs` | appends to `city-buildings.bin` | Scatters trees, shrubs and rocks from the land cover, and street trees along the verges. Reads the buffer to find the buildings, so it runs after 2 and 5. |
 | 9 | `maps3d-doors.mjs` | rewrites `city-structures.bin` | Gives every building an entrance and tells it what the ground under it does: nearest street, which face of the footprint it is on, and the graded elevation at the door and across the plan. **Must run after 6** — it samples the finished heightmap, and a door placed before the water dig sits at the wrong height. Rewrites the record in place; base fields are copied through untouched, so re-running is safe. |
+| 10 | `maps3d-airfields.mjs` | rewrites the heightmap, appends to `city-buildings.bin` | **The only authored geometry in the pipeline.** The capture has no aeroway node of any kind — not even an empty group, unlike `Roads_Rail` and the rest — so KSAN's runway 09/27 and North Island's 18/36 and 11/29 do not exist to be recovered and are laid from published airfield data instead. Grades each strip flat to a least-squares fit of the ground beneath it, clamped to the 1% a runway is allowed, then paves, marks and lights it. **Must run after 6** for the same reason the doors pass does. Correct the alignments in the `AIRFIELDS` table, not in code. |
 | — | `structgraph.mjs` | nothing | Not a step. The reference implementation of the structural graph — columns, slabs, wall panels, the circulation core, and the load-path solve that decides what collapses. Derived from the record and a seed, never stored, because the server and every client have to build the identical graph from the same 88 bytes. Whatever builds this in the engine must agree with it index for index. |
 | — | `maps3d-struct.mjs` | nothing | Runs the graph over all 63,985 records and prints the evidence: 7.69 M elements, 1.92 MB of damage state, determinism, collapse behaviour, and the two-round fixed point. Exits non-zero if the fixed point is ever missed. |
 | — | `interior-a.mjs` | nothing | Not a step. The Tier A generator — a lift core taken from the structural graph, fire stairs, a lobby, escalators, and a corridor cross running out to all four facades with rooms in the four quadrants off it. Derived from the seed, never stored. |
@@ -37,6 +38,7 @@ node tools/maps3d-water.mjs    capture.glb --out out
 node tools/maps3d-bridges.mjs  --out out
 node tools/maps3d-vegetation.mjs --out out
 node tools/maps3d-doors.mjs    --out out
+node tools/maps3d-airfields.mjs --out out
 node tools/maps3d-preview.mjs  --out out
 ```
 
@@ -84,6 +86,7 @@ twice for something that is.
 | `Roads_Paths` | 118,494 | The largest road class in the capture, and the last one anybody thought to look for. 442 km. |
 | `Roads_Bridge` | 29,425 | Stored as two thin edge strips, not a filled ribbon. |
 | `Roads_Rail`, `_Ferry`, `_Tunnel`, `_Sidewalk`, `_Crosswalk`, `_Parking` | **0** | Empty. Do not plan work that depends on them. |
+| *aeroway of any kind* | **absent** | Not empty — **absent**. There is no runway, taxiway or apron group at all, so both airfields come through as ordinary paved service roads and anonymous boxes. `maps3d-airfields.mjs` authors them. |
 | `LandCover_Grass` | 212,080 | |
 | `LandCover_Wood` | 67,712 | |
 | `LandCover_Urban` | 62,822 | A classification polygon draped on the terrain — 82% of its vertices sit within a metre of the ground, with a symmetric tail either side, which is sampling noise and not structure. There is nothing in it but the colour it already contributes to the surface map. |
