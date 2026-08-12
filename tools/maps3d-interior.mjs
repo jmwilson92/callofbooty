@@ -11,7 +11,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
-import { buildInterior } from './interior-c.mjs';
+import { buildInterior as buildC } from './interior-c.mjs';
+import { buildInterior as buildA } from './interior-a.mjs';
+import { buildGraph } from './structgraph.mjs';
 
 const args = process.argv.slice(2);
 const arg = (n, d) => {
@@ -38,15 +40,28 @@ const recAt = (i) => ({
   groundMinM: rd(i, 'groundMinM'), groundMaxM: rd(i, 'groundMaxM'),
 });
 
-const TIER_C = [];
-for (let i = 0; i < S.count; i++) if (rd(i, 'tier') === 1) TIER_C.push(i);
-console.log('%s tier C structures of %s\n',
-  TIER_C.length.toLocaleString('en-GB'), S.count.toLocaleString('en-GB'));
+// Tier A is a core with a corridor round it; tier C is a tree of rooms. They
+// are different generators and the only thing they share is the record they
+// read and the shape they hand back.
+const TIER = arg('tier', 'C').toUpperCase();
+const WANT = TIER === 'A' ? 3 : 1;
+const buildInterior = TIER === 'A'
+  ? (r) => buildA(r, buildGraph(r))
+  : buildC;
+
+const PICKED = [];
+for (let i = 0; i < S.count; i++) if (rd(i, 'tier') === WANT) PICKED.push(i);
+const TIER_C = PICKED;
+console.log('%s tier %s structures of %s\n',
+  PICKED.length.toLocaleString('en-GB'), TIER, S.count.toLocaleString('en-GB'));
 
 // ── The budget ──────────────────────────────────────────────────────────────
 
 const kit = new Map();
 let placements = 0; let rooms = 0; let buried = 0; let plinthed = 0; let stairless = 0;
+let coreInvented = 0; let coreTooTight = 0; let escalators = 0;
+let lifts = 0; let stairFlights = 0; const useCount = {};
+let withLower = 0; let lowerTotal = 0; const aFalls = [];
 let worst = 0; let worstIdx = 0;
 let tinyRooms = 0; let unreachable = 0;
 const perLevel = []; const roomAreas = [];
@@ -60,19 +75,48 @@ for (const i of TIER_C) {
     rooms += l.rooms.length;
     perLevel.push(l.rooms.length);
     for (const rm of l.rooms) { if (rm.area < 2) tinyRooms++; roomAreas.push(rm.area); }
-    // Every partition wall carries exactly one door and the rooms come from a
-    // binary split, so rooms = walls + 1 on every level. If that ever fails the
-    // tree is not a tree and something is sealed off.
-    if (l.rooms.length !== l.walls + 1) unreachable++;
+    if (TIER === 'A') {
+      // A tier A floor is reachable if every room either is the corridor, is
+      // open to it, or shares an edge with it. Nothing hangs off another room.
+      // A tier A floor is reachable if every room touches the corridor, or
+      // touches an open zone that does. Two hops, no more: a cellular office
+      // opens onto the open plan, the open plan opens onto the corridor.
+      const arms = l.rooms.filter((x) => x.corridor);
+      const edge = (a, b) => (Math.abs(a.x1 - b.x0) < 0.01 || Math.abs(a.x0 - b.x1) < 0.01
+        ? a.y0 < b.y1 - 0.01 && a.y1 > b.y0 + 0.01
+        : (Math.abs(a.y1 - b.y0) < 0.01 || Math.abs(a.y0 - b.y1) < 0.01)
+          && a.x0 < b.x1 - 0.01 && a.x1 > b.x0 + 0.01);
+      const opens = l.rooms.filter((x) => x.open && arms.some((a) => edge(x, a)));
+      for (const rm of l.rooms) {
+        if (rm.corridor || !arms.length) continue;
+        if (arms.some((a) => edge(rm, a))) continue;
+        if (opens.some((o) => edge(rm, o))) continue;
+        unreachable++; break;
+      }
+    } else if (l.rooms.length !== l.walls + 1) {
+      // Every partition wall carries exactly one door and the rooms come from a
+      // binary split, so rooms = walls + 1 on every level. If that ever fails
+      // the tree is not a tree and something is sealed off.
+      unreachable++;
+    }
   }
   if (it.stairless) stairless++;
+  if (TIER === 'A') {
+    if (!it.coreFromGraph) coreInvented++;
+    if (!it.coreOK) coreTooTight++;
+    if (it.escalator) escalators++;
+    if (it.lowerLevels > 0) { withLower++; lowerTotal += it.lowerLevels; }
+    aFalls.push(it.fall);
+    lifts += it.lifts; stairFlights += it.stairs;
+    for (const l of it.levels) useCount[l.use] = (useCount[l.use] ?? 0) + 1;
+  }
   if (it.buried) buried++; else if (it.plinthM > 0.15) plinthed++;
   if (it.placements.length > worst) { worst = it.placements.length; worstIdx = i; }
 }
 const ms = Date.now() - t0;
 
 console.log('instances');
-console.log('  tier C total     %s M over %s rooms',
+console.log('  tier %s total     %s M over %s rooms', TIER,
   (placements / 1e6).toFixed(2), rooms.toLocaleString('en-GB'));
 console.log('  per building     %s mean, %s worst',
   (placements / TIER_C.length).toFixed(0), worst.toLocaleString('en-GB'));
@@ -100,19 +144,50 @@ for (const [k, n] of rows) {
 }
 console.log('  %d distinct pieces', rows.length);
 
+if (TIER === 'A') {
+  console.log('\ncirculation');
+  console.log('  %s lift cars over %s buildings, %s mean',
+    lifts.toLocaleString('en-GB'), PICKED.length.toLocaleString('en-GB'),
+    (lifts / PICKED.length).toFixed(1));
+  console.log('  %s stair flights per floor, %s mean',
+    stairFlights.toLocaleString('en-GB'), (stairFlights / PICKED.length).toFixed(2));
+  console.log('  %s lobbies get escalators', escalators.toLocaleString('en-GB'));
+  console.log('  core taken from the structural graph in %s, invented in %s, '
+    + 'too tight for a corridor in %s',
+    (PICKED.length - coreInvented).toLocaleString('en-GB'),
+    coreInvented.toLocaleString('en-GB'), coreTooTight.toLocaleString('en-GB'));
+  console.log('  floors by use  %s', Object.entries(useCount)
+    .sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n.toLocaleString('en-GB')}`).join('   '));
+}
+
 console.log('\nsitting on the ground');
-console.log('  %s buildings sit level or near enough (fall under 0.15 m)',
-  (TIER_C.length - buried - plinthed).toLocaleString('en-GB'));
-console.log('  %s need a plinth on the low side, up to 1.2 m',
-  plinthed.toLocaleString('en-GB'));
-console.log('  %s fall more than 1.2 m and need a partly buried lower level',
-  buried.toLocaleString('en-GB'));
-console.log('  %s have an upper floor but no plate for a straight stair run — '
-  + 'they need a spiral in the kit', stairless.toLocaleString('en-GB'));
+if (TIER === 'A') {
+  // A tower is cut into the slope, not sat on it, so plinths do not apply — the
+  // downhill side comes out of the ground and becomes floor.
+  aFalls.sort((a, b) => a - b);
+  console.log('  fall across the plate  p50 %s m   p90 %s m   max %s m',
+    aFalls[aFalls.length >> 1].toFixed(2),
+    aFalls[Math.floor(aFalls.length * 0.9)].toFixed(2),
+    aFalls[aFalls.length - 1].toFixed(2));
+  console.log('  %s buildings are cut deep enough to gain a lower ground level, '
+    + '%s such levels in all', withLower.toLocaleString('en-GB'),
+    lowerTotal.toLocaleString('en-GB'));
+  console.log('  %s plates too narrow for a core get a single stair against the '
+    + 'long wall instead', coreTooTight.toLocaleString('en-GB'));
+} else {
+  console.log('  %s buildings sit level or near enough (fall under 0.15 m)',
+    (PICKED.length - buried - plinthed).toLocaleString('en-GB'));
+  console.log('  %s need a plinth on the low side, up to 1.2 m',
+    plinthed.toLocaleString('en-GB'));
+  console.log('  %s fall more than 1.2 m and need a partly buried lower level',
+    buried.toLocaleString('en-GB'));
+  console.log('  %s have an upper floor but no plate for a straight stair run — '
+    + 'they need a spiral in the kit', stairless.toLocaleString('en-GB'));
+}
 
 console.log('\nchecks');
 console.log('  connectivity     %s',
-  unreachable ? `${unreachable} levels where rooms != walls + 1` : 'every room reachable on every level');
+  unreachable ? `${unreachable} levels with an unreachable room` : 'every room reachable on every level');
 console.log('  rooms under 2 m2 %s (furniture is skipped in these)', tinyRooms.toLocaleString('en-GB'));
 
 let drift = 0;
@@ -142,7 +217,8 @@ if (PLAN !== null) {
   else {
     for (const i of TIER_C) {
       const r = recAt(i);
-      if (r.archetype === 'house' && Math.round(r.storeys) === 2
+      if (TIER === 'A' ? Math.round(r.storeys) >= 8
+        : r.archetype === 'house' && Math.round(r.storeys) === 2
         && r.widthM > 11 && r.depthM > 9) { pick = i; break; }
     }
   }
@@ -151,12 +227,16 @@ if (PLAN !== null) {
   console.log('\nplan: structure %d — %s, %s x %s m, %d storeys, %s',
     pick, r.archetype, r.widthM.toFixed(1), r.depthM.toFixed(1),
     Math.round(r.storeys),
-    it.buried ? `buried lower level (${it.fall.toFixed(1)} m of fall)`
-      : `${it.plinthM.toFixed(2)} m plinth`);
+    TIER === 'A'
+      ? `${it.lifts} lifts, ${it.stairs} stairs, ${it.escalator ? 'escalators' : 'no escalator'}`
+        + `, ${it.fall.toFixed(1)} m of fall`
+      : it.buried ? `buried lower level (${it.fall.toFixed(1)} m of fall)`
+        : `${it.plinthM.toFixed(2)} m plinth`);
 
   const PAD = 30;
   const SC = 46;                       // pixels per metre
-  const levels = it.levels.length;
+  const MAXL = parseInt(arg('planLevels', '4'), 10);
+  const levels = Math.min(it.levels.length, MAXL);
   const w = Math.round(r.widthM * SC) + PAD * 2;
   const hOne = Math.round(r.depthM * SC) + PAD * 2;
   const H = hOne * levels;
@@ -181,6 +261,12 @@ if (PLAN !== null) {
     door_front: [255, 90, 60], door_shop: [255, 90, 60],
     window_small: [110, 190, 235], window_shopfront: [110, 190, 235],
     stair_flight: [150, 235, 150], stair_opening: [90, 150, 90],
+    // tier A
+    stair_flight_dogleg: [150, 235, 150], door_fire: [90, 200, 110],
+    lift_shaft: [255, 120, 220], lift_door: [255, 120, 220],
+    lift_door_lobby: [255, 120, 220], escalator: [255, 210, 80],
+    door_revolving: [255, 90, 60], facade_curtain: [110, 190, 235],
+    facade_window: [110, 190, 235], wc_block: [120, 160, 200],
   };
   for (let k = 0; k < levels; k++) {
     const oy = k * hOne;
@@ -193,6 +279,11 @@ if (PLAN !== null) {
     line(px(-r.widthM / 2), py(r.depthM / 2), px(-r.widthM / 2), py(-r.depthM / 2), [120, 120, 130]);
     // rooms
     for (const rm of it.levels[k].rooms) {
+      if (rm.corridor) {
+        for (let yy = py(rm.y0); yy <= py(rm.y1); yy += 3) {
+          for (let xx = px(rm.x0); xx <= px(rm.x1); xx += 3) put(xx, yy, [52, 58, 70]);
+        }
+      }
       line(px(rm.x0), py(rm.y0), px(rm.x1), py(rm.y0), [60, 66, 74]);
       line(px(rm.x1), py(rm.y0), px(rm.x1), py(rm.y1), [60, 66, 74]);
       line(px(rm.x1), py(rm.y1), px(rm.x0), py(rm.y1), [60, 66, 74]);
@@ -202,7 +293,7 @@ if (PLAN !== null) {
       if (Math.abs(p.z - it.levels[k].z) > 0.01) continue;
       const c = COL[p.kit];
       const x = px(p.x); const y = py(p.y);
-      if (p.kit === 'wall_partition') continue;
+      if (p.kit === 'wall_partition' || p.kit === 'wall_core') continue;
       if (c) box(x, y, 3, 3, c);
       else box(x, y, 2, 2, [130, 120, 150]);           // furniture
     }
@@ -243,5 +334,6 @@ if (PLAN !== null) {
     chunk('IDAT', deflateSync(raw, { level: 6 })),
     chunk('IEND', Buffer.alloc(0)),
   ]));
-  console.log('wrote %s — %d levels stacked, ground floor at the top', dest, levels);
+  console.log('wrote %s — %d of %d levels stacked, ground floor at the top',
+  dest, levels, it.levels.length);
 }

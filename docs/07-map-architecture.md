@@ -98,6 +98,62 @@ pieces: wall and window panels, door units, stair flights, lift cars, desks,
 chairs, monitors, shelving, planters. The generator places them. That is the
 whole difference between a plan that ships and one that does not.
 
+### Tier A — built
+
+`tools/interior-a.mjs` lays out all 1,141. **A tower is not Tier C with more
+rooms in it.** A house is a tree of rooms and you get everywhere by walking
+through other rooms; a tower is a core with corridors off it and everything
+hanging off those. That difference is the whole file.
+
+The core is not chosen here — `structgraph.mjs` already places one, as a set of
+shear walls holding the building up, and the interior is built around that same
+bay or the lift shaft and the thing carrying the load end up in different places.
+**1,101 of 1,141 take their core straight from the structural graph**; 40 have a
+single-bay plate with no core in the graph and get one cut in the middle.
+
+| | |
+|---|---|
+| Instances | **1.48 M**, 1,295 per building, 13,341 worst |
+| Rooms | 118,187 — 8 per level at p50, 39.5 m² at p50 |
+| Generation | 468 µs a building |
+| Circulation | **3,932 lift cars** (3.4 mean), 2 stair flights per floor, 634 lobbies with escalators |
+| Floors | 4,661 office, 3,195 residential, 1,141 lobby, 1,141 plant |
+
+Floor use is decided once per building from its seed — commercial low,
+residential high, plant at the top — because an office plate and an apartment
+plate are not the same plan.
+
+Two things the connectivity check found that no count ever would have:
+
+- **A sliver belonging to nothing.** Where the depth left behind the perimeter
+  offices was too thin to be a room it was simply dropped, leaving a gap — on one
+  building 0.15 m wide — between the corridor and the offices. Every room on that
+  floor was then unreachable because it no longer touched anything. **3,275
+  floors.**
+- **A ring corridor strands the corners.** A corridor that only circles the core
+  touches the middle of each facade and nothing else, so the four corner rooms
+  hang off nothing. **2,822 floors.** The fix is architectural rather than
+  numerical: run the corridor out to all four facades as a cross, which leaves
+  four quadrants, and a quadrant always has an arm along two of its sides.
+
+Within a quadrant, rooms are cut across its longer dimension so each lands on an
+arm, and any depth left behind them becomes open plan — cellular offices at the
+glass where the daylight is, open floor behind. That is how a real plate works,
+and it is also the difference between a floor that is all corridor and one worth
+fighting across.
+
+Two more the run settled:
+
+- **47 plates are too narrow for a core and a corridor round it** — between 3.3
+  and 6.8 m across and up to eleven storeys. They are stair towers, not offices,
+  and they now get a single flight against the long wall. Before that they had no
+  way up at all.
+- **A tower is cut into a slope, not sat on one.** Tier A's median fall is 2.32 m
+  and p90 is 11.60 m, so the plate is levelled at the high side and the downhill
+  side comes out of the ground: **439 buildings gain a lower ground level, 856
+  such levels in all.** Each is playable floor with daylight on one side and
+  earth on the other.
+
 ### Tier C — built
 
 `tools/interior-c.mjs` lays out all 53,595 of them and `tools/maps3d-interior.mjs`
