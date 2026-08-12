@@ -263,6 +263,27 @@ function pave(g, halfW, kindName, opts = {}) {
 
 // ── Build ───────────────────────────────────────────────────────────────────
 
+/** Metres of clearance between two capsules; negative means they overlap. */
+function segGap(a1, b1, w1, a2, b2, w2) {
+  const P = (p) => [toU(p.lon) * FRAME, toV(p.lat) * FRAME];
+  const [ax, ay] = P(a1); const [bx, by] = P(b1);
+  const [cx, cy] = P(a2); const [dx2, dy2] = P(b2);
+  let best = Infinity;
+  const near = (px, py, qx, qy, rx, ry) => {
+    const vx = rx - qx; const vy = ry - qy;
+    const L = vx * vx + vy * vy;
+    const t = L ? Math.max(0, Math.min(1, ((px - qx) * vx + (py - qy) * vy) / L)) : 0;
+    return Math.hypot(px - (qx + vx * t), py - (qy + vy * t));
+  };
+  for (let i = 0; i <= 40; i++) {
+    const t = i / 40;
+    best = Math.min(best, near(ax + (bx - ax) * t, ay + (by - ay) * t, cx, cy, dx2, dy2));
+    best = Math.min(best, near(cx + (dx2 - cx) * t, cy + (dy2 - cy) * t, ax, ay, bx, by));
+  }
+  return best - w1 - w2;
+}
+
+
 const KA = kindOf('apron');
 let runwayM = 0; let taxiM = 0; let apronM2 = 0;
 
@@ -279,6 +300,106 @@ function toLength(r) {
     { lat: mid.lat - (r.b.lat - r.a.lat) * k, lon: mid.lon - (r.b.lon - r.a.lon) * k },
     { lat: mid.lat + (r.b.lat - r.a.lat) * k, lon: mid.lon + (r.b.lon - r.a.lon) * k },
   ];
+}
+
+// Where the aprons actually go.
+//
+// Placing an apron by hand has now been wrong three times: across runway 18/36,
+// then across the threshold of 11/29, then on top of North Island's hangars. It
+// is the one piece of geometry here with nothing to derive it from, and guessing
+// it repeatedly is not a method. So the table gives a hint and this searches
+// outward from it for a position that clears every runway and sits on the
+// fewest buildings, preferring to stay near a taxiway — which is where an apron
+// belongs, since that is how an aircraft gets on and off it.
+const buildingXY = [];
+{
+  const bKinds = new Set(['building', 'pad']);
+  for (let p = 0; p < baseCount; p++) {
+    const o = p * STRIDE * 4;
+    if (!bKinds.has(kinds[Math.round(bin.readFloatLE(o + 24))])) continue;
+    buildingXY.push(bin.readFloatLE(o) * FRAME, bin.readFloatLE(o + 4) * FRAME,
+      Math.max(bin.readFloatLE(o + 12), bin.readFloatLE(o + 16)) / 2);
+  }
+}
+
+function apronSegment(ap) {
+  const th = (ap.rotDeg * Math.PI) / 180;
+  const hLon = ((ap.w / 2) * Math.cos(th)) / M_LON;
+  const hLat = ((ap.w / 2) * Math.sin(th)) / M_LAT;
+  return [
+    { lat: ap.lat - hLat, lon: ap.lon - hLon },
+    { lat: ap.lat + hLat, lon: ap.lon + hLon },
+  ];
+}
+
+function placeApron(field, hint) {
+  const runways = field.runways.map((r) => [...toLength(r), r.w / 2, r.id]);
+  const taxi = field.taxiways.map((t) => [t.a, t.b, t.w / 2]);
+  const STEP_M = 40;
+  const REACH_M = 900;
+  let best = null;
+  for (let dy = -REACH_M; dy <= REACH_M; dy += STEP_M) {
+    for (let dx = -REACH_M; dx <= REACH_M; dx += STEP_M) {
+      const cand = { ...hint, lat: hint.lat + dy / M_LAT, lon: hint.lon + dx / M_LON };
+      const [a, b] = apronSegment(cand);
+      let clash = false;
+      for (const [ra, rb, halfW] of runways) {
+        if (segGap(a, b, cand.d / 2, ra, rb, halfW) <= 0) { clash = true; break; }
+      }
+      if (clash) continue;
+
+      // Buildings whose footprint circle reaches inside the apron rectangle.
+      const cx = toU(cand.lon) * FRAME; const cy = toV(cand.lat) * FRAME;
+      const th = (cand.rotDeg * Math.PI) / 180;
+      const ux = Math.cos(th); const uy = Math.sin(th);
+      let on = 0;
+      for (let i = 0; i < buildingXY.length; i += 3) {
+        const px = buildingXY[i] - cx; const py = buildingXY[i + 1] - cy;
+        const la = Math.abs(px * ux + py * uy); const lb = Math.abs(-px * uy + py * ux);
+        const r = buildingXY[i + 2];
+        if (la <= cand.w / 2 + r && lb <= cand.d / 2 + r) on++;
+      }
+      // An apron you can only reach by crossing a runway is not an apron. The
+      // first search put KSAN's on the north side while its taxiway is south,
+      // 174 m away as the crow flies and across the 09/27 strip in practice.
+      let near = Infinity; let blocked = false;
+      const acx = toU(cand.lon) * FRAME; const acy = toV(cand.lat) * FRAME;
+      for (const [ta, tb, tw] of taxi) {
+        near = Math.min(near, segGap(a, b, cand.d / 2, ta, tb, tw));
+        const t0 = { lat: (ta.lat + tb.lat) / 2, lon: (ta.lon + tb.lon) / 2 };
+        const tx = toU(t0.lon) * FRAME; const ty = toV(t0.lat) * FRAME;
+        for (const [ra, rb] of runways) {
+          const rx0 = toU(ra.lon) * FRAME; const ry0 = toV(ra.lat) * FRAME;
+          const rx1 = toU(rb.lon) * FRAME; const ry1 = toV(rb.lat) * FRAME;
+          const side = (px, py) => Math.sign((rx1 - rx0) * (py - ry0) - (ry1 - ry0) * (px - rx0));
+          if (side(acx, acy) && side(tx, ty) && side(acx, acy) !== side(tx, ty)) blocked = true;
+        }
+      }
+      if (blocked) continue;
+
+      // And it has to be on land. "Clear of every building" is trivially true
+      // over the bay, and the search duly parked San Diego International's
+      // apron in the water — the one place with no buildings for 600 m.
+      let wet = false;
+      for (let i = -3; i <= 3 && !wet; i++) {
+        for (let j = -3; j <= 3; j++) {
+          const su = toU(cand.lon) + ((i / 3) * (cand.w / 2) * ux - (j / 3) * (cand.d / 2) * uy) / FRAME;
+          const sv = toV(cand.lat) + ((i / 3) * (cand.w / 2) * uy + (j / 3) * (cand.d / 2) * ux) / FRAME;
+          const gx = Math.min(RES - 1, Math.max(0, Math.round(su * (RES - 1))));
+          const gy = Math.min(RES - 1, Math.max(0, Math.round(sv * (RES - 1))));
+          if (heightAt(gx, gy) < 1.0) { wet = true; break; }
+        }
+      }
+      if (wet) continue;
+      // Abut the taxiway, do not swallow it. Scoring the gap as max(0, near)
+      // made overlap free, and the search happily buried 131 m of taxiway under
+      // the apron. Aiming at a small positive gap puts the apron alongside.
+      const TAXI_GAP_M = 25;
+      const score = on * 10000 + Math.abs(near - TAXI_GAP_M);
+      if (!best || score < best.score) best = { cand, on, near, score, dx, dy };
+    }
+  }
+  return best;
 }
 
 for (const field of AIRFIELDS) {
@@ -298,40 +419,26 @@ for (const field of AIRFIELDS) {
     taxiM += g.lenM;
     console.log('  taxiway    %s m x %s m', g.lenM.toFixed(0), t.w);
   }
-  for (const a of field.aprons) {
+  field.placedAprons = [];
+  for (const hint of field.aprons) {
+    const found = placeApron(field, hint);
+    if (!found) {
+      console.error('  no clear position for the apron within 900 m of the hint');
+      process.exit(1);
+    }
+    const a = found.cand;
+    field.placedAprons.push(a);
     // An apron is graded as a wide short strip along its own long axis.
-    const th = (a.rotDeg * Math.PI) / 180;
-    const halfLon = ((a.w / 2) * Math.cos(th)) / M_LON;
-    const halfLat = ((a.w / 2) * Math.sin(th)) / M_LAT;
-    const g = gradeStrip(
-      { lat: a.lat - halfLat, lon: a.lon - halfLon },
-      { lat: a.lat + halfLat, lon: a.lon + halfLon },
-      a.d / 2,
-    );
+    const [pa, pb] = apronSegment(a);
+    const g = gradeStrip(pa, pb, a.d / 2);
     pave(g, a.d / 2, 'apron');
     apronM2 += a.w * a.d;
-    console.log('  apron      %s x %s m', a.w, a.d);
+    console.log('  apron      %s x %s m, moved %s m east and %s m north of the hint',
+      a.w, a.d, found.dx.toFixed(0), found.dy.toFixed(0));
+    console.log('             %s, %s m clear of the nearest taxiway',
+      found.on ? `${found.on} buildings still under it` : 'clear of every building',
+      found.near.toFixed(0));
   }
-}
-
-/** Metres of clearance between two capsules; negative means they overlap. */
-function segGap(a1, b1, w1, a2, b2, w2) {
-  const P = (p) => [toU(p.lon) * FRAME, toV(p.lat) * FRAME];
-  const [ax, ay] = P(a1); const [bx, by] = P(b1);
-  const [cx, cy] = P(a2); const [dx2, dy2] = P(b2);
-  let best = Infinity;
-  const near = (px, py, qx, qy, rx, ry) => {
-    const vx = rx - qx; const vy = ry - qy;
-    const L = vx * vx + vy * vy;
-    const t = L ? Math.max(0, Math.min(1, ((px - qx) * vx + (py - qy) * vy) / L)) : 0;
-    return Math.hypot(px - (qx + vx * t), py - (qy + vy * t));
-  };
-  for (let i = 0; i <= 40; i++) {
-    const t = i / 40;
-    best = Math.min(best, near(ax + (bx - ax) * t, ay + (by - ay) * t, cx, cy, dx2, dy2));
-    best = Math.min(best, near(cx + (dx2 - cx) * t, cy + (dy2 - cy) * t, ax, ay, bx, by));
-  }
-  return best - w1 - w2;
 }
 
 // ── Anything standing on the pavement ───────────────────────────────────────
@@ -354,12 +461,8 @@ for (const field of AIRFIELDS) {
     strips.push([a, b, r.w / 2, `${field.name} ${r.id}`]);
   }
   for (const t of field.taxiways) { laid.push([t.a, t.b, t.w / 2]); movement.push([t.a, t.b, t.w / 2]); }
-  for (const ap of field.aprons) {
-    const th = (ap.rotDeg * Math.PI) / 180;
-    const hLon = ((ap.w / 2) * Math.cos(th)) / M_LON;
-    const hLat = ((ap.w / 2) * Math.sin(th)) / M_LAT;
-    const a = { lat: ap.lat - hLat, lon: ap.lon - hLon };
-    const b = { lat: ap.lat + hLat, lon: ap.lon + hLon };
+  for (const ap of field.placedAprons) {
+    const [a, b] = apronSegment(ap);
     laid.push([a, b, ap.d / 2]);
     // An apron across a runway is not a placement mistake to notice later, it
     // closes the airfield. Checked here rather than left to a screenshot.
