@@ -64,10 +64,28 @@ const AIRFIELDS = [
         mid: { lat: 32.7325, lon: -117.1897 },
       },
     ],
-    // Parallel taxiway on the south side, full length, as on the imagery.
+    // Two full-length parallel taxiways, one either side, as on the imagery —
+    // the north one runs along the MCRD boundary and was missing entirely.
     // Offset is signed: positive is to the right of the take-off direction.
-    taxiways: [{ w: 23, parallelTo: '09/27', offsetM: 130, lengthM: 2700 }],
-    aprons: [{ lat: 32.7300, lon: -117.1950, w: 620, d: 240, rotDeg: -10 }],
+    taxiways: [
+      { w: 23, parallelTo: '09/27', offsetM: 130, lengthM: 2700 },
+      { w: 23, parallelTo: '09/27', offsetM: -150, lengthM: 2500 },
+    ],
+    // Both sides are flight lines: the terminals and their gates to the south,
+    // the commuter and cargo ramps to the north-east. Neither is a guessed
+    // rectangle — the search kept putting the terminal apron on the wrong side
+    // of the runway, because the terminal area is the one place full of
+    // buildings and 'clear of every building' scored it worst.
+    flightLines: [
+      {
+        ofRunway: '09/27', side: 1, fromM: 190, toM: 900,
+        minAreaM2: 2000, clusterM: 220, apronDepthM: 170, minGroup: 2,
+      },
+      {
+        ofRunway: '09/27', side: -1, fromM: 170, toM: 900,
+        minAreaM2: 2500, clusterM: 200, apronDepthM: 150, minGroup: 2,
+      },
+    ],
   },
   {
     name: 'NAS North Island (KNZY)',
@@ -86,7 +104,17 @@ const AIRFIELDS = [
     ],
     // The flight line is east of 18/36 on the imagery, so the taxiway is too.
     taxiways: [{ w: 23, parallelTo: '18/36', offsetM: -180, lengthM: 2200 }],
-    aprons: [{ lat: 32.7000, lon: -117.2090, w: 560, d: 260, rotDeg: -1 }],
+    // The squadron ramps north-east of 11/29 — HSM-35, HSM-41, HSM-73 and the
+    // VRM-30 line. Rather than guess four more rectangles, these are derived
+    // from the hangars the capture already contains: find the big buildings in
+    // a corridor beside the runway, group them, and lay an apron in front of
+    // each group with a taxiway link back to the movement area. That is what a
+    // flight line is, and it cannot land on a hangar because the hangars are
+    // what positioned it.
+    flightLines: [{
+      ofRunway: '11/29', side: -1, fromM: 85, toM: 950,
+      minAreaM2: 2500, clusterM: 200, apronDepthM: 170, minGroup: 2,
+    }],
   },
 ];
 
@@ -144,6 +172,12 @@ const FLAG_CLEARED = 8;
 const parts = [];
 const push = (u, v, rot, w, d, h, kind, base) =>
   parts.push([u, v, rot, w, d, h, kind, FLAG_STRUCTURE, base]);
+
+const struct0 = readFileSync(structPath);
+const SS0 = city.structures;
+const SF0 = Object.fromEntries(SS0.fields.map((f, i) => [f, i]));
+const SS_COUNT = SS0.count;
+const sRd0 = (i, f) => struct0.readFloatLE(i * SS0.stride * 4 + SF0[f] * 4);
 
 const heightAt = (x, y) => LO + (r16.readUInt16LE((y * RES + x) * 2) / 65535) * (HI - LO);
 const setHeight = (x, y, m) => {
@@ -378,19 +412,27 @@ function placeApron(field, hint) {
       const acx = toU(cand.lon) * FRAME; const acy = toV(cand.lat) * FRAME;
 
       // An apron you can only reach by crossing a runway is not an apron.
-      let near = Infinity; let blocked = false;
+      // An apron has to reach SOME taxiway without crossing a runway. Asking
+      // that no taxiway be cut off was wrong the moment KSAN got one either
+      // side of its runway: every position was then blocked by one of them, and
+      // the search reported no clear position anywhere.
+      let near = Infinity; let reachable = false;
       for (const [ta, tb, tw] of taxi) {
-        near = Math.min(near, segGap(a, b, cand.d / 2, ta, tb, tw));
+        const gap = segGap(a, b, cand.d / 2, ta, tb, tw);
         const tx = toU((ta.lon + tb.lon) / 2) * FRAME;
         const ty = toV((ta.lat + tb.lat) / 2) * FRAME;
+        let cut = false;
         for (const [ra, rb] of runways) {
           const rx0 = toU(ra.lon) * FRAME; const ry0 = toV(ra.lat) * FRAME;
           const rx1 = toU(rb.lon) * FRAME; const ry1 = toV(rb.lat) * FRAME;
           const side2 = (px, py) => Math.sign((rx1 - rx0) * (py - ry0) - (ry1 - ry0) * (px - rx0));
-          if (side2(acx, acy) && side2(tx, ty) && side2(acx, acy) !== side2(tx, ty)) blocked = true;
+          if (side2(acx, acy) && side2(tx, ty) && side2(acx, acy) !== side2(tx, ty)) cut = true;
         }
+        if (cut) continue;
+        reachable = true;
+        near = Math.min(near, gap);
       }
-      if (blocked) continue;
+      if (!reachable) continue;
 
       // And it has to be on land: "clear of every building" is trivially true
       // over the bay, and the search duly parked KSAN's apron in the water.
@@ -420,6 +462,115 @@ function placeApron(field, hint) {
   return best;
 }
 
+/**
+ * Aprons and their taxiway links, derived from the hangars already in the
+ * capture rather than placed by hand.
+ *
+ * Every apron before this one was a guess that had to be corrected against a
+ * render — four times. The hangars are not a guess: they are surveyed buildings
+ * sitting exactly where the real ramps serve them. So the ramp goes in front of
+ * the hangars, which is where a ramp is, and by construction it cannot be on
+ * top of one.
+ */
+function flightLineAprons(field) {
+  const specs = field.flightLines ?? (field.flightLine ? [field.flightLine] : []);
+  return specs.flatMap((spec) => oneFlightLine(field, spec));
+}
+
+function oneFlightLine(field, spec) {
+  const r = field.runways.find((x) => x.id === spec.ofRunway) ?? field.runways[0];
+  const [ra, rb] = toLength(r);
+  const ax = toU(ra.lon) * FRAME; const ay = toV(ra.lat) * FRAME;
+  const bx = toU(rb.lon) * FRAME; const by = toV(rb.lat) * FRAME;
+  const L = Math.hypot(bx - ax, by - ay);
+  const ux = (bx - ax) / L; const uy = (by - ay) / L;      // along the runway
+  const nx = -uy; const ny = ux;                            // to its right
+
+  // Hangars in the corridor, in runway coordinates.
+  const hangars = [];
+  for (let i = 0; i < SS_COUNT; i++) {
+    const w = sRd0(i, 'widthM'); const d = sRd0(i, 'depthM');
+    if (w * d < spec.minAreaM2) continue;
+    if (sRd0(i, 'heightM') < 4) continue;                   // not a pad
+    const px = sRd0(i, 'u') * FRAME - ax; const py = sRd0(i, 'v') * FRAME - ay;
+    const t = (px * nx + py * ny) * spec.side;
+    if (t < spec.fromM || t > spec.toM) continue;
+    const sAlong = px * ux + py * uy;
+    if (sAlong < -400 || sAlong > L + 400) continue;
+    hangars.push({ s: sAlong, t, r: Math.max(w, d) / 2 });
+  }
+  if (!hangars.length) return [];
+
+  // Group along the runway; a gap wider than clusterM starts a new ramp.
+  hangars.sort((p, q) => p.s - q.s);
+  const groups = [];
+  let cur = [hangars[0]];
+  for (let i = 1; i < hangars.length; i++) {
+    if (hangars[i].s - cur[cur.length - 1].s > spec.clusterM) { groups.push(cur); cur = []; }
+    cur.push(hangars[i]);
+  }
+  groups.push(cur);
+
+  // A ramp serves a group of hangars, not a whole airfield. Left uncapped the
+  // first run produced a single 1,437 m apron in front of eighteen of them,
+  // which is a runway with aeroplanes parked on it, not a flight line.
+  const MAX_RAMP_M = 420;
+  const split = [];
+  for (const g of groups) {
+    const s0 = g[0].s; const s1 = g[g.length - 1].s;
+    const n = Math.max(1, Math.ceil((s1 - s0) / MAX_RAMP_M));
+    if (n === 1) { split.push(g); continue; }
+    const cut = (s1 - s0) / n;
+    for (let k = 0; k < n; k++) {
+      const part = g.filter((h) => h.s >= s0 + cut * k - 1 && h.s <= s0 + cut * (k + 1) + 1);
+      if (part.length) split.push(part);
+    }
+  }
+
+  const out = [];
+  for (const g of split) {
+    if (g.length < spec.minGroup) continue;
+    const s0 = Math.min(...g.map((h) => h.s - h.r));
+    const s1 = Math.max(...g.map((h) => h.s + h.r));
+    const tNear = Math.min(...g.map((h) => h.t - h.r));     // hangar face
+    const apronOuter = tNear;                               // up against the hangars
+    // Never nearer the runway than the corridor's own inner edge. Allowing
+    // 0.6 of it let a ramp's capsule reach the strip, and the apron-versus-
+    // runway assertion refused to build — correctly.
+    const apronInner = Math.max(spec.fromM, tNear - spec.apronDepthM);
+    // A narrow ramp is a real thing — some squadron lines are barely wider
+    // than a rotor disc. Rejecting anything under 40 m deep threw away three of
+    // North Island's four, leaving one ramp for the whole flight line.
+    if (apronOuter - apronInner < 25 || s1 - s0 < 60) continue;
+    out.push({ s0, s1, tIn: apronInner, tOut: apronOuter, n: g.length });
+  }
+
+  // Back to lat/lon: centre, size and bearing in the runway's own frame.
+  // Negated on purpose. The frame's v axis increases southward, so a bearing
+  // measured in frame coordinates has the opposite sign to one measured in
+  // latitude — and apronSegment() works in lat/lon. Without the flip a ramp
+  // beside a south-east runway pointed north-east instead, 62 degrees out, and
+  // its capsule reached across the strip.
+  const bearing = -(Math.atan2(uy, ux) * 180) / Math.PI;
+  const toLL = (sM, tM) => {
+    const X = ax + ux * sM + nx * tM * spec.side;
+    const Y = ay + uy * sM + ny * tM * spec.side;
+    return { lat: side.centre.lat - ((Y / FRAME) - 0.5) * FRAME / M_LAT,
+      lon: side.centre.lon + ((X / FRAME) - 0.5) * FRAME / M_LON };
+  };
+  return out.map((a) => {
+    const cs = (a.s0 + a.s1) / 2; const ct = (a.tIn + a.tOut) / 2;
+    const c = toLL(cs, ct);
+    return {
+      apron: { lat: c.lat, lon: c.lon, w: a.s1 - a.s0, d: a.tOut - a.tIn, rotDeg: bearing },
+      // A link from the ramp back to the movement area, square to the runway.
+      // The link stops short of the runway strip rather than running onto it.
+      link: [toLL(cs, a.tIn), toLL(cs, Math.max(r.w / 2 + 45, spec.fromM * 0.5))],
+      hangars: a.n,
+    };
+  });
+}
+
 for (const field of AIRFIELDS) {
   console.log('\n%s', field.name);
   for (const r of field.runways) {
@@ -440,7 +591,23 @@ for (const field of AIRFIELDS) {
     console.log('  taxiway    %s m x %s m', g.lenM.toFixed(0), t.w);
   }
   field.placedAprons = [];
-  for (const hint of field.aprons) {
+  field.links = [];
+  for (const fl of flightLineAprons(field)) {
+    const [la, lb] = fl.link;
+    const [pa0, pb0] = apronSegment(fl.apron);
+    const g = gradeStrip(pa0, pb0, fl.apron.d / 2);
+    pave(g, fl.apron.d / 2, 'apron');
+    apronM2 += fl.apron.w * fl.apron.d;
+    field.placedAprons.push(fl.apron);
+    const lg = gradeStrip(la, lb, 23 / 2);
+    pave(lg, 23 / 2, 'taxiway');
+    taxiM += lg.lenM;
+    field.links.push([la, lb, 23 / 2]);
+    console.log('  ramp       %s x %s m in front of %d hangars, %s m link to the '
+      + 'movement area', fl.apron.w.toFixed(0), fl.apron.d.toFixed(0), fl.hangars,
+      lg.lenM.toFixed(0));
+  }
+  for (const hint of field.aprons ?? []) {
     const found = placeApron(field, hint);
     if (!found) {
       console.error('  no clear position for the apron within 900 m of the hint');
@@ -483,6 +650,9 @@ for (const field of AIRFIELDS) {
   for (const t of field.taxiways) {
     const [ta, tb] = taxiEnds(t, field);
     laid.push([ta, tb, t.w / 2]); movement.push([ta, tb, t.w / 2]);
+  }
+  for (const [la, lb, lw] of field.links ?? []) {
+    laid.push([la, lb, lw]); movement.push([la, lb, lw]);
   }
   for (const ap of field.placedAprons) {
     const [a, b] = apronSegment(ap);
