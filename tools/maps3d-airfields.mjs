@@ -77,13 +77,22 @@ const AIRFIELDS = [
     // of the runway, because the terminal area is the one place full of
     // buildings and 'clear of every building' scored it worst.
     flightLines: [
+      // Corridors of 900 m put three of these on Marine Corps Recruit Depot
+      // land — 32.738 N is MCRD, not the airport, and the depot's big buildings
+      // are exactly the kind this looks for. The airport boundary is close to
+      // the strip on both sides, so the corridors are too.
+      // Measured off the strip rather than assumed. The terminals sit 139 m
+      // south of the centreline, so a corridor starting at 190 found nothing at
+      // all; the north-east commuter and cargo stands run 264 to 433 m out, and
+      // Marine Corps Recruit Depot land begins around 580, which is where three
+      // ramps wrongly went when the corridor reached 900.
       {
-        ofRunway: '09/27', side: 1, fromM: 190, toM: 900,
-        minAreaM2: 2000, clusterM: 220, apronDepthM: 170, minGroup: 2,
+        ofRunway: '09/27', side: 1, fromM: 110, toM: 460,
+        minAreaM2: 1800, clusterM: 260, apronDepthM: 170, minGroup: 2,
       },
       {
-        ofRunway: '09/27', side: -1, fromM: 170, toM: 900,
-        minAreaM2: 2500, clusterM: 200, apronDepthM: 150, minGroup: 2,
+        ofRunway: '09/27', side: -1, fromM: 170, toM: 450,
+        minAreaM2: 1500, clusterM: 260, apronDepthM: 150, minGroup: 2,
       },
     ],
   },
@@ -112,7 +121,7 @@ const AIRFIELDS = [
     // flight line is, and it cannot land on a hangar because the hangars are
     // what positioned it.
     flightLines: [{
-      ofRunway: '11/29', side: -1, fromM: 85, toM: 950,
+      ofRunway: '11/29', side: -1, fromM: 85, toM: 700,
       minAreaM2: 2500, clusterM: 200, apronDepthM: 170, minGroup: 2,
     }],
   },
@@ -603,8 +612,9 @@ for (const field of AIRFIELDS) {
     pave(lg, 23 / 2, 'taxiway');
     taxiM += lg.lenM;
     field.links.push([la, lb, 23 / 2]);
-    console.log('  ramp       %s x %s m in front of %d hangars, %s m link to the '
-      + 'movement area', fl.apron.w.toFixed(0), fl.apron.d.toFixed(0), fl.hangars,
+    console.log('  ramp       %s x %s m at %s, %s — %d hangars, %s m link',
+      fl.apron.w.toFixed(0), fl.apron.d.toFixed(0),
+      fl.apron.lat.toFixed(4), fl.apron.lon.toFixed(4), fl.hangars,
       lg.lenM.toFixed(0));
   }
   for (const hint of field.aprons ?? []) {
