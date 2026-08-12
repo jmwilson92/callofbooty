@@ -98,6 +98,52 @@ pieces: wall and window panels, door units, stair flights, lift cars, desks,
 chairs, monitors, shelving, planters. The generator places them. That is the
 whole difference between a plan that ships and one that does not.
 
+### Tier C — built
+
+`tools/interior-c.mjs` lays out all 53,595 of them and `tools/maps3d-interior.mjs`
+runs it over the map. A floorplate is cut by binary partition, and the split tree
+is the plan rather than a by-product: **every internal node is a wall and gets
+exactly one door**, so the rooms form a tree and every room is reachable without
+any connectivity pass. Doing it any other way ends with a bedroom nobody can get
+into, and at 53,595 buildings nobody would ever find it. The harness asserts
+`rooms == walls + 1` on every level as the standing proof.
+
+| | |
+|---|---|
+| Instances | **6.10 M**, 114 per building, 828 worst |
+| Rooms | 800,848 — 7 per level at p50, 22.4 m² at p50 |
+| Generation | 26 µs a building |
+| Kit pieces | **39 distinct** |
+
+The heaviest pieces, which is the order they should be modelled in: 1.13 M wall
+partitions, 1.13 M interior doors, 981 K windows, 615 K shelves, 449 K chairs.
+
+**6.10 M is not a runtime number.** Nothing is stored — each building is laid out
+on stream-in from its seed, so what has to fit is 114 instances per building
+times however many buildings are resident, not six million of anything.
+
+Three things the run settled that guesswork had wrong:
+
+- **A dwelling and a shop are not the same problem.** One room per 17 m² for both
+  put eleven rooms in a house and chopped a retail unit into cubicles. At 22 m²
+  for a house and 48 m² for a shop the house gets seven and the shop keeps an
+  open floor with a back of house — and that open floor is the only large
+  interior space Tier C has, which is where a fight needs somewhere to happen.
+- **Windows at one per 3.2 m of wall made them 17% of every instance on the map**
+  and gave a semi-detached sixteen a floor. That is a glazed band, not a house.
+  One per 5 m.
+- **The stairwell has to be chosen once for the whole building**, before any
+  level is partitioned, and no wall may cross it. Laid out per floor, the
+  upstairs opening lands on a partition and the stairs arrive into brickwork —
+  plainly wrong in a plan and invisible in every count.
+
+And what it found about the ground, which the record made possible: of the
+53,595, only **7,656 sit level**. **30,897 need a plinth** on the low side of up
+to 1.2 m, and **15,042 fall more than that and need a partly buried lower level**.
+A further **436 have an upper floor but no plate wide enough for a straight stair
+run** — those need a spiral in the kit, and are reported rather than quietly
+given an unreachable first floor.
+
 ## Destruction is state on a graph, not physics
 
 Chaos geometry collections are per-actor and will not survive 63,985 buildings,
