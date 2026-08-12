@@ -50,8 +50,17 @@ const buildInterior = TIER === 'A' ? (r) => buildA(r, buildGraph(r))
   : TIER === 'B' ? buildB
     : buildC;
 
+const CLEARED = (S.flags && S.flags.cleared) || 8;
+let skipped = 0;
 const PICKED = [];
-for (let i = 0; i < S.count; i++) if (rd(i, 'tier') === WANT) PICKED.push(i);
+for (let i = 0; i < S.count; i++) {
+  if (rd(i, 'tier') !== WANT) continue;
+  // Flagged by maps3d-airfields.mjs for standing on runway pavement. It is not
+  // going to be there, so it does not get an inside.
+  if (F.flags !== undefined && (rd(i, 'flags') & CLEARED)) { skipped++; continue; }
+  PICKED.push(i);
+}
+if (skipped) console.log('%d cleared for airfield pavement, not laid out', skipped);
 const TIER_C = PICKED;
 console.log('%s tier %s structures of %s\n',
   PICKED.length.toLocaleString('en-GB'), TIER, S.count.toLocaleString('en-GB'));

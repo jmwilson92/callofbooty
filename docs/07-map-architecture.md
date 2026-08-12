@@ -98,6 +98,19 @@ pieces: wall and window panels, door units, stair flights, lift cars, desks,
 chairs, monitors, shelving, planters. The generator places them. That is the
 whole difference between a plan that ships and one that does not.
 
+### What has no interior at all
+
+**299 records — the pads, and nothing else.** 63,686 of 63,985 structures are
+laid out, which is 99.5%. The pads are the zero-height footprints the capture
+carries no height for: 386 parts over 0.48 km², the largest 5.95 ha. They were
+never given an invented height and so have no storeys to put rooms in. Giving
+them interiors means first deciding how tall they are, which is fabrication, not
+generation.
+
+A further 5 structures are flagged **cleared** — they stood on runway or taxiway
+pavement laid by `maps3d-airfields.mjs` and are skipped by the importer and by
+all three generators. See the airfield note below.
+
 ### Tier A — built
 
 `tools/interior-a.mjs` lays out all 1,141. **A tower is not Tier C with more

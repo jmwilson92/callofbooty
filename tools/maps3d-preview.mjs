@@ -249,6 +249,7 @@ try {
       d: bin.readFloatLE(o + 16),
       h: bin.readFloatLE(o + 20),
       kind: kinds[Math.round(bin.readFloatLE(o + 24))] ?? 'building',
+      flags: stride > 7 ? Math.round(bin.readFloatLE(o + 28)) : 0,
       base: stride > 8 ? bin.readFloatLE(o + 32) : 0,
     });
   }
@@ -259,6 +260,7 @@ try {
   }
   list.sort((a, b) => (a.base + a.h) - (b.base + b.h));
   for (const p of list) {
+    if (p.flags & 8) continue;      // cleared for airfield pavement
     const col = KIND_COLOUR[p.kind] ?? [0.5, 0.45, 0.4];
     // A tall part catches more light from above than the ground beside it.
     const lift = 1 + Math.min(0.35, (p.base + p.h) * 0.012);

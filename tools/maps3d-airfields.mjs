@@ -90,6 +90,7 @@ const THRESHOLD_BARS = 8;
 const sidePath = join(OUT, 'sandiego.json');
 const cityPath = join(OUT, 'city.json');
 const binPath = join(OUT, 'city-buildings.bin');
+const structPath = join(OUT, 'city-structures.bin');
 const hmPath = join(OUT, 'sandiego.r16');
 
 const side = JSON.parse(readFileSync(sidePath, 'utf8'));
@@ -123,6 +124,13 @@ const kindOf = (name) => {
 // A runway is built over ground, not water, but it is a structure in the same
 // sense a bridge deck is: the sea test must not cull it.
 const FLAG_STRUCTURE = 4;
+// A building standing on a runway is wrong however it got there, and something
+// has to give. The pavement wins: it is the only geometry here placed on purpose
+// and the only geometry an aircraft needs. Rather than delete the building —
+// which would shift every index after it and break the structure record's
+// partIndex — it is flagged, and the importer and both interior generators skip
+// anything carrying the bit.
+const FLAG_CLEARED = 8;
 const parts = [];
 const push = (u, v, rot, w, d, h, kind, base) =>
   parts.push([u, v, rot, w, d, h, kind, FLAG_STRUCTURE, base]);
@@ -304,6 +312,73 @@ for (const field of AIRFIELDS) {
   }
 }
 
+// ── Anything standing on the pavement ───────────────────────────────────────
+
+const struct = readFileSync(structPath);
+const SS = city.structures;
+const SF = Object.fromEntries(SS.fields.map((f, i) => [f, i]));
+const sRd = (i, f) => struct.readFloatLE(i * SS.stride * 4 + SF[f] * 4);
+
+// Every strip that was laid, as a segment and a half-width, in frame metres.
+const laid = [];
+for (const field of AIRFIELDS) {
+  for (const r of field.runways) { const [a, b] = toLength(r); laid.push([a, b, r.w / 2]); }
+  for (const t of field.taxiways) laid.push([t.a, t.b, t.w / 2]);
+}
+
+let cleared = 0; let clearedParts = 0; let clearedM2 = 0; let biggest = 0;
+for (let i = 0; i < SS.count; i++) {
+  const so = i * SS.stride * 4 + SF.flags * 4;
+  // Cleared afresh each run, so moving an alignment un-clears what it no longer
+  // covers instead of leaving buildings deleted by a previous guess.
+  const was = struct.readFloatLE(so);
+  struct.writeFloatLE(was - (was & FLAG_CLEARED ? FLAG_CLEARED : 0), so);
+
+  const cx = sRd(i, 'u') * FRAME; const cy = sRd(i, 'v') * FRAME;
+  const W = sRd(i, 'widthM'); const Dp = sRd(i, 'depthM');
+  const th = (sRd(i, 'rotDeg') * Math.PI) / 180;
+  const ux = Math.cos(th); const uy = Math.sin(th);
+  let on = false;
+  for (const [a, b, halfW] of laid) {
+    const ax = toU(a.lon) * FRAME; const ay = toV(a.lat) * FRAME;
+    const bx = toU(b.lon) * FRAME; const by = toV(b.lat) * FRAME;
+    const dx = bx - ax; const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    for (const [ox, oy] of [[0, 0], [W / 2, Dp / 2], [-W / 2, Dp / 2],
+      [-W / 2, -Dp / 2], [W / 2, -Dp / 2]]) {
+      const px = cx + ox * ux - oy * uy;
+      const py = cy + ox * uy + oy * ux;
+      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+      if (Math.hypot(px - (ax + dx * t), py - (ay + dy * t)) <= halfW) { on = true; break; }
+    }
+    if (on) break;
+  }
+  if (!on) continue;
+
+  struct.writeFloatLE(struct.readFloatLE(so) + FLAG_CLEARED, so);
+  cleared++;
+  clearedM2 += W * Dp;
+  biggest = Math.max(biggest, W * Dp);
+  const p0 = sRd(i, 'partIndex'); const pn = sRd(i, 'partCount');
+  for (let p = p0; p < p0 + pn && p < baseCount; p++) {
+    const fo = p * STRIDE * 4 + 7 * 4;
+    const f = bin.readFloatLE(fo);
+    if (!(f & FLAG_CLEARED)) bin.writeFloatLE(f + FLAG_CLEARED, fo);
+    clearedParts++;
+  }
+}
+if (cleared) {
+  console.log('\n%d structures (%d parts, %s ha, largest %s ha) stand on the '
+    + 'pavement and are flagged cleared', cleared, clearedParts,
+    (clearedM2 / 1e4).toFixed(1), (biggest / 1e4).toFixed(2));
+  if (biggest > 20000) {
+    console.log('  one of them is over 2 ha — a clash that big is worth reading '
+      + 'as a hint that an alignment is wrong, not just as a building in the way');
+  }
+} else {
+  console.log('\nnothing stands on the pavement');
+}
+
 // ── Sanity, before anything is written ──────────────────────────────────────
 
 if (LO > -10.0001 && HI < 250.0001) {
@@ -333,11 +408,15 @@ parts.forEach((p, i) => {
   for (let f = 0; f < STRIDE; f++) add.writeFloatLE(p[f], o + f * 4);
 });
 writeFileSync(binPath, Buffer.concat([bin, add]));
+writeFileSync(structPath, struct);
 writeFileSync(hmPath, r16);
 
 city.kinds = kinds;
 city.buildingCount = baseCount + parts.length;
-city.buildingFlags = { ...(city.buildingFlags ?? {}), structure: FLAG_STRUCTURE };
+city.buildingFlags = {
+  ...(city.buildingFlags ?? {}), structure: FLAG_STRUCTURE, cleared: FLAG_CLEARED,
+};
+city.structures.flags = { ...(city.structures.flags ?? {}), cleared: FLAG_CLEARED };
 city.airfields = {
   producedBy: 'tools/maps3d-airfields.mjs',
   baseCount,
@@ -345,6 +424,8 @@ city.airfields = {
   runwayM: Math.round(runwayM),
   taxiwayM: Math.round(taxiM),
   apronHa: +(apronM2 / 1e4).toFixed(1),
+  clearedStructures: cleared,
+  clearedParts,
   authored: true,
   note: 'The capture contains no aeroway geometry of any kind — not even an '
     + 'empty group — so these alignments are authored from published airfield '
