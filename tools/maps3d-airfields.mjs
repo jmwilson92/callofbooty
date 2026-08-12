@@ -72,10 +72,12 @@ const AIRFIELDS = [
     taxiways: [
       { w: 23, a: { lat: 32.7072, lon: -117.2108 }, b: { lat: 32.6914, lon: -117.2108 } },
     ],
-    // East of the parallel taxiway. Placed at -117.2105 it straddled runway
-    // 18/36, which no apron does and which the render showed at once.
+    // North of runway 11/29 and east of the parallel taxiway. At -117.2105 it
+    // straddled 18/36; at 32.6975 it swallowed the eastern threshold of 11/29.
+    // Both were obvious in a render and invisible in every count, which is why
+    // there is now an assertion below that an apron may not touch a runway.
     aprons: [
-      { lat: 32.6975, lon: -117.2055, w: 620, d: 280, rotDeg: 0 },
+      { lat: 32.7035, lon: -117.2060, w: 500, d: 250, rotDeg: 0 },
     ],
   },
 ];
@@ -312,6 +314,26 @@ for (const field of AIRFIELDS) {
   }
 }
 
+/** Metres of clearance between two capsules; negative means they overlap. */
+function segGap(a1, b1, w1, a2, b2, w2) {
+  const P = (p) => [toU(p.lon) * FRAME, toV(p.lat) * FRAME];
+  const [ax, ay] = P(a1); const [bx, by] = P(b1);
+  const [cx, cy] = P(a2); const [dx2, dy2] = P(b2);
+  let best = Infinity;
+  const near = (px, py, qx, qy, rx, ry) => {
+    const vx = rx - qx; const vy = ry - qy;
+    const L = vx * vx + vy * vy;
+    const t = L ? Math.max(0, Math.min(1, ((px - qx) * vx + (py - qy) * vy) / L)) : 0;
+    return Math.hypot(px - (qx + vx * t), py - (qy + vy * t));
+  };
+  for (let i = 0; i <= 40; i++) {
+    const t = i / 40;
+    best = Math.min(best, near(ax + (bx - ax) * t, ay + (by - ay) * t, cx, cy, dx2, dy2));
+    best = Math.min(best, near(cx + (dx2 - cx) * t, cy + (dy2 - cy) * t, ax, ay, bx, by));
+  }
+  return best - w1 - w2;
+}
+
 // ── Anything standing on the pavement ───────────────────────────────────────
 
 const struct = readFileSync(structPath);
@@ -319,14 +341,89 @@ const SS = city.structures;
 const SF = Object.fromEntries(SS.fields.map((f, i) => [f, i]));
 const sRd = (i, f) => struct.readFloatLE(i * SS.stride * 4 + SF[f] * 4);
 
-// Every strip that was laid, as a segment and a half-width, in frame metres.
-const laid = [];
+// Every surface that was laid, as a segment and a half-width in metres — an
+// apron included, since it is graded and paved exactly like a wide short strip.
+// Leaving aprons out of this was the reason a taxiway kept its buildings.
+const laid = [];                  // everything that gets graded and paved
+const strips = [];                // runways only — see the assertion below
+const movement = [];              // runways and taxiways: what must be kept clear
 for (const field of AIRFIELDS) {
-  for (const r of field.runways) { const [a, b] = toLength(r); laid.push([a, b, r.w / 2]); }
-  for (const t of field.taxiways) laid.push([t.a, t.b, t.w / 2]);
+  for (const r of field.runways) {
+    const [a, b] = toLength(r);
+    laid.push([a, b, r.w / 2]); movement.push([a, b, r.w / 2]);
+    strips.push([a, b, r.w / 2, `${field.name} ${r.id}`]);
+  }
+  for (const t of field.taxiways) { laid.push([t.a, t.b, t.w / 2]); movement.push([t.a, t.b, t.w / 2]); }
+  for (const ap of field.aprons) {
+    const th = (ap.rotDeg * Math.PI) / 180;
+    const hLon = ((ap.w / 2) * Math.cos(th)) / M_LON;
+    const hLat = ((ap.w / 2) * Math.sin(th)) / M_LAT;
+    const a = { lat: ap.lat - hLat, lon: ap.lon - hLon };
+    const b = { lat: ap.lat + hLat, lon: ap.lon + hLon };
+    laid.push([a, b, ap.d / 2]);
+    // An apron across a runway is not a placement mistake to notice later, it
+    // closes the airfield. Checked here rather than left to a screenshot.
+    //
+    // Runways only. An apron is supposed to meet its taxiway — that is how an
+    // aircraft gets off it — and the first version of this check called that a
+    // fault and refused to build KSAN at all.
+    for (const [ma, mb, mw, mname] of strips) {
+      if (segGap(a, b, ap.d / 2, ma, mb, mw) <= 0) {
+        console.error('the %s apron overlaps %s — move it in the AIRFIELDS table',
+          field.name, mname);
+        process.exit(1);
+      }
+    }
+  }
 }
 
-let cleared = 0; let clearedParts = 0; let clearedM2 = 0; let biggest = 0;
+// Precompute the surfaces in frame metres once; this runs over 745,000 parts.
+// Movement areas only. Clearing for aprons as well deleted the San Diego
+// International terminals, which is exactly backwards: the apron is the lowest
+// confidence geometry on this map and the terminals are real buildings out of
+// the capture. An aircraft has to have the runway and the taxiway; it can park
+// beside a building. So apron pavement is laid under whatever is already there
+// and nothing is removed for it.
+const surf = movement.map(([a, b, halfW]) => {
+  const ax = toU(a.lon) * FRAME; const ay = toV(a.lat) * FRAME;
+  const bx = toU(b.lon) * FRAME; const by = toV(b.lat) * FRAME;
+  const dx = bx - ax; const dy = by - ay;
+  return { ax, ay, dx, dy, len2: dx * dx + dy * dy, halfW };
+});
+const onPavement = (cx, cy, W, Dp, th) => {
+  const ux = Math.cos(th); const uy = Math.sin(th);
+  for (const s of surf) {
+    for (const [ox, oy] of [[0, 0], [W / 2, Dp / 2], [-W / 2, Dp / 2],
+      [-W / 2, -Dp / 2], [W / 2, -Dp / 2]]) {
+      const px = cx + ox * ux - oy * uy;
+      const py = cy + ox * uy + oy * ux;
+      const t = Math.max(0, Math.min(1, ((px - s.ax) * s.dx + (py - s.ay) * s.dy) / s.len2));
+      if (Math.hypot(px - (s.ax + s.dx * t), py - (s.ay + s.dy * t)) <= s.halfW) return true;
+    }
+  }
+  return false;
+};
+
+// Every part, not only the buildings. Clearing buildings alone left the street
+// network, its lamps and the street trees running straight across the runway —
+// which looked far worse than the buildings had, and was the whole of the
+// difference between "a runway" and "a dark strip with a road on it".
+let clearedParts = 0;
+const byKind = new Map();
+for (let p = 0; p < baseCount; p++) {
+  const o = p * STRIDE * 4;
+  const f = bin.readFloatLE(o + 7 * 4);
+  if (f & FLAG_CLEARED) bin.writeFloatLE(f - FLAG_CLEARED, o + 7 * 4);
+  if (!onPavement(bin.readFloatLE(o) * FRAME, bin.readFloatLE(o + 4) * FRAME,
+    bin.readFloatLE(o + 12), bin.readFloatLE(o + 16),
+    (bin.readFloatLE(o + 8) * Math.PI) / 180)) continue;
+  bin.writeFloatLE(bin.readFloatLE(o + 7 * 4) + FLAG_CLEARED, o + 7 * 4);
+  clearedParts++;
+  const k = kinds[Math.round(bin.readFloatLE(o + 24))] ?? '?';
+  byKind.set(k, (byKind.get(k) ?? 0) + 1);
+}
+
+let cleared = 0; let clearedM2 = 0; let biggest = 0;
 for (let i = 0; i < SS.count; i++) {
   const so = i * SS.stride * 4 + SF.flags * 4;
   // Cleared afresh each run, so moving an alignment un-clears what it no longer
@@ -338,39 +435,27 @@ for (let i = 0; i < SS.count; i++) {
   const W = sRd(i, 'widthM'); const Dp = sRd(i, 'depthM');
   const th = (sRd(i, 'rotDeg') * Math.PI) / 180;
   const ux = Math.cos(th); const uy = Math.sin(th);
-  let on = false;
-  for (const [a, b, halfW] of laid) {
-    const ax = toU(a.lon) * FRAME; const ay = toV(a.lat) * FRAME;
-    const bx = toU(b.lon) * FRAME; const by = toV(b.lat) * FRAME;
-    const dx = bx - ax; const dy = by - ay;
-    const len2 = dx * dx + dy * dy;
-    for (const [ox, oy] of [[0, 0], [W / 2, Dp / 2], [-W / 2, Dp / 2],
-      [-W / 2, -Dp / 2], [W / 2, -Dp / 2]]) {
-      const px = cx + ox * ux - oy * uy;
-      const py = cy + ox * uy + oy * ux;
-      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
-      if (Math.hypot(px - (ax + dx * t), py - (ay + dy * t)) <= halfW) { on = true; break; }
-    }
-    if (on) break;
-  }
-  if (!on) continue;
+  if (!onPavement(cx, cy, W, Dp, th)) continue;
 
   struct.writeFloatLE(struct.readFloatLE(so) + FLAG_CLEARED, so);
   cleared++;
   clearedM2 += W * Dp;
   biggest = Math.max(biggest, W * Dp);
+  // The record's rectangle is the one from before decompose() cut it up, so a
+  // structure can be flagged whose individual parts were each missed above.
   const p0 = sRd(i, 'partIndex'); const pn = sRd(i, 'partCount');
   for (let p = p0; p < p0 + pn && p < baseCount; p++) {
     const fo = p * STRIDE * 4 + 7 * 4;
     const f = bin.readFloatLE(fo);
-    if (!(f & FLAG_CLEARED)) bin.writeFloatLE(f + FLAG_CLEARED, fo);
-    clearedParts++;
+    if (!(f & FLAG_CLEARED)) { bin.writeFloatLE(f + FLAG_CLEARED, fo); clearedParts++; }
   }
 }
-if (cleared) {
-  console.log('\n%d structures (%d parts, %s ha, largest %s ha) stand on the '
-    + 'pavement and are flagged cleared', cleared, clearedParts,
-    (clearedM2 / 1e4).toFixed(1), (biggest / 1e4).toFixed(2));
+if (clearedParts) {
+  console.log('\n%d parts cleared off the pavement: %s', clearedParts,
+    [...byKind].sort((a, b) => b[1] - a[1]).slice(0, 8)
+      .map(([k, n]) => `${k} ${n}`).join(', '));
+  console.log('  of those, %d whole structures (%s ha, largest %s ha)',
+    cleared, (clearedM2 / 1e4).toFixed(1), (biggest / 1e4).toFixed(2));
   if (biggest > 20000) {
     console.log('  one of them is over 2 ha — a clash that big is worth reading '
       + 'as a hint that an alignment is wrong, not just as a building in the way');
