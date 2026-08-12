@@ -183,11 +183,36 @@ Not cheap, and worth naming so nobody is surprised:
   produce byte-identical layouts from the seed, forever, across patches. Any
   change to the generator changes every building. Version the generator and
   pin it per match.
-- **Doors have to face streets.** Nothing in the record knows where the entrance
-  goes yet. `roads.json` has 2,103 km of centrelines to answer it, but it runs
-  after the city pass, so that is a second enrichment step.
 - **The 299 pads still have no height.** They are floor without a building, and
   the interior generator has to skip them rather than invent something.
+- **A door can open onto its neighbour.** The entrance is placed on the face the
+  street is on, not on the face that is clear. In a dense block those are
+  sometimes different, and nothing checks the adjacent footprint yet.
+
+## Entrances and the ground under them — built
+
+`maps3d-doors.mjs` runs after the water dig and enriches the record from **22
+fields**: `doorU`, `doorV`, `doorSide`, `frontageM`, `frontageClass`, `groundM`,
+`groundMinM`, `groundMaxM`. It resamples all 10,421 non-bridge road runs to a
+6 m step — 347,518 samples — into a uniform grid, and searches outward in rings
+because road density varies by a factor of six across the map. The door goes on
+whichever face the street is on, judged by offset as a fraction of each
+half-extent rather than in metres, so a long thin block gets its door on the
+long wall; it then slides along that face towards the street and stops short of
+the corners.
+
+**Every structure found a street.** Frontage is 19.8 m at the median, 29.0 m at
+p90, and the furthest building on the map is 430 m from a road. By street type:
+24,398 on service roads, 24,204 on local streets, 8,511 on collectors, 5,857 on
+footpaths, 1,015 on arterials.
+
+The ground survey was the part that changed a plan. Sampling a 5×5 grid in each
+footprint's own frame: the median building falls **0.70 m** across its plan, p90
+is 3.36 m, and the worst is a 56 × 78 m highrise on the hillside north of the
+airport with **25.74 m** of fall. **25,497 of 63,686 structures — 40% — fall more
+than a metre.** A generator that assumes a level slab would bury the back door of
+two buildings in five, so a stepped or sunk ground floor is not an edge case to
+handle later, it is the common path.
 
 ## Build order
 

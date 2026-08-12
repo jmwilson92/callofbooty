@@ -18,6 +18,7 @@ what the one before it wrote.
 | 6 | `maps3d-water.mjs` | rewrites the heightmap, appends to `city-buildings.bin` | Digs the water: bathymetry the capture does not have, since its water surfaces come back as ground 3.5 m above datum. **Must run after 5** so the road carve is already in the heightmap it reads. Also gives the inland bodies their own water surface: the ocean actor is one plane at Z=0, so it covers the tidal water and nothing else, and the San Diego River sits 6 to 11 m up. |
 | 7 | `maps3d-bridges.mjs` | appends to `city-buildings.bin` | Builds the bridges: ramped deck, markings, parapets and piers. **Must run after 6** — a part's elevation is relative to the terrain under it, so a bridge built before the dig sinks with the bed it spans. |
 | 8 | `maps3d-vegetation.mjs` | appends to `city-buildings.bin` | Scatters trees, shrubs and rocks from the land cover, and street trees along the verges. Reads the buffer to find the buildings, so it runs after 2 and 5. |
+| 9 | `maps3d-doors.mjs` | rewrites `city-structures.bin` | Gives every building an entrance and tells it what the ground under it does: nearest street, which face of the footprint it is on, and the graded elevation at the door and across the plan. **Must run after 6** — it samples the finished heightmap, and a door placed before the water dig sits at the wrong height. Rewrites the record in place; base fields are copied through untouched, so re-running is safe. |
 | — | `maps3d-preview.mjs` | `terrain-shaded.png` | Not part of the build. Shades the result the way the Unreal landscape material shades it and draws the packed buffer over the top, so a defect shows up here rather than in the editor. `--span 900 --centre 0.70,0.52 --name closeup` windows in on a few blocks. |
 
 ```sh
@@ -29,6 +30,7 @@ node tools/maps3d-roadmesh.mjs --out out
 node tools/maps3d-water.mjs    capture.glb --out out
 node tools/maps3d-bridges.mjs  --out out
 node tools/maps3d-vegetation.mjs --out out
+node tools/maps3d-doors.mjs    --out out
 node tools/maps3d-preview.mjs  --out out
 ```
 
