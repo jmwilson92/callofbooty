@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { buildInterior as buildC } from './interior-c.mjs';
 import { buildInterior as buildA } from './interior-a.mjs';
+import { buildInterior as buildB } from './interior-b.mjs';
 import { buildGraph } from './structgraph.mjs';
 
 const args = process.argv.slice(2);
@@ -44,10 +45,10 @@ const recAt = (i) => ({
 // are different generators and the only thing they share is the record they
 // read and the shape they hand back.
 const TIER = arg('tier', 'C').toUpperCase();
-const WANT = TIER === 'A' ? 3 : 1;
-const buildInterior = TIER === 'A'
-  ? (r) => buildA(r, buildGraph(r))
-  : buildC;
+const WANT = TIER === 'A' ? 3 : TIER === 'B' ? 2 : 1;
+const buildInterior = TIER === 'A' ? (r) => buildA(r, buildGraph(r))
+  : TIER === 'B' ? buildB
+    : buildC;
 
 const PICKED = [];
 for (let i = 0; i < S.count; i++) if (rd(i, 'tier') === WANT) PICKED.push(i);
@@ -62,6 +63,8 @@ let placements = 0; let rooms = 0; let buried = 0; let plinthed = 0; let stairle
 let coreInvented = 0; let coreTooTight = 0; let escalators = 0;
 let lifts = 0; let stairFlights = 0; const useCount = {};
 let withLower = 0; let lowerTotal = 0; const aFalls = [];
+const bKind = {}; let mezzanines = 0; let singleLoaded = 0;
+let rackRuns = 0; let docks = 0; let bSlim = 0; const bFalls = [];
 let worst = 0; let worstIdx = 0;
 let tinyRooms = 0; let unreachable = 0;
 const perLevel = []; const roomAreas = [];
@@ -93,6 +96,19 @@ for (const i of TIER_C) {
         if (opens.some((o) => edge(rm, o))) continue;
         unreachable++; break;
       }
+    } else if (TIER === 'B') {
+      // A block is a spine with units either side; a shed is one volume. Both
+      // are reachable if every room touches the corridor or is the open floor.
+      const spine = l.rooms.find((x) => x.corridor);
+      for (const rm of l.rooms) {
+        if (rm.corridor || rm.open || rm.level) continue;
+        if (!spine) { unreachable++; break; }
+        const t = (Math.abs(rm.x1 - spine.x0) < 0.01 || Math.abs(rm.x0 - spine.x1) < 0.01)
+          ? rm.y0 < spine.y1 - 0.01 && rm.y1 > spine.y0 + 0.01
+          : (Math.abs(rm.y1 - spine.y0) < 0.01 || Math.abs(rm.y0 - spine.y1) < 0.01)
+            && rm.x0 < spine.x1 - 0.01 && rm.x1 > spine.x0 + 0.01;
+        if (!t) { unreachable++; break; }
+      }
     } else if (l.rooms.length !== l.walls + 1) {
       // Every partition wall carries exactly one door and the rooms come from a
       // binary split, so rooms = walls + 1 on every level. If that ever fails
@@ -101,6 +117,15 @@ for (const i of TIER_C) {
     }
   }
   if (it.stairless) stairless++;
+  if (TIER === 'B') {
+    bKind[it.kind] = (bKind[it.kind] ?? 0) + 1;
+    if (it.mezz) mezzanines++;
+    if (it.singleLoaded && !it.slim) singleLoaded++;
+    if (it.slim) bSlim++;
+    if (it.rackRuns) rackRuns += it.rackRuns;
+    if (it.docks) docks += it.docks;
+    bFalls.push(it.fall);
+  }
   if (TIER === 'A') {
     if (!it.coreFromGraph) coreInvented++;
     if (!it.coreOK) coreTooTight++;
@@ -160,8 +185,27 @@ if (TIER === 'A') {
     .sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n.toLocaleString('en-GB')}`).join('   '));
 }
 
+if (TIER === 'B') {
+  console.log('\nthe two halves of tier B');
+  console.log('  %s', Object.entries(bKind)
+    .map(([k, n]) => `${k} ${n.toLocaleString('en-GB')}`).join('   '));
+  console.log('  %s blocks are too shallow for units both sides of the spine, '
+    + 'and %s are too small for a spine at all — those are shafts, and get one '
+    + 'open volume a floor with a single flight',
+    singleLoaded.toLocaleString('en-GB'), bSlim.toLocaleString('en-GB'));
+  console.log('  %s sheds get a mezzanine, %s racking runs and %s loading doors '
+    + 'in all', mezzanines.toLocaleString('en-GB'),
+    rackRuns.toLocaleString('en-GB'), docks.toLocaleString('en-GB'));
+}
+
 console.log('\nsitting on the ground');
-if (TIER === 'A') {
+if (TIER === 'B') {
+  bFalls.sort((a, b) => a - b);
+  console.log('  fall across the plate  p50 %s m   p90 %s m   max %s m',
+    bFalls[bFalls.length >> 1].toFixed(2),
+    bFalls[Math.floor(bFalls.length * 0.9)].toFixed(2),
+    bFalls[bFalls.length - 1].toFixed(2));
+} else if (TIER === 'A') {
   // A tower is cut into the slope, not sat on it, so plinths do not apply — the
   // downhill side comes out of the ground and becomes floor.
   aFalls.sort((a, b) => a - b);
@@ -230,8 +274,14 @@ if (PLAN !== null) {
     TIER === 'A'
       ? `${it.lifts} lifts, ${it.stairs} stairs, ${it.escalator ? 'escalators' : 'no escalator'}`
         + `, ${it.fall.toFixed(1)} m of fall`
-      : it.buried ? `buried lower level (${it.fall.toFixed(1)} m of fall)`
-        : `${it.plinthM.toFixed(2)} m plinth`);
+      : TIER === 'B'
+        ? it.kind === 'warehouse'
+          ? `shed, ${it.clearM.toFixed(1)} m clear, ${it.rackRuns} racking runs, `
+            + `${it.docks} loading doors, ${it.mezz ? 'mezzanine' : 'no mezzanine'}`
+          : `block, ${it.slim ? 'slim' : it.singleLoaded ? 'single-loaded' : 'double-loaded'}`
+            + `, ${it.lift ? 'lift' : 'stairs only'}`
+        : it.buried ? `buried lower level (${it.fall.toFixed(1)} m of fall)`
+          : `${it.plinthM.toFixed(2)} m plinth`);
 
   const PAD = 30;
   const SC = 46;                       // pixels per metre
@@ -265,6 +315,10 @@ if (PLAN !== null) {
     stair_flight_dogleg: [150, 235, 150], door_fire: [90, 200, 110],
     lift_shaft: [255, 120, 220], lift_door: [255, 120, 220],
     lift_door_lobby: [255, 120, 220], escalator: [255, 210, 80],
+    // tier B
+    door_roller: [255, 150, 60], dock_leveller: [180, 110, 50],
+    rack_pallet: [130, 150, 120], mezzanine_deck: [90, 110, 150],
+    stair_industrial: [150, 235, 150], window_clerestory: [110, 190, 235],
     door_revolving: [255, 90, 60], facade_curtain: [110, 190, 235],
     facade_window: [110, 190, 235], wc_block: [120, 160, 200],
   };

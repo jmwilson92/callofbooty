@@ -154,6 +154,34 @@ Two more the run settled:
   such levels in all.** Each is playable floor with daylight on one side and
   earth on the other.
 
+### Tier B — built
+
+`tools/interior-b.mjs`, and **Tier B is not one thing.** An apartment block and a
+distribution shed share a height band and nothing else, so there are two
+generators with almost no code in common. Forcing one layout onto both is how a
+hangar ends up partitioned into bedrooms.
+
+- **8,146 midrises** get a spine corridor down the long axis with units either
+  side and the stair and lift at the ends — a double-loaded block, which beats
+  Tier A's cross on a plate this size where a cross would be nearly all corridor.
+- **804 warehouses** get one tall volume, racking in aisles laid across the short
+  axis so the aisles run the building's length, a mezzanine office against the
+  wall the road is on, and roller doors under it. Never partitioned: the open
+  span is the whole character of the building and the only long indoor sightline
+  on the map. **6,314 racking runs, 5,619 loading doors, 511 mezzanines.**
+
+1.86 M instances, 208 per building, 139,612 rooms, 47 µs each. The KSAN terminal
+and the North Island hangars are in here, so this is where the design's aviation
+objectives get their insides.
+
+The connectivity check paid for itself a third time: **1,439 "midrises" are too
+small for a spine at all.** The worst was a 5.1 × 3.2 m plate of ten storeys
+whose flats were laid from x 2.56 to 7.06 on a building that ends at 2.44 —
+outside itself. Those are shafts and stair towers, and they now get the same
+treatment as Tier A's 47 slim buildings: one open volume a floor and a single
+flight. A further 1,149 are too shallow for units both sides and go
+single-loaded.
+
 ### Tier C — built
 
 `tools/interior-c.mjs` lays out all 53,595 of them and `tools/maps3d-interior.mjs`
