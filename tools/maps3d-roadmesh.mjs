@@ -174,6 +174,47 @@ const ZEBRA_OFFSET_M = 2.2;   // from the transition, toward the junction
 
 
 // ── Walk the centrelines in metres ──────────────────────────────────────────
+// The packed part format carries yaw and no pitch, so a deck box cannot tilt to
+// follow a slope: it sits flat and the next one starts higher. At the 14 m
+// segment this used, a 7.5% grade -- the 90th percentile of this city -- steps
+// 105 cm, and the 99th steps 398. That is the staircase.
+//
+// Until the format grows a pitch field the fix is to make the segment short
+// enough that the step is small: walk the graded terrain and subdivide wherever
+// the rise across a segment exceeds MAX_STEP_M. Flat roads keep the full 14 m
+// and cost nothing; only the steep ones pay, which is 10% of the network.
+// 0.25 m, not the 0.12 that was tried first. 0.12 gives a visibly better slope
+// but costs 1.25 M road parts against 855 K here, and the map this feeds is not
+// streaming: every part is resident. The real fix is a pitch field in the packed
+// format, which would let segments stay at 14 m and cost nothing at all.
+const MAX_STEP_M = 0.25;
+const MIN_SEG_M = 1.6;
+
+function walkGraded(pts, stepM) {
+  const out = [];
+  for (const s of walk(pts, stepM)) {
+    const ha = sampleAt((s.x - s.dir[0] * s.len / 2) / FRAME,
+      (s.y - s.dir[1] * s.len / 2) / FRAME);
+    const hb = sampleAt((s.x + s.dir[0] * s.len / 2) / FRAME,
+      (s.y + s.dir[1] * s.len / 2) / FRAME);
+    const rise = Math.abs((hb ?? 0) - (ha ?? 0));
+    const n = Math.min(
+      Math.max(1, Math.ceil(rise / MAX_STEP_M)),
+      Math.max(1, Math.floor(s.len / MIN_SEG_M)));
+    if (n === 1) { out.push(s); continue; }
+    const seg = s.len / n;
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n - 0.5;
+      out.push({
+        x: s.x + s.dir[0] * s.len * t,
+        y: s.y + s.dir[1] * s.len * t,
+        len: seg, dir: s.dir, nrm: s.nrm, head: s.head,
+      });
+    }
+  }
+  return out;
+}
+
 function walk(pts, stepM) {
   const out = [];
   for (let i = 1; i < pts.length; i++) {
@@ -207,6 +248,43 @@ function walk(pts, stepM) {
 // Bridges are NOT in this list. Grading ground up to meet a bridge deck is
 // what builds an embankment across the channel it crosses; a bridge stands on
 // piers instead, and the ground under it is left alone.
+// A traced centreline is a polyline, and a coarse one: the median turn between
+// consecutive points is 32.6 degrees and the 90th percentile is 86.8. Laid as
+// deck boxes that reads as a series of mitred corners rather than a road, and no
+// amount of shortening the segments helps, because the corner is in the data.
+//
+// Chaikin corner-cutting fixes it in the data instead. Each pass replaces every
+// interior point with two points a quarter and three quarters along its
+// neighbouring edges, which halves the turn angle per pass and converges on a
+// quadratic B-spline. Endpoints are kept so junctions still meet. Two passes
+// takes the median turn under 10 degrees for four times the points, which the
+// walker then re-samples away anyway.
+function chaikin(pts, passes) {
+  let out = pts;
+  for (let k = 0; k < passes; k++) {
+    if (out.length < 3) return out;
+    const next = [out[0]];
+    for (let i = 0; i < out.length - 1; i++) {
+      const a = out[i]; const b = out[i + 1];
+      next.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25]);
+      next.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+    }
+    next.push(out[out.length - 1]);
+    out = next;
+  }
+  return out;
+}
+
+const SMOOTH_PASSES = 2;
+let smoothedPts = 0;
+for (const r of roadsDoc.roads) {
+  if (r.pts.length < 3) continue;
+  r.pts = chaikin(r.pts, SMOOTH_PASSES);
+  smoothedPts += r.pts.length;
+}
+console.log('smoothed %d centrelines to %s points (%d Chaikin passes)',
+  roadsDoc.roads.length, smoothedPts.toLocaleString('en-GB'), SMOOTH_PASSES);
+
 const CARVE_ORDER = ['path', 'service', 'local', 'collector', 'arterial'];
 const byClass = {};
 for (const r of roadsDoc.roads) (byClass[r.cls] ??= []).push(r);
@@ -405,7 +483,7 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
   const road = roadsDoc.roads[roadIndex];
   const spec = SPEC[road.cls] ?? SPEC.local;
   if (spec.skip) { skipped++; continue; }
-  const steps = walk(road.pts, DECK_M);
+  const steps = walkGraded(road.pts, DECK_M);
   if (!steps.length) continue;
   // A path's measured width is not a measurement. The skeleton raster is
   // 2.098 m a pixel, so a one-pixel-wide trail reports a half-width of one
