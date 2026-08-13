@@ -60,6 +60,17 @@ const sampleAt = (u, v) => {
   const r = Math.min(RES - 1, Math.max(0, Math.round(v * (RES - 1))));
   return height[r * RES + c];
 };
+// The ground as the survey left it. Every road's profile is measured against
+// this and never against `height`, which the carve mutates as it goes: read the
+// mutated map and a service road inherits whatever embankment the arterial next
+// to it just built, the profile chases it, and the result depends on the order
+// the roads happened to be carved in. Profiles are order-independent.
+const natural = Float32Array.from(height);
+const naturalAt = (u, v) => {
+  const c = Math.min(RES - 1, Math.max(0, Math.round(u * (RES - 1))));
+  const r = Math.min(RES - 1, Math.max(0, Math.round(v * (RES - 1))));
+  return natural[r * RES + c];
+};
 
 // Where the water is. maps3d-water.mjs has not run yet — it runs after this —
 // so the heightmap still says the bay is dry ground 3.5 m up. The surface map
@@ -141,6 +152,8 @@ const DECK_LIFT = 0.05;       // above the graded ground
 const KERB_H = 0.15;
 const KERB_W = 0.40;
 const SHOULDER_M = 2.0;       // graded ground either side of the carriageway
+const BATTER_RUN = 2.0;       // horizontal run per metre of embankment, 2:1
+const BATTER_MAX_M = 14.0;    // and no wider, whatever the earthwork
 
 // Street lighting. Only on the classes that really carry it: an American
 // residential street is lit from poles on the power line, not from a highway
@@ -205,34 +218,9 @@ const ZEBRA_OFFSET_M = 2.2;   // from the transition, toward the junction
 const MAX_STEP_M = 0.15;
 const MIN_SEG_M = 1.2;
 
-function walkGraded(pts, stepM) {
-  const out = [];
-  for (const s of walk(pts, stepM)) {
-    const ha = sampleAt((s.x - s.dir[0] * s.len / 2) / FRAME,
-      (s.y - s.dir[1] * s.len / 2) / FRAME) ?? 0;
-    const hb = sampleAt((s.x + s.dir[0] * s.len / 2) / FRAME,
-      (s.y + s.dir[1] * s.len / 2) / FRAME) ?? 0;
-    const rise = hb - ha;
-    const pitch = (Math.atan2(rise, s.len) * 180) / Math.PI;
-    const n = Math.min(
-      Math.max(1, Math.ceil(Math.abs(rise) / MAX_STEP_M)),
-      Math.max(1, Math.floor(s.len / MIN_SEG_M)));
-    if (n === 1) { s.pitch = pitch; out.push(s); continue; }
-    const seg = s.len / n;
-    for (let i = 0; i < n; i++) {
-      const t = (i + 0.5) / n - 0.5;
-      out.push({
-        x: s.x + s.dir[0] * s.len * t,
-        y: s.y + s.dir[1] * s.len * t,
-        len: seg, dir: s.dir, nrm: s.nrm, head: s.head, pitch,
-      });
-    }
-  }
-  return out;
-}
-
 function walk(pts, stepM) {
   const out = [];
+  let arc = 0;
   for (let i = 1; i < pts.length; i++) {
     const ax = pts[i - 1][0] * FRAME;
     const ay = pts[i - 1][1] * FRAME;
@@ -242,15 +230,206 @@ function walk(pts, stepM) {
     if (len < 1e-6) continue;
     const n = Math.max(1, Math.round(len / stepM));
     const dir = [(bx - ax) / len, (by - ay) / len];
+    const seg = len / n;
     for (let s = 0; s < n; s++) {
       const t = (s + 0.5) / n;
       out.push({
         x: ax + (bx - ax) * t,
         y: ay + (by - ay) * t,
-        len: len / n,
+        len: seg,
+        s0: arc + seg * (s + 0.5),        // arclength at the segment's centre
         dir,
         nrm: [-dir[1], dir[0]],
         head: (Math.atan2(dir[1], dir[0]) * 180) / Math.PI,
+      });
+    }
+    arc += len;
+  }
+  return out;
+}
+
+
+// ── The road's own elevation, and why the ground no longer decides it ───────
+//
+// A deck box used to take its height from the heightmap under its centre. That
+// is a 3.2 m raster read with a 14 m box, nearest-neighbour, on a surface every
+// other road in the city also writes into — so consecutive boxes could read
+// pixels that disagree, and the road stepped. Tilting the box fixed the tilt
+// but not the disagreement: pitch rotates a box about its own centre, it does
+// not make its ends meet its neighbours'.
+//
+// So the ground stops deciding. Each road gets ONE elevation profile as a
+// function of distance along it, every part of that road — deck, paint, kerb,
+// lamp — is placed against that profile, and the terrain is carved to match.
+// Consecutive segments now share an endpoint height by construction, because
+// they read the same continuous function at the same station. There is no step
+// left to remove.
+//
+// The profile is built in four stages:
+//
+//   1. Sample the natural ground every 4 m and take a +/- 48 m moving average.
+//      This is the survey, de-hummocked.
+//   2. Limit the grade. A road climbs at a rate; the ground does not. Measured
+//      along these centrelines the ground reaches 176% -- a 60 degree bank that
+//      a trail crosses sideways and a raster read turns into a wall. Each class
+//      gets the steepest grade that class really carries.
+//   3. Bound the earthwork, so limiting the grade cannot drive the road eight
+//      storeys into a hillside or leave it flying over a canyon.
+//   4. Round the crests and sags, so a grade change is a curve rather than a
+//      kink. Averaging neighbours cannot steepen anything, so this keeps the
+//      limit from stage 2.
+//
+// San Diego's steepest public streets run about 20-25%. Arterials are built to
+// far less than that; a footpath can be a staircase and is allowed the most.
+const MAX_GRADE = {
+  arterial: 0.08,
+  collector: 0.10,
+  local: 0.15,
+  service: 0.18,
+  path: 0.25,
+};
+const MAX_CUT_M = 8.0;
+const MAX_FILL_M = 8.0;
+const PROFILE_STEP_M = 4.0;
+const PROFILE_AVG_R = 12;      // +/- 12 samples = +/- 48 m
+const ROUND_PASSES = 2;
+
+// The steepest-allowed road that stays under the ground, and the steepest that
+// stays over it. Both are g-Lipschitz by construction — a forward sweep makes
+// each sample reachable from its predecessor at the grade limit, the backward
+// sweep from its successor — and so is their average, which is the road: it
+// cuts a hilltop and fills the dip beyond it by the same amount, which is how
+// the earthwork balances instead of all being cut or all being fill.
+function slopeLimit(z, ds, g) {
+  const n = z.length;
+  const lo = Float64Array.from(z);
+  const hi = Float64Array.from(z);
+  for (let i = 1; i < n; i++) {
+    lo[i] = Math.min(lo[i], lo[i - 1] + g * ds[i - 1]);
+    hi[i] = Math.max(hi[i], hi[i - 1] - g * ds[i - 1]);
+  }
+  for (let i = n - 2; i >= 0; i--) {
+    lo[i] = Math.min(lo[i], lo[i + 1] + g * ds[i]);
+    hi[i] = Math.max(hi[i], hi[i + 1] - g * ds[i]);
+  }
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) out[i] = (lo[i] + hi[i]) / 2;
+  return out;
+}
+
+function buildProfile(pts, cls) {
+  const steps = walk(pts, PROFILE_STEP_M);
+  if (!steps.length) return null;
+  const n = steps.length;
+  const at = new Float64Array(n);          // station of each sample
+  const raw = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    at[i] = steps[i].s0;
+    raw[i] = naturalAt(steps[i].x / FRAME, steps[i].y / FRAME);
+  }
+  const ds = new Float64Array(Math.max(1, n - 1));
+  for (let i = 0; i < n - 1; i++) ds[i] = Math.max(1e-3, at[i + 1] - at[i]);
+
+  // 1. de-hummock
+  let z = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let sum = 0; let k = 0;
+    for (let j = Math.max(0, i - PROFILE_AVG_R);
+      j <= Math.min(n - 1, i + PROFILE_AVG_R); j++) { sum += raw[j]; k++; }
+    z[i] = sum / k;
+  }
+
+  // 2 and 3, alternating. Clamping the earthwork can reintroduce a grade the
+  // limiter had just removed, so the two are run against each other until they
+  // agree — and the grade limit gets the last word, because a road too steep to
+  // drive is a worse failure than a deep cutting.
+  const g = MAX_GRADE[cls] ?? MAX_GRADE.local;
+  for (let round = 0; round < 4; round++) {
+    z = slopeLimit(z, ds, g);
+    let moved = false;
+    for (let i = 0; i < n; i++) {
+      const c = Math.min(Math.max(z[i], raw[i] - MAX_CUT_M), raw[i] + MAX_FILL_M);
+      if (Math.abs(c - z[i]) > 1e-6) { z[i] = c; moved = true; }
+    }
+    if (!moved) break;
+  }
+  z = slopeLimit(z, ds, g);
+
+  // 4. round the crests and sags. Averaging neighbours cannot steepen the
+  // difference between two samples, but the samples are not evenly spaced —
+  // `walk` divides each polyline edge into a whole number of pieces, so the
+  // step length changes at every vertex — and a difference carried from a long
+  // span onto a short one IS steeper. So the limiter gets the last word. It is
+  // idempotent on a profile that already complies, which is nearly all of it,
+  // so this costs the rounding almost nothing.
+  for (let p = 0; p < ROUND_PASSES; p++) {
+    const s = Float64Array.from(z);
+    for (let i = 1; i < n - 1; i++) s[i] = z[i - 1] * 0.25 + z[i] * 0.5 + z[i + 1] * 0.25;
+    z = s;
+  }
+  z = slopeLimit(z, ds, g);
+  return { at, z, raw, len: at[n - 1] };
+}
+
+// Height at a distance along the road. Linear between samples, flat past the
+// ends — a segment centre can sit half a step outside the first and last
+// station, and a road that fell off its own profile there would step exactly
+// where it meets the next road.
+function zAtArc(prof, s) {
+  const { at, z } = prof;
+  const n = at.length;
+  if (n === 1 || s <= at[0]) return z[0];
+  if (s >= at[n - 1]) return z[n - 1];
+  let lo = 0; let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (at[mid] <= s) lo = mid; else hi = mid;
+  }
+  const t = (s - at[lo]) / (at[hi] - at[lo]);
+  return z[lo] + (z[hi] - z[lo]) * t;
+}
+
+// Ground deviation at a station, which is what the shoulder has to batter down.
+function devAtArc(prof, s) {
+  const { at, z, raw } = prof;
+  const n = at.length;
+  if (n === 1 || s <= at[0]) return z[0] - raw[0];
+  if (s >= at[n - 1]) return z[n - 1] - raw[n - 1];
+  let lo = 0; let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (at[mid] <= s) lo = mid; else hi = mid;
+  }
+  const t = (s - at[lo]) / (at[hi] - at[lo]);
+  return (z[lo] - raw[lo]) + ((z[hi] - raw[hi]) - (z[lo] - raw[lo])) * t;
+}
+
+// Walk a road for the deck, taking every height from its profile. A segment's
+// ends are read at its own two stations, so its far end and the next segment's
+// near end are the same number: the joint is exact, not merely small.
+function walkProfiled(pts, stepM, prof) {
+  const out = [];
+  for (const s of walk(pts, stepM)) {
+    const za = zAtArc(prof, s.s0 - s.len / 2);
+    const zb = zAtArc(prof, s.s0 + s.len / 2);
+    const rise = zb - za;
+    const pitch = (Math.atan2(rise, s.len) * 180) / Math.PI;
+    // Belt and braces for a consumer that ignores pitch: subdivide until the
+    // rise across a piece is under MAX_STEP_M. With the grade now capped this
+    // is cheap — it only bites above 1% and never splits below MIN_SEG_M.
+    const n = Math.min(
+      Math.max(1, Math.ceil(Math.abs(rise) / MAX_STEP_M)),
+      Math.max(1, Math.floor(s.len / MIN_SEG_M)));
+    if (n === 1) { s.pitch = pitch; s.z = (za + zb) / 2; out.push(s); continue; }
+    const seg = s.len / n;
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n - 0.5;
+      const cs = s.s0 + s.len * t;
+      out.push({
+        x: s.x + s.dir[0] * s.len * t,
+        y: s.y + s.dir[1] * s.len * t,
+        len: seg, s0: cs, dir: s.dir, nrm: s.nrm, head: s.head, pitch,
+        z: zAtArc(prof, cs),
       });
     }
   }
@@ -305,31 +484,76 @@ const CARVE_ORDER = ['path', 'service', 'local', 'collector', 'arterial'];
 const byClass = {};
 for (const r of roadsDoc.roads) (byClass[r.cls] ??= []).push(r);
 
+// One profile per road, built before anything is carved so no road's profile
+// can see another road's earthwork. Indexed by position in roadsDoc.roads,
+// because the carve walks by class and the deck walks by index.
+const profiles = new Array(roadsDoc.roads.length).fill(null);
+const roadIndexOf = new Map(roadsDoc.roads.map((r, i) => [r, i]));
+{
+  let steepest = 0; let deepest = 0; let highest = 0; let over = 0; let n = 0;
+  let heavy = 0; let stations = 0;
+  for (let i = 0; i < roadsDoc.roads.length; i++) {
+    const r = roadsDoc.roads[i];
+    if (SPEC[r.cls]?.skip) continue;         // bridges carry their own deck
+    const prof = buildProfile(r.pts, r.cls);
+    if (!prof) continue;
+    profiles[i] = prof;
+    const cap = MAX_GRADE[r.cls] ?? MAX_GRADE.local;
+    for (let k = 1; k < prof.at.length; k++) {
+      const run = prof.at[k] - prof.at[k - 1];
+      if (run < 1e-3) continue;
+      const grade = Math.abs(prof.z[k] - prof.z[k - 1]) / run;
+      if (grade > steepest) steepest = grade;
+      if (grade > cap + 1e-4) over++;
+      n++;
+    }
+    for (let k = 0; k < prof.at.length; k++) {
+      const d = prof.z[k] - prof.raw[k];
+      if (d > highest) highest = d;
+      if (-d > deepest) deepest = -d;
+      if (Math.abs(d) > MAX_CUT_M) heavy++;
+      stations++;
+    }
+  }
+  console.log('graded %d road profiles: steepest %s%%, %d of %s spans over '
+    + 'their class cap, earthwork up to %s m of cut and %s m of fill',
+    profiles.filter(Boolean).length, (steepest * 100).toFixed(1), over,
+    n.toLocaleString('en-GB'), deepest.toFixed(1), highest.toFixed(1));
+  console.log('  %s of %s stations need more than the %s m earthwork bound '
+    + '(%s%%) — those are the canyon crossings, where the grade limit wins',
+    heavy.toLocaleString('en-GB'), stations.toLocaleString('en-GB'), MAX_CUT_M,
+    ((heavy / Math.max(1, stations)) * 100).toFixed(2));
+  // The grade limit is the point of the exercise. A handful of spans can still
+  // exceed their cap where the earthwork bound fought it to a draw, but a
+  // wholesale miss means the limiter is not the last thing touching the
+  // profile — which is exactly how a rounding pass reintroduced 36% grades.
+  if (over > n * 0.001) {
+    console.error('%d spans (%s%%) exceed their class grade cap — something '
+      + 'after the limiter is putting slope back',
+      over, ((over / n) * 100).toFixed(2));
+    process.exit(1);
+  }
+}
+
 let carved = 0;
 for (const cls of CARVE_ORDER) {
   for (const road of byClass[cls] ?? []) {
-    const steps = walk(road.pts, 4);
+    const prof = profiles[roadIndexOf.get(road)];
+    if (!prof) continue;
+    const steps = walk(road.pts, PROFILE_STEP_M);
     if (steps.length < 2) continue;
 
-    // Smooth the elevation along the line before writing it back. This is the
-    // grading: a road climbs at a constant rate between two points, it does
-    // not reproduce every hummock the survey found under it.
-    const raw = steps.map((s) => sampleAt(s.x / FRAME, s.y / FRAME));
-    const smooth = new Float32Array(raw.length);
-    const R = 12;
-    for (let i = 0; i < raw.length; i++) {
-      let sum = 0; let n = 0;
-      for (let k = Math.max(0, i - R); k <= Math.min(raw.length - 1, i + R); k++) {
-        sum += raw[k]; n++;
-      }
-      smooth[i] = sum / n;
-    }
-
     const nominal = cls === 'path' && road.w <= 5.0 ? 2.4 : road.w;
-    const halfCorridor = nominal / 2 + SHOULDER_M;
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i];
-      const target = smooth[i];
+      // The shoulder is what gets the graded surface back down to the ground it
+      // was cut into. A fixed 2 m of it is fine on the flat and is a retaining
+      // wall against an 8 m embankment, so it widens to a 2:1 batter wherever
+      // the road has left the ground — which is the 10% of the network that was
+      // making the other 90% look broken.
+      const dev = Math.abs(devAtArc(prof, s.s0));
+      const shoulder = Math.min(BATTER_MAX_M, Math.max(SHOULDER_M, dev * BATTER_RUN));
+      const halfCorridor = nominal / 2 + shoulder;
       const reach = Math.ceil(halfCorridor / M_PER_SAMPLE) + 1;
       const c0 = Math.round(s.x / M_PER_SAMPLE);
       const r0 = Math.round(s.y / M_PER_SAMPLE);
@@ -341,12 +565,18 @@ for (const cls of CARVE_ORDER) {
           const px = c * M_PER_SAMPLE - s.x;
           const py = r * M_PER_SAMPLE - s.y;
           const perp = Math.abs(px * s.nrm[0] + py * s.nrm[1]);
-          const along = Math.abs(px * s.dir[0] + py * s.dir[1]);
+          const alongSigned = px * s.dir[0] + py * s.dir[1];
+          const along = Math.abs(alongSigned);
           if (along > s.len / 2 + M_PER_SAMPLE) continue;
           if (perp > halfCorridor) continue;
+          // The pixel's own height, read at the pixel's own distance along the
+          // road — not the station's. Using the station's makes the graded
+          // ground a 4 m staircase under a road that is not one, and leaves the
+          // deck's placement correcting for a step the carve just put there.
+          const target = zAtArc(prof, s.s0 + alongSigned);
           // Full grade across the carriageway, easing out over the shoulder so
           // the verge meets the natural ground instead of stepping off it.
-          const t = Math.min(1, Math.max(0, (perp - nominal / 2) / SHOULDER_M));
+          const t = Math.min(1, Math.max(0, (perp - nominal / 2) / shoulder));
           const blend = 1 - t * t * (3 - 2 * t);
           const i2 = r * RES + c;
           height[i2] = height[i2] * (1 - blend) + target * blend;
@@ -356,8 +586,9 @@ for (const cls of CARVE_ORDER) {
     }
   }
 }
-console.log('carved %d heightmap samples (%.2f km2 of graded corridor)',
-  carved, (carved * M_PER_SAMPLE * M_PER_SAMPLE) / 1e6);
+console.log('carved %s heightmap samples (%s km2 of graded corridor)',
+  carved.toLocaleString('en-GB'),
+  ((carved * M_PER_SAMPLE * M_PER_SAMPLE) / 1e6).toFixed(2));
 
 // ── Junction boxes ──────────────────────────────────────────────────────────
 //
@@ -495,11 +726,29 @@ let deckN = 0; let markN = 0; let kerbN = 0; let wetSteps = 0;
 let yielded = 0; let boxed = 0; let lampN = 0; let stopN = 0;
 let zebraN = 0; let zebraN2 = 0;
 let skipped = 0;
+let deckErr = 0; let deckErrSum = 0; let deckErrN = 0;
+
+// Paint stacks on top of the deck, and the deck's own lift is already in the
+// offset, so the paint's offset is the deck's plus the deck's thickness.
+const MARK_STACK = DECK_LIFT + DECK_THICK + MARK_H;
+
+// The consumer treats a base of almost exactly zero as "this thing stands on
+// the ground" and sinks it to hide the gap under a box on a slope. A road deck
+// is not standing on anything and must not be sunk, so a base that lands in
+// that dead band by arithmetic accident is nudged clear of it. 2 cm, which is
+// under the paint's own thickness and so invisible.
+// The nudge keeps the sign it was given: flipping a -19 mm base to +20 mm moves
+// the part 39 mm, which is twice the error the nudge is allowed to introduce
+// and was the largest placement error left on the map.
+const DEAD_BAND = 0.02;
+const onGrade = (b) => (Math.abs(b) < DEAD_BAND ? (b < 0 ? -DEAD_BAND : DEAD_BAND) : b);
 for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
   const road = roadsDoc.roads[roadIndex];
   const spec = SPEC[road.cls] ?? SPEC.local;
   if (spec.skip) { skipped++; continue; }
-  const steps = walkGraded(road.pts, DECK_M);
+  const prof = profiles[roadIndex];
+  if (!prof) { skipped++; continue; }
+  const steps = walkProfiled(road.pts, DECK_M, prof);
   if (!steps.length) continue;
   // A path's measured width is not a measurement. The skeleton raster is
   // 2.098 m a pixel, so a one-pixel-wide trail reports a half-width of one
@@ -519,6 +768,16 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
     const u = s.x / FRAME;
     const v = s.y / FRAME;
     if (wetAt(u, v)) { wetSteps++; travelled += s.len; continue; }
+    // `base` is an offset from the terrain the consumer samples under the part,
+    // and the road knows its own height, so the offset is whatever gets it
+    // there: profile minus the ground actually under that part. On the
+    // centreline the carve has already put the ground on the profile and this
+    // is ~0; off it — under the paint, the kerb, the lamp — it is the
+    // shoulder's fall, which is exactly what those pieces used to float or sink
+    // by. Pieces that sit further along the road than the segment's centre ask
+    // the profile for their own station rather than borrowing its.
+    const liftAt = (z, ou, ov, extra) => onGrade(z - sampleAt(ou, ov) + extra);
+    const lift = (ou, ov, extra) => liftAt(s.z, ou, ov, extra);
     const zone = zoneAt(s.x, s.y, roadIndex);
     // Entering or leaving a box the other road owns: paint a stop bar across
     // this carriageway, on the outside of the step so it sits back from the
@@ -528,20 +787,24 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
     if ((entering || leaving) && spec.centre !== 'none') {
       const sgn = entering ? -1 : 1;
       const at = sgn * (STOP_INSET_M + s.len / 2);
-      push((s.x + s.dir[0] * at) / FRAME, (s.y + s.dir[1] * at) / FRAME,
-        s.head, STOP_W, road.w - 0.5, MARK_H,
-        DECK_LIFT + DECK_THICK + MARK_H, 'line_white');
+      const bu = (s.x + s.dir[0] * at) / FRAME;
+      const bv = (s.y + s.dir[1] * at) / FRAME;
+      const bz = zAtArc(prof, s.s0 + at);
+      push(bu, bv, s.head, STOP_W, road.w - 0.5, MARK_H,
+        liftAt(bz, bu, bv, MARK_STACK), 'line_white', s.pitch);
       stopN++;
 
       // The crossing sits between that bar and the junction.
       const zc = at + sgn * ZEBRA_OFFSET_M;
       const zx = s.x + s.dir[0] * zc; const zy = s.y + s.dir[1] * zc;
+      const zz = zAtArc(prof, s.s0 + zc);
       const bars = Math.max(2, Math.floor((width - 1.0) / ZEBRA_PITCH));
       for (let b = 0; b < bars; b++) {
         const off = (b - (bars - 1) / 2) * ZEBRA_PITCH;
-        push((zx + s.nrm[0] * off) / FRAME, (zy + s.nrm[1] * off) / FRAME,
-          s.head, ZEBRA_BAR_L, ZEBRA_BAR_W, MARK_H,
-          DECK_LIFT + DECK_THICK + MARK_H, 'line_white');
+        const ou = (zx + s.nrm[0] * off) / FRAME;
+        const ov = (zy + s.nrm[1] * off) / FRAME;
+        push(ou, ov, s.head, ZEBRA_BAR_L, ZEBRA_BAR_W, MARK_H,
+          liftAt(zz, ou, ov, MARK_STACK), 'line_white', s.pitch);
         zebraN++;
       }
       zebraN2++;
@@ -549,17 +812,21 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
     prevZone = zone;
     if (zone === 'yield') { yielded++; travelled += s.len; continue; }
     const paint = zone === 'clear';
-    // The deck's underside sits at the graded height; `base` is relative to
-    // the terrain the consumer samples, which is now the same graded height.
-    push(u, v, s.head, s.len + 0.6, width, DECK_THICK, DECK_LIFT,
+    push(u, v, s.head, s.len + 0.6, width, DECK_THICK, lift(u, v, DECK_LIFT),
       road.cls === 'path' ? 'path' : 'road_deck', s.pitch);
     deckN++;
+    // What the consumer will actually land on, minus where the road says it
+    // should be. This is the whole fix expressed as one number, so it is
+    // measured rather than assumed.
+    const err = Math.abs(sampleAt(u, v) + lift(u, v, DECK_LIFT) - DECK_LIFT - s.z);
+    if (err > deckErr) deckErr = err;
+    deckErrSum += err; deckErrN++;
 
-    const markBase = DECK_LIFT + DECK_THICK + MARK_H;
     const offsetPart = (offM, w, len, kind) => {
       const ou = (s.x + s.nrm[0] * offM) / FRAME;
       const ov = (s.y + s.nrm[1] * offM) / FRAME;
-      push(ou, ov, s.head, len, w, MARK_H, markBase, kind, s.pitch);
+      push(ou, ov, s.head, len, w, MARK_H, lift(ou, ov, MARK_STACK), kind,
+        s.pitch);
       markN++;
     };
 
@@ -592,7 +859,8 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
         const off = side * (halfW + KERB_W / 2);
         const ou = (s.x + s.nrm[0] * off) / FRAME;
         const ov = (s.y + s.nrm[1] * off) / FRAME;
-        push(ou, ov, s.head, s.len + 0.4, KERB_W, KERB_H, DECK_LIFT, 'kerb');
+        push(ou, ov, s.head, s.len + 0.4, KERB_W, KERB_H, lift(ou, ov, DECK_LIFT),
+          'kerb', s.pitch);
         kerbN++;
       }
     }
@@ -606,12 +874,16 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
         const off = side * (halfW + KERB_W + LAMP_CLEAR_M);
         const pu = (s.x + s.nrm[0] * off) / FRAME;
         const pv = (s.y + s.nrm[1] * off) / FRAME;
-        push(pu, pv, s.head, LAMP_POLE_W, LAMP_POLE_W, lamp.poleH, 0, 'lamp_post');
+        // A lamp stands plumb on the verge, not raked over with the grade, so
+        // it takes the road's height but none of its pitch.
+        push(pu, pv, s.head, LAMP_POLE_W, LAMP_POLE_W, lamp.poleH,
+          lift(pu, pv, 0), 'lamp_post');
         // The head reaches back over the carriageway on its arm.
         const hoff = off - side * lamp.armM;
-        push((s.x + s.nrm[0] * hoff) / FRAME, (s.y + s.nrm[1] * hoff) / FRAME,
-          s.head, LAMP_HEAD_L, LAMP_HEAD_W, LAMP_HEAD_H, lamp.poleH - LAMP_HEAD_H,
-          'lamp');
+        const hu = (s.x + s.nrm[0] * hoff) / FRAME;
+        const hv = (s.y + s.nrm[1] * hoff) / FRAME;
+        push(hu, hv, s.head, LAMP_HEAD_L, LAMP_HEAD_W, LAMP_HEAD_H,
+          lift(hu, hv, lamp.poleH - LAMP_HEAD_H), 'lamp');
         lampN += 2;
       }
     }
@@ -620,6 +892,19 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
   }
 }
 console.log('%d deck segments, %d markings, %d kerb pieces', deckN, markN, kerbN);
+console.log('deck lands on its profile to within %s mm (mean %s mm over %s '
+  + 'segments)', (deckErr * 1000).toFixed(1),
+  ((deckErrSum / Math.max(1, deckErrN)) * 1000).toFixed(2),
+  deckErrN.toLocaleString('en-GB'));
+// The only thing allowed to move a deck off its profile is the dead-band nudge,
+// and that is bounded. Anything larger means the carve and the placement have
+// stopped agreeing about the ground, which is the defect this whole pass exists
+// to remove — so it fails the build rather than shipping a road that steps.
+if (deckErr > DEAD_BAND + 1e-6) {
+  console.error('a deck segment misses its own profile by %s m — the carve and '
+    + 'the placement disagree about the ground', deckErr.toFixed(3));
+  process.exit(1);
+}
 console.log('%d steps yielded to a more major road at a crossing, %d left '
   + 'unpainted inside a junction box', yielded, boxed);
 console.log('%d street light parts (%d lights) on arterials and collectors',
@@ -734,8 +1019,8 @@ for (const v of height) { if (v < lo) lo = v; if (v > hi) hi = v; }
 // Keep the declared range: the carve only ever moves ground between existing
 // heights, so re-ranging would change the landscape Z scale for no reason and
 // silently invalidate the import recipe the user already has.
-console.log('elevation after carve %.2f .. %.2f m (declared range %s..%s kept)',
-  lo, hi, LO, HI);
+console.log('elevation after carve %s .. %s m (declared range %s..%s kept)',
+  lo.toFixed(2), hi.toFixed(2), LO, HI);
 
 const samples = new Uint16Array(RES * RES);
 for (let i = 0; i < height.length; i++) {

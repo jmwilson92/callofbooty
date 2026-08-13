@@ -187,8 +187,9 @@ for (let i = 0; i < R.length; i++) {
   if (G[i]) coverPx++;
   if (B[i]) waterPx++;
 }
-console.log('\ncoverage of the %.1f km frame: road %.2f km2, land cover %.2f km2, water %.2f km2',
-  FRAME / 1000, km2(roadPx), km2(coverPx), km2(waterPx));
+console.log('\ncoverage of the %s km frame: road %s km2, land cover %s km2, water %s km2',
+  (FRAME / 1000).toFixed(1), km2(roadPx).toFixed(2), km2(coverPx).toFixed(2),
+  km2(waterPx).toFixed(2));
 
 // ── Encode as 8-bit RGB ─────────────────────────────────────────────────────
 const CRC = (() => {
@@ -243,5 +244,6 @@ writeFileSync(join(OUT, 'sandiego-surfaces.json'), JSON.stringify({
     + 'maximum, over frameMetres.',
 }, null, 2));
 
-console.log('\nwrote %s  (%.1f MB, %d x %d, %.2f m per pixel)',
-  join(OUT, 'sandiego-surfaces.png'), png.length / 1048576, RES, RES, mPerPx);
+console.log('\nwrote %s  (%s MB, %d x %d, %s m per pixel)',
+  join(OUT, 'sandiego-surfaces.png'), (png.length / 1048576).toFixed(1), RES, RES,
+  mPerPx.toFixed(2));
