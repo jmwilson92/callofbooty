@@ -170,6 +170,58 @@ Two traps it now guards against, both hit on the first run:
   Mesa is 12.6 km north of centre and this capture is ±5.9 km, so that POI
   belongs to the synthesised world in `src/world/geo`, not to this one.
 
+## Auditing every road, not the ones a camera faced
+
+`tools/flyover.mjs` can photograph any corner of the map, but there are 10,822
+road runs and 2,020 km of centreline: looking at all of it one frame at a time
+is not a plan. Measuring all of it takes about a minute.
+
+```
+node tools/road-audit.mjs --out out --json audit.json
+node tools/flyover.mjs   --out out --shots audit.json   # look at the worst
+```
+
+It walks every centreline at 2 m and asks the three questions a road can fail —
+BREAKS (is there carriageway under every metre), BLOCKED (is a building
+standing in it), BURIED (is terrain above the surface) — then writes ready-made
+cameras for the worst of each, because a finding nobody looks at is a finding
+nobody fixes. More than 0.5% of the network without carriageway fails the build.
+
+Three ways this audit lied before it was trusted, all worth knowing because
+they are the shape of measurement bugs generally:
+
+- **Counting legitimate absences.** A centreline over water has no deck on
+  purpose — `maps3d-bridges.mjs` builds one on piles after the bay is dug.
+  Counting those buried the real breaks under 1,046 fake ones.
+- **Measuring at the wrong place.** BURIED first sampled at the kerb line and
+  reported 4.9% of the network. Most of that was roads in cuttings, where
+  ground rising at the kerb is a retaining face and entirely correct. Sampling
+  inside the carriageway, where wheels go, gives 1.8%.
+- **Measuring against the wrong thing.** A slack tolerance is right for "is
+  there carriageway near here" and wrong for "is the ground above the deck I am
+  on": on a bluff it finds a neighbouring road's deck 20 m below and reports
+  21 m of terrain over a road that is fine. BREAKS and BURIED now use different
+  tolerances on purpose.
+
+## Roads bury each other, and the last one carved wins
+
+The carve writes each road's profile into the ground one road at a time. That
+is right where roads meet at grade and wrong everywhere else: two parallel
+carriageways on a hillside get their own profiles, sit at different heights,
+and whichever is carved second raises the ground back over the first. On a
+freeway it renders as the hillside sawtoothing through the carriageway.
+
+So after every road has carved, one more pass that can only ever **lower** the
+ground, and only inside a carriageway. Order stops mattering — a pixel ends up
+at or below every deck above it. It moved 969,391 samples, by up to 14.2 m, and
+took BURIED from 1.77% to 1.14%.
+
+Where two carriageways genuinely conflict the lower one wins and the upper
+road's deck stands proud of the ground. That is what a grade separation looks
+like, and it is the honest reading of a capture that cannot tell a flyover from
+a crossroads: only 0.76% of road vertices sit more than 4 m above the ground
+under them.
+
 ## The road knows its own height; the ground does not get a vote
 
 A deck box used to take its elevation from the heightmap under its centre. That

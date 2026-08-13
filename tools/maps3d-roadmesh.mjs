@@ -590,6 +590,64 @@ console.log('carved %s heightmap samples (%s km2 of graded corridor)',
   carved.toLocaleString('en-GB'),
   ((carved * M_PER_SAMPLE * M_PER_SAMPLE) / 1e6).toFixed(2));
 
+// ── Clearance ───────────────────────────────────────────────────────────────
+//
+// The carve writes each road's profile into the ground, one road at a time, and
+// the last writer wins. That is right where roads meet at grade and wrong
+// everywhere else: two parallel carriageways on a hillside get their own
+// profiles, sit at different heights, and whichever is carved second raises the
+// ground back over the first. Measured across the whole network that left
+// 49,305 stations — 4.9% of it — with terrain standing above the road surface,
+// up to 21 m of it, and on a freeway it renders as the hillside sawtoothing
+// through the carriageway.
+//
+// So after every road has carved, one more pass that can only ever LOWER the
+// ground, and only inside a carriageway. Order stops mattering: a pixel ends up
+// at or below every deck above it, so no road can be buried by another road's
+// earthwork. Where two carriageways genuinely conflict the lower one wins and
+// the upper road's deck stands proud of the ground, which is what a grade
+// separation looks like and is the honest reading of a capture that cannot tell
+// a flyover from a crossroads.
+//
+// This runs BEFORE the decks are laid, because each deck's base is measured
+// against the finished ground. Lowering the ground afterwards would take the
+// decks down with it.
+let cleared = 0; let deepest = 0;
+for (const cls of CARVE_ORDER) {
+  for (const road of byClass[cls] ?? []) {
+    const prof = profiles[roadIndexOf.get(road)];
+    if (!prof) continue;
+    const nominal = cls === 'path' && road.w <= 5.0 ? 2.4 : road.w;
+    const half = nominal / 2;
+    const reach = Math.ceil(half / M_PER_SAMPLE) + 1;
+    for (const s of walk(road.pts, PROFILE_STEP_M)) {
+      const c0 = Math.round(s.x / M_PER_SAMPLE);
+      const r0 = Math.round(s.y / M_PER_SAMPLE);
+      for (let dr = -reach; dr <= reach; dr++) {
+        for (let dc = -reach; dc <= reach; dc++) {
+          const c = c0 + dc; const r = r0 + dr;
+          if (c < 0 || r < 0 || c >= RES || r >= RES) continue;
+          const px = c * M_PER_SAMPLE - s.x;
+          const py = r * M_PER_SAMPLE - s.y;
+          if (Math.abs(px * s.nrm[0] + py * s.nrm[1]) > half) continue;
+          const alongSigned = px * s.dir[0] + py * s.dir[1];
+          if (Math.abs(alongSigned) > s.len / 2 + M_PER_SAMPLE) continue;
+          const target = zAtArc(prof, s.s0 + alongSigned);
+          const i2 = r * RES + c;
+          if (height[i2] > target) {
+            deepest = Math.max(deepest, height[i2] - target);
+            height[i2] = target;
+            cleared++;
+          }
+        }
+      }
+    }
+  }
+}
+console.log('cleared %s samples standing above a carriageway (up to %s m of it) '
+  + '— that is one road\'s earthwork having buried another\'s',
+  cleared.toLocaleString('en-GB'), deepest.toFixed(1));
+
 // ── Junction boxes ──────────────────────────────────────────────────────────
 //
 // Two centrelines that cross need one of them to give way, and until now
