@@ -120,6 +120,56 @@ for, `maps3d-surfaces.mjs` counts the triangles of any class it has no code for,
 `maps3d-preview.mjs` names kinds it has no colour for, and
 `Tools/build_sandiego.py` warns rather than importing a kind as default grey.
 
+## Looking at it, without Unreal
+
+Every defect that has survived this pipeline was one no count could show. The
+aprons on the wrong airfield, the road that stepped 105 cm, the three ramps on
+MCRD land, the flight lines that were not in the buffer at all — each passed its
+assertions, printed a healthy log, and was caught by a human opening the editor.
+
+`tools/flyover.mjs` renders the shipped bytes in perspective so that stops being
+a human's job:
+
+```
+node tools/flyover.mjs --out out --list              # named places
+node tools/flyover.mjs --out out --find runway       # where a kind actually is
+node tools/flyover.mjs --out out --place ksan --eye 260 --look 100
+node tools/flyover.mjs --out out --shots shots.json --only runway,taxiway
+```
+
+It reads `city.json`, `city-buildings.bin` and `sandiego.r16` — the same files
+copied into `Tools/Heightmaps`, not a parallel description of them — and
+transcribes `build_sandiego.py`'s placement arithmetic field for field: same
+sink rule, same water rule, same cleared-flag skip, same palette. If the two
+ever disagree the render is a lie, so they are kept side by side deliberately.
+
+About three seconds a shot. There is no GPU, so WebGL runs on SwiftShader;
+`--radius` bounds how much world is sent, because drawing all 1.57 M parts to
+photograph one street corner is how this becomes an hour a shot. On a machine
+whose Playwright build does not match its browser cache, set `CHROME_PATH`.
+
+**What it proves:** where a part is, how big it is, which way it points, whether
+it stands on the ground or floats, whether it intersects something it should
+not. That is the whole class of bug this project keeps producing.
+
+**What it cannot prove:** anything the engine owns — materials, lighting, LOD
+popping, HISM cull distances, collision, streaming. The ground renders as flat
+green because the landscape material is not run here; `maps3d-preview.mjs` is
+the tool for that question. If flyover looks right and the editor does not, the
+fault is on the Unreal side, which is a much smaller place to look.
+
+Two traps it now guards against, both hit on the first run:
+
+- **Places are latitude and longitude, never u,v.** The first table was
+  hand-picked in u,v and every entry was wrong — KSAN by 740 m, which put the
+  camera in a suburb looking at nothing and would have been reported as "the
+  runways are still missing".
+- **A place outside the playable area fails the run.** Out-of-bounds ring
+  terrain renders as an empty green field, which is indistinguishable from a
+  thing that was never built. This is how the `kearny` entry was caught: Kearny
+  Mesa is 12.6 km north of centre and this capture is ±5.9 km, so that POI
+  belongs to the synthesised world in `src/world/geo`, not to this one.
+
 ## The road knows its own height; the ground does not get a vote
 
 A deck box used to take its elevation from the heightmap under its centre. That
