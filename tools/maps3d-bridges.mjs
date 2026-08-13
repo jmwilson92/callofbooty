@@ -123,7 +123,7 @@ function walk(pts, stepM) {
 const FLAG_STRUCTURE = 4;
 const parts = [];
 const push = (u, v, rot, w, d, h, base, kind) =>
-  parts.push([u, v, rot, w, d, h, kind, FLAG_STRUCTURE, base]);
+  parts.push([u, v, rot, w, d, h, kind, FLAG_STRUCTURE, base, 0]);
 
 // What gets built here: every road classed as a bridge, plus any run of any
 // other road that ends up over water once the bay is dug. The second case is

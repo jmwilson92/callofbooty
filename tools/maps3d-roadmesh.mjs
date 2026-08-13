@@ -187,9 +187,10 @@ const ZEBRA_OFFSET_M = 2.2;   // from the transition, toward the junction
 // but costs 1.25 M road parts against 855 K here, and the map this feeds is not
 // streaming: every part is resident. The real fix is a pitch field in the packed
 // format, which would let segments stay at 14 m and cost nothing at all.
-const MAX_STEP_M = 0.25;
-const MIN_SEG_M = 1.6;
-
+// Each segment gets the pitch of the ground it spans, so the box tilts to the
+// grade instead of stepping up to it. This replaces subdividing on slope, which
+// worked but cost 176,000 extra parts on a map that does not stream — the tilt
+// is both better looking and free.
 function walkGraded(pts, stepM) {
   const out = [];
   for (const s of walk(pts, stepM)) {
@@ -197,20 +198,9 @@ function walkGraded(pts, stepM) {
       (s.y - s.dir[1] * s.len / 2) / FRAME);
     const hb = sampleAt((s.x + s.dir[0] * s.len / 2) / FRAME,
       (s.y + s.dir[1] * s.len / 2) / FRAME);
-    const rise = Math.abs((hb ?? 0) - (ha ?? 0));
-    const n = Math.min(
-      Math.max(1, Math.ceil(rise / MAX_STEP_M)),
-      Math.max(1, Math.floor(s.len / MIN_SEG_M)));
-    if (n === 1) { out.push(s); continue; }
-    const seg = s.len / n;
-    for (let i = 0; i < n; i++) {
-      const t = (i + 0.5) / n - 0.5;
-      out.push({
-        x: s.x + s.dir[0] * s.len * t,
-        y: s.y + s.dir[1] * s.len * t,
-        len: seg, dir: s.dir, nrm: s.nrm, head: s.head,
-      });
-    }
+    const rise = (hb ?? 0) - (ha ?? 0);
+    s.pitch = (Math.atan2(rise, s.len) * 180) / Math.PI;
+    out.push(s);
   }
   return out;
 }
@@ -472,8 +462,8 @@ console.log('%d centreline crossings -> junction boxes', zones.length);
 
 // ── 2 & 3. Deck, markings, kerbs ────────────────────────────────────────────
 const parts = [];
-const push = (u, v, rot, w, d, h, base, kind) =>
-  parts.push({ u, v, rot, w, d, h, base, kind });
+const push = (u, v, rot, w, d, h, base, kind, pitch = 0) =>
+  parts.push({ u, v, rot, w, d, h, base, kind, pitch });
 
 let deckN = 0; let markN = 0; let kerbN = 0; let wetSteps = 0;
 let yielded = 0; let boxed = 0; let lampN = 0; let stopN = 0;
@@ -536,14 +526,14 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
     // The deck's underside sits at the graded height; `base` is relative to
     // the terrain the consumer samples, which is now the same graded height.
     push(u, v, s.head, s.len + 0.6, width, DECK_THICK, DECK_LIFT,
-      road.cls === 'path' ? 'path' : 'road_deck');
+      road.cls === 'path' ? 'path' : 'road_deck', s.pitch);
     deckN++;
 
     const markBase = DECK_LIFT + DECK_THICK + MARK_H;
     const offsetPart = (offM, w, len, kind) => {
       const ou = (s.x + s.nrm[0] * offM) / FRAME;
       const ov = (s.y + s.nrm[1] * offM) / FRAME;
-      push(ou, ov, s.head, len, w, MARK_H, markBase, kind);
+      push(ou, ov, s.head, len, w, MARK_H, markBase, kind, s.pitch);
       markN++;
     };
 
@@ -702,6 +692,7 @@ parts.forEach((p, i) => {
   bin.writeFloatLE(kindIdx.get(p.kind), o + 24);
   bin.writeFloatLE(0, o + 28);
   bin.writeFloatLE(p.base, o + 32);
+  bin.writeFloatLE(p.pitch ?? 0, o + 36);
 });
 cityDoc.kinds = kinds;
 cityDoc.roadmesh = { baseCount: roadBase };

@@ -542,8 +542,12 @@ try {
     const r = (i / RES) | 0; const c = i - r * RES;
     // base is relative to the ground under the part, and the slab's top has to
     // land on the body's own surface.
+    // The trailing 0 is pitchDeg. Without it the row is one short of the
+    // stride, the writer reads undefined off the end and puts NaN in the
+    // buffer -- 12,018 NaN pitches, one per inland water slab, which the
+    // importer would hand straight to a rotator.
     rows.push([c / (RES - 1), r / (RES - 1), 0, M_PER_PX, M_PER_PX, SLAB_H,
-      K_WATER, 0, body.surface - height[i] - SLAB_H]);
+      K_WATER, 0, body.surface - height[i] - SLAB_H, 0]);
   }
   const add = Buffer.alloc(rows.length * STRIDE * 4);
   for (let i = 0; i < rows.length; i++) {

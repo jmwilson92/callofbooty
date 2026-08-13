@@ -152,7 +152,7 @@ const FLAG_STRUCTURE = 4;
 const FLAG_CLEARED = 8;
 const parts = [];
 const push = (u, v, rot, w, d, h, kind, base) =>
-  parts.push([u, v, rot, w, d, h, kind, FLAG_STRUCTURE, base]);
+  parts.push([u, v, rot, w, d, h, kind, FLAG_STRUCTURE, base, 0]);
 
 const struct0 = readFileSync(structPath);
 const SS0 = city.structures;

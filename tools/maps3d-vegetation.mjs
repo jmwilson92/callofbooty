@@ -255,7 +255,7 @@ function rand(seed) {
 
 const parts = [];
 const push = (u, v, rot, w, d, h, base, kind) => {
-  parts.push([u, v, rot, w, d, h, kind, 0, base]);
+  parts.push([u, v, rot, w, d, h, kind, 0, base, 0]);
 };
 
 const table = [];

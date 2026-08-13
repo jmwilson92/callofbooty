@@ -455,7 +455,11 @@ if (unnamed) {
   console.error('%d parts have a kind with no index', unnamed);
   process.exit(1);
 }
-const STRIDE = 9;
+// 10, not 9. The tenth field is pitch, and it exists because without it a part
+// can only yaw: a road deck laid on a slope sits flat and the next one starts
+// higher, which at a 7.5% grade and a 14 m segment is a 105 cm step. Every
+// producer writes it; most write zero, because a tree does not lean.
+const STRIDE = 10;
 const bin = Buffer.alloc(out.length * STRIDE * 4);
 out.forEach((b, i) => {
   const o = i * STRIDE * 4;
@@ -470,6 +474,7 @@ out.forEach((b, i) => {
   bin.writeFloatLE(kindIdx.get(b.kind), o + 24);
   bin.writeFloatLE(0, o + 28);            // flags
   bin.writeFloatLE(b.base, o + 32);
+  bin.writeFloatLE(0, o + 36);   // pitchDeg — buildings are level
 });
 
 // Same rule as the kinds above: the archetype list is what was built, not a
@@ -508,7 +513,7 @@ const meta = {
   buildingCount: out.length,
   buildingStride: STRIDE,
   buildingFile: 'city-buildings.bin',
-  buildingFields: ['u', 'v', 'rotDeg', 'widthM', 'depthM', 'heightM', 'kind', 'flags', 'baseM'],
+  buildingFields: ['u', 'v', 'rotDeg', 'widthM', 'depthM', 'heightM', 'kind', 'flags', 'baseM', 'pitchDeg'],
   buildingFlags: { landmark: 1, water: 2 },
   structures: {
     count: structures.length,
