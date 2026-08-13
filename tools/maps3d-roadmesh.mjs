@@ -191,16 +191,42 @@ const ZEBRA_OFFSET_M = 2.2;   // from the transition, toward the junction
 // grade instead of stepping up to it. This replaces subdividing on slope, which
 // worked but cost 176,000 extra parts on a map that does not stream — the tilt
 // is both better looking and free.
+// Belt and braces, because a deck that steps up a hill is the thing that makes
+// the whole map look broken and it has now survived one fix.
+//
+//   - Each segment carries the pitch of the ground it spans, so a consumer that
+//     honours the field lays the box ON the slope.
+//   - AND the segment is subdivided until the rise across it is under
+//     MAX_STEP_M, so a consumer that ignores pitch still only steps 15 cm.
+//
+// The second is redundant when the first works and costs parts. It is here
+// anyway: the pitch field is new, and a road that looks wrong is worse than a
+// road that costs more.
+const MAX_STEP_M = 0.15;
+const MIN_SEG_M = 1.2;
+
 function walkGraded(pts, stepM) {
   const out = [];
   for (const s of walk(pts, stepM)) {
     const ha = sampleAt((s.x - s.dir[0] * s.len / 2) / FRAME,
-      (s.y - s.dir[1] * s.len / 2) / FRAME);
+      (s.y - s.dir[1] * s.len / 2) / FRAME) ?? 0;
     const hb = sampleAt((s.x + s.dir[0] * s.len / 2) / FRAME,
-      (s.y + s.dir[1] * s.len / 2) / FRAME);
-    const rise = (hb ?? 0) - (ha ?? 0);
-    s.pitch = (Math.atan2(rise, s.len) * 180) / Math.PI;
-    out.push(s);
+      (s.y + s.dir[1] * s.len / 2) / FRAME) ?? 0;
+    const rise = hb - ha;
+    const pitch = (Math.atan2(rise, s.len) * 180) / Math.PI;
+    const n = Math.min(
+      Math.max(1, Math.ceil(Math.abs(rise) / MAX_STEP_M)),
+      Math.max(1, Math.floor(s.len / MIN_SEG_M)));
+    if (n === 1) { s.pitch = pitch; out.push(s); continue; }
+    const seg = s.len / n;
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n - 0.5;
+      out.push({
+        x: s.x + s.dir[0] * s.len * t,
+        y: s.y + s.dir[1] * s.len * t,
+        len: seg, dir: s.dir, nrm: s.nrm, head: s.head, pitch,
+      });
+    }
   }
   return out;
 }
@@ -265,7 +291,7 @@ function chaikin(pts, passes) {
   return out;
 }
 
-const SMOOTH_PASSES = 2;
+const SMOOTH_PASSES = 3;
 let smoothedPts = 0;
 for (const r of roadsDoc.roads) {
   if (r.pts.length < 3) continue;
