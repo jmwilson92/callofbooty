@@ -26,10 +26,29 @@ const arg = (n, d) => {
 };
 const DIR = resolve(arg('out', 'out'));
 const WORST = parseInt(arg('worst', '10'), 10);
+// How far off the raw centreline a deck may be and still count as covering it.
+// maps3d-roadmesh.mjs smooths the line with 3 Chaikin passes before laying any
+// deck and does not write the smoothed line back, so the two disagree by the
+// sagitta of every corner — most on the windiest class, which is footpaths.
+const TOL = parseFloat(arg('tol', '2.5'));
 
 const side = JSON.parse(readFileSync(join(DIR, 'sandiego.json'), 'utf8'));
 const city = JSON.parse(readFileSync(join(DIR, 'city.json'), 'utf8'));
-const roadsDoc = JSON.parse(readFileSync(join(DIR, 'roads.json'), 'utf8'));
+// The line the decks were actually laid on, not the raw traced polyline.
+// maps3d-roadmesh.mjs smooths with 3 Chaikin passes before building anything,
+// and measuring coverage against the unsmoothed line reported 49.0 km of holes
+// where four fifths of it was this audit walking somewhere the road had never
+// been. If the file is missing the answer would be wrong rather than absent, so
+// this stops instead of guessing.
+let roadsDoc;
+try {
+  roadsDoc = JSON.parse(readFileSync(join(DIR, 'roads-built.json'), 'utf8'));
+} catch {
+  console.error('no roads-built.json in %s — re-run tools/maps3d-roadmesh.mjs. '
+    + 'Auditing against the raw roads.json measures a line the decks were never '
+    + 'laid on, and reports its own smoothing as holes in the map.', DIR);
+  process.exit(1);
+}
 const RES = side.resolution;
 const FRAME = side.frameMetres.width;
 const LO = side.heightRangeMetres.min;
@@ -67,6 +86,8 @@ if (unclassified.length) {
   process.exit(1);
 }
 
+const FLAG_WATER = 2;
+const FLAG_STRUCTURE = 4;
 const FLAG_CLEARED = 8;
 
 // ── Load the parts we care about into oriented rectangles ───────────────────
@@ -78,6 +99,13 @@ function loadRects(want) {
     if (!want.has(kind)) continue;
     const flags = bin.readFloatLE(o + 28) | 0;
     if (flags & FLAG_CLEARED) continue;
+    // Match what actually reaches the level. Tools/build_sandiego.py drops a
+    // part whose ground reads as sea unless it is flagged as standing over
+    // water on purpose, so counting one here as carriageway would let this
+    // audit report coverage the player never walks on.
+    const px = bin.readFloatLE(o) * FRAME;
+    const py = bin.readFloatLE(o + 4) * FRAME;
+    if (!(flags & (FLAG_WATER | FLAG_STRUCTURE)) && groundAt(px, py) < 0.6) continue;
     const rot = (bin.readFloatLE(o + 8) * Math.PI) / 180;
     out.push({
       x: bin.readFloatLE(o) * FRAME,
@@ -179,7 +207,7 @@ for (let ri = 0; ri < roadsDoc.roads.length; ri++) {
       let under = null;                 // strictly beneath this station
       for (const j of at(deckGrid, x, y)) {
         const d = decks[j];
-        if (!cover && inside(d, x, y, 2.5)) cover = d;
+        if (!cover && inside(d, x, y, TOL)) cover = d;
         if (!under && inside(d, x, y, 0)) under = d;
         if (cover && under) break;
       }

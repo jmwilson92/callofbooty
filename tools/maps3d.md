@@ -20,6 +20,9 @@ what the one before it wrote.
 | 8 | `maps3d-vegetation.mjs` | appends to `city-buildings.bin` | Scatters trees, shrubs and rocks from the land cover, and street trees along the verges. Reads the buffer to find the buildings, so it runs after 2 and 5. |
 | 9 | `maps3d-doors.mjs` | rewrites `city-structures.bin` | Gives every building an entrance and tells it what the ground under it does: nearest street, which face of the footprint it is on, and the graded elevation at the door and across the plan. **Must run after 6** — it samples the finished heightmap, and a door placed before the water dig sits at the wrong height. Rewrites the record in place; base fields are copied through untouched, so re-running is safe. |
 | 10 | `maps3d-airfields.mjs` | rewrites the heightmap, appends to `city-buildings.bin` | **The only authored geometry in the pipeline.** The capture has no aeroway node of any kind — not even an empty group, unlike `Roads_Rail` and the rest — so KSAN's runway 09/27 and North Island's 18/36 and 11/29 do not exist to be recovered and are laid from published airfield data instead. A runway is stated as a midpoint, a published length and its **magnetic** designator; the true heading is the designator plus San Diego's 11 deg east declination. Stating both thresholds by hand instead left every strip several degrees off its real alignment. Taxiways are perpendicular offsets from their runway, so they cannot drift out of parallel. Grades each strip flat to a least-squares fit of the ground beneath it, clamped to the 1% a runway is allowed, then paves, marks and lights it. **Must run after 6** for the same reason the doors pass does. Also flags **every part** standing on runway or taxiway pavement as **cleared** (flag 8) rather than deleting it — deleting one would shift every index after it and the structure record addresses parts by index. Builds runways and parallel taxiways only — aprons are left to be placed by hand. Correct the alignments in the `AIRFIELDS` table, not in code. |
+| 11 | `maps3d-clearroads.mjs` | rewrites `city-buildings.bin`, `city.json` | Takes the buildings out of the roads. Footprints and centrelines are traced by different passes and nothing ever asked whether they disagreed, so a building over a carriageway was simply extruded through it — 2.2% of every metre of the network. Flags a footprint carrying 8 m or more of centreline through it, with **flag 8** rather than deleting, because the structure record addresses parts by index. **Must run last**, after every pass that can add a drivable surface. |
+| — | `road-audit.mjs` | nothing | Not a step. Walks all 2,043 km of built centreline and reports BREAKS, BLOCKED and BURIED, with ready-made `flyover.mjs` cameras for the worst of each. Exits non-zero over 0.5% of the network without carriageway. |
+| — | `flyover.mjs` | `shots/*.png` | Not a step. Renders the shipped bytes in perspective, so a defect can be seen without opening the editor. |
 | — | `structgraph.mjs` | nothing | Not a step. The reference implementation of the structural graph — columns, slabs, wall panels, the circulation core, and the load-path solve that decides what collapses. Derived from the record and a seed, never stored, because the server and every client have to build the identical graph from the same 88 bytes. Whatever builds this in the engine must agree with it index for index. |
 | — | `maps3d-struct.mjs` | nothing | Runs the graph over all 63,985 records and prints the evidence: 7.69 M elements, 1.92 MB of damage state, determinism, collapse behaviour, and the two-round fixed point. Exits non-zero if the fixed point is ever missed. |
 | — | `interior-a.mjs` | nothing | Not a step. The Tier A generator — a lift core taken from the structural graph, fire stairs, a lobby, escalators, and a corridor cross running out to all four facades with rooms in the four quadrants off it. Derived from the seed, never stored. |
@@ -39,7 +42,9 @@ node tools/maps3d-bridges.mjs  --out out
 node tools/maps3d-vegetation.mjs --out out
 node tools/maps3d-doors.mjs    --out out
 node tools/maps3d-airfields.mjs --out out
+node tools/maps3d-clearroads.mjs --out out
 node tools/maps3d-preview.mjs  --out out
+node tools/road-audit.mjs      --out out
 ```
 
 ## Recovering a centreline from a surface
@@ -169,6 +174,29 @@ Two traps it now guards against, both hit on the first run:
   thing that was never built. This is how the `kearny` entry was caught: Kearny
   Mesa is 12.6 km north of centre and this capture is ±5.9 km, so that POI
   belongs to the synthesised world in `src/world/geo`, not to this one.
+
+## Buildings in the road
+
+Nothing in this pipeline ever asked whether a building was standing in a road.
+The capture supplies footprints and centrelines separately, different passes
+trace them, and where they disagree the building is extruded straight through
+the carriageway. Measured against the line the decks are actually laid on that
+was 2.2% of every metre of the network.
+
+`tools/maps3d-clearroads.mjs` runs last, after every pass that can add a
+drivable surface, and flags a footprint carrying 8 m or more of centreline
+through it. Eight metres, not one: a garage clipping a driveway is a tolerance
+problem, eight metres of road inside a building is a building in the road. It
+took BLOCKED from 2.23% to 0.20% by clearing 1,365 footprints over 239 ha.
+
+It **flags with bit 8 rather than deleting**, for the reason
+`maps3d-airfields.mjs` does: `city-structures.bin` addresses parts by index, so
+removing one silently reassigns every interior after it.
+
+Fourteen of the cleared footprints are over 2 ha, the largest carrying 2.4 km of
+road through a 598 x 88 m building. A road through a footprint that big is
+better read as the two tracers disagreeing than as a building in the street, and
+those are called out in the log rather than deleted quietly.
 
 ## Auditing every road, not the ones a camera faced
 

@@ -480,6 +480,21 @@ for (const r of roadsDoc.roads) {
 console.log('smoothed %d centrelines to %s points (%d Chaikin passes)',
   roadsDoc.roads.length, smoothedPts.toLocaleString('en-GB'), SMOOTH_PASSES);
 
+// Publish the line the decks are actually built from. Nothing downstream could
+// see it before: the smoothing happened in memory and roads.json kept the raw
+// traced polyline, so anything auditing coverage walked a line the road was
+// never laid on. Chaikin cuts corners, and on a winding footpath it pulls the
+// centreline metres off the original — which read as 49.0 km of holes, of which
+// four fifths were the audit looking in the wrong place. Deriving from what was
+// built, rather than from what it was built out of, is the rule here.
+writeFileSync(join(DIR, 'roads-built.json'), JSON.stringify({
+  producedBy: 'tools/maps3d-roadmesh.mjs',
+  note: 'Centrelines AFTER Chaikin smoothing — the line the decks were laid on. '
+    + 'roads.json holds the raw traced polyline; measure coverage against this.',
+  smoothPasses: SMOOTH_PASSES,
+  roads: roadsDoc.roads.map((r) => ({ cls: r.cls, w: r.w, pts: r.pts })),
+}));
+
 const CARVE_ORDER = ['path', 'service', 'local', 'collector', 'arterial'];
 const byClass = {};
 for (const r of roadsDoc.roads) (byClass[r.cls] ??= []).push(r);
@@ -785,6 +800,13 @@ let yielded = 0; let boxed = 0; let lampN = 0; let stopN = 0;
 let zebraN = 0; let zebraN2 = 0;
 let skipped = 0;
 let deckErr = 0; let deckErrSum = 0; let deckErrN = 0;
+let yieldDeckN = 0;
+
+// How far the minor road's carriageway sits below the major road's inside a
+// junction box. Enough that the depth buffer never has to choose between two
+// coplanar decks, small enough that nothing drives over a lip: 3 cm is a tenth
+// of the deck's own thickness and under the height of the kerb beside it.
+const YIELD_SINK = 0.03;
 
 // Paint stacks on top of the deck, and the deck's own lift is already in the
 // offset, so the paint's offset is the deck's plus the deck's thickness.
@@ -868,11 +890,28 @@ for (let roadIndex = 0; roadIndex < roadsDoc.roads.length; roadIndex++) {
       zebraN2++;
     }
     prevZone = zone;
-    if (zone === 'yield') { yielded++; travelled += s.len; continue; }
+    // Yielding used to mean laying no carriageway at all inside the junction
+    // box, on the reasoning that the major road's deck covers it and two decks
+    // at one height fight for the depth buffer. The major road's deck does NOT
+    // cover it: the box is padded past the carriageway, the minor road is
+    // dropped a whole segment at a time, and the two do not line up. Measured
+    // over the network that left 49.5 km of holes in 1,682 gaps, and the gap
+    // count by class is the giveaway — 43 on arterials, which rarely yield,
+    // against 400 or more on every class that does.
+    //
+    // So yield the SURFACE, not the substance. The minor road keeps its
+    // carriageway through the box and loses its paint, its kerbs and its lamps,
+    // and sits a few centimetres lower so the major road is unambiguously the
+    // one on top. That is what an at-grade junction looks like, it is what the
+    // depth buffer needs, and there is no hole to walk into.
+    const yieldZone = zone === 'yield';
+    if (yieldZone) yielded++;
     const paint = zone === 'clear';
-    push(u, v, s.head, s.len + 0.6, width, DECK_THICK, lift(u, v, DECK_LIFT),
+    push(u, v, s.head, s.len + 0.6, width, DECK_THICK,
+      lift(u, v, yieldZone ? DECK_LIFT - YIELD_SINK : DECK_LIFT),
       road.cls === 'path' ? 'path' : 'road_deck', s.pitch);
     deckN++;
+    if (yieldZone) yieldDeckN++;
     // What the consumer will actually land on, minus where the road says it
     // should be. This is the whole fix expressed as one number, so it is
     // measured rather than assumed.
@@ -963,8 +1002,17 @@ if (deckErr > DEAD_BAND + 1e-6) {
     + 'the placement disagree about the ground', deckErr.toFixed(3));
   process.exit(1);
 }
-console.log('%d steps yielded to a more major road at a crossing, %d left '
-  + 'unpainted inside a junction box', yielded, boxed);
+console.log('%s steps yielded to a more major road at a crossing — %s of them '
+  + 'still carry carriageway, %s cm lower and unpainted, so the junction has no '
+  + 'hole in it; %s left unpainted inside a box',
+  yielded.toLocaleString('en-GB'), yieldDeckN.toLocaleString('en-GB'),
+  (YIELD_SINK * 100).toFixed(0), boxed.toLocaleString('en-GB'));
+if (yielded && yieldDeckN < yielded * 0.99) {
+  console.error('%d yielded steps laid no carriageway — a junction that drops '
+    + 'the minor road entirely is the 49.5 km of holes this replaced',
+    yielded - yieldDeckN);
+  process.exit(1);
+}
 console.log('%d street light parts (%d lights) on arterials and collectors',
   lampN, lampN / 2);
 console.log('%d stop bars where a road yields at a crossing, and %d crossings '
